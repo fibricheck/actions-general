@@ -2,8 +2,6 @@
 
 A collection of general use actions
 
-# Usage
-
 ## parse-tag
 <!-- start usage -->
 ```yaml
