@@ -41,8 +41,3 @@ A collection of general use actions
 <!-- end usage -->
 
 - [Example](./s3-increment/example.yml)
-
-
-# License
-
-The scripts and documentation in this project are released under the [MIT License](LICENSE)
