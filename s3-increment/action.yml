@@ -27,13 +27,13 @@ inputs:
     default: "eu-central-1"
 
 outputs:
-  old-build-number:
-    description: "The version number (eg: 2.11.0)"
-    value: ${{ steps.increment-build-number.outputs.old-code }}
+  old-number:
+    description: "The number before increment"
+    value: ${{ steps.increment-number.outputs.old-number }}
 
-  new-build-number:
-    description: "The build variant (eg: eu/us/research)"
-    value: ${{ steps.increment-build-number.outputs.new-code }}
+  new-number:
+    description: "The number after increment"
+    value: ${{ steps.increment-number.outputs.new-number }}
 
 runs:
   using: "composite"
@@ -45,15 +45,15 @@ runs:
         aws-secret-access-key: ${{ inputs.secret-access-key }}
         aws-region: ${{ inputs.region }}
           
-    - name: Get & Increment Build Number
-      id: increment-build-number
+    - name: Get & Increment Number
+      id: increment-number
       shell: bash
       run: | 
-        aws s3 cp "${{ inputs.s3-file-path }}" ./s3-ibn-info.json || echo "{}" > s3-ibn-info.json
-        OLD_CODE=$(jq '${{ inputs.key-selector }} // 0' s3-ibn-info.json)
-        NEW_CODE=$(( $OLD_CODE + 1 ))
-        jq "${{ inputs.key-selector }}=$NEW_CODE" s3-ibn-info.json > s3-ibn-info.tmp
-        mv s3-ibn-info.tmp s3-ibn-info.json
-        aws s3 cp s3-ibn-info.json "${{ inputs.s3-file-path }}"
-        echo "old-code=$OLD_CODE" >> $GITHUB_OUTPUT
-        echo "new-code=$NEW_CODE" >> $GITHUB_OUTPUT
+        aws s3 cp "${{ inputs.s3-file-path }}" ./s3-in-info.json || echo "{}" > s3-in-info.json
+        OLD_NUMBER=$(jq '${{ inputs.key-selector }} // 0' s3-in-info.json)
+        NEW_NUMBER=$(( $OLD_NUMBER + 1 ))
+        jq "${{ inputs.key-selector }}=$NEW_NUMBER" s3-in-info.json > s3-in-info.tmp
+        mv s3-in-info.tmp s3-in-info.json
+        aws s3 cp s3-in-info.json "${{ inputs.s3-file-path }}"
+        echo "old-number=$OLD_NUMBER" >> $GITHUB_OUTPUT
+        echo "new-number=$NEW_NUMBER" >> $GITHUB_OUTPUT

@@ -15,6 +15,6 @@ jobs:
     steps:
       - name: Parse Tag
         id: parse-tag
-        uses: fibricheck/actions-build-fibri-android-app/parse-tag@main
+        uses: fibricheck/actions-general/parse-tag@v1
         with:
           tag: ${{ github.ref }}

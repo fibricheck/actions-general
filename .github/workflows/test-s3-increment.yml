@@ -18,4 +18,4 @@ jobs:
 
       - name: verify
         run: |
-            [ "${{ steps.s3-test.outputs.new-build-number }}" = "${{ github.run_number }}" ]
+            [ "${{ steps.s3-test.outputs.new-number }}" = "${{ github.run_number }}" ]

@@ -4,13 +4,13 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
-      old-number: ${{ steps.increment-build-number.outputs.old-build-number }}
-      new-number: ${{ steps.increment-build-number.outputs.new-build-number }}
+      old-number: ${{ steps.increment-build-number.outputs.old-number }}
+      new-number: ${{ steps.increment-build-number.outputs.new-number }}
 
     steps:
       - name: Increment build number
         id: increment-build-number
-        uses: fibricheck/actions-build-fibri-android-app/s3-increment-build-number@main
+        uses: fibricheck/actions-general/s3-increment@v1
         with:
           s3-file-path: 's3://example.fibricheck.com/example/example.json'
           key-selector: '.appBuildNumbers.example'
