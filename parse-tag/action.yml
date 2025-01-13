@@ -1,0 +1,34 @@
+name: 'Parse Tag'
+description: 'Parses a tag in the form /refs/tags/vX.XX.XX/<variant>/<type>'
+inputs:
+  tag: 
+    description: 'The tag to parse'
+    required: true
+    type: string
+
+outputs:
+  version:
+    description: "The version number (eg: 2.11.0)"
+    value: ${{ steps.parse-tag.outputs.version }}
+
+  variant:
+    description: "The build variant (eg: eu/us/research)"
+    value: ${{ steps.parse-tag.outputs.variant }}
+
+  type:
+    description: "The build type (eg: dev/prod)"
+    value: ${{ steps.parse-tag.outputs.type }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Parse Tag
+      shell: bash
+      id: parse-tag
+      run: |
+        TAG=$(echo "${{ inputs.tag }}" | sed 's/^refs\/tags\///')
+        TAG=$(echo "$TAG" | sed 's/^v//') 
+        VERSION=$(cut -d '/' -f 1 <<< "$TAG") && echo "version=$VERSION" >> $GITHUB_OUTPUT
+        VARIANT=$(cut -d '/' -f 2 <<< "$TAG") && echo "variant=$VARIANT" >> $GITHUB_OUTPUT
+        TYPE=$(cut -d '/' -f 3 <<< "$TAG") && echo "type=$TYPE" >> $GITHUB_OUTPUT
+

@@ -1,0 +1,34 @@
+name: Test Parse Tag
+
+on:
+  workflow_call:
+
+jobs: 
+  test-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: parse-tag-1
+        id: parse-tag-1
+        uses: ./parse-tag
+        with:
+            tag: v2.11.0/eu/dev
+
+      - name: test 1
+        run: |
+          [ "${{ steps.parse-tag-1.outputs.version }}" = "2.11.0" ]
+          [ "${{ steps.parse-tag-1.outputs.variant }}" = "eu" ]
+          [ "${{ steps.parse-tag-1.outputs.type }}" = "dev" ]
+
+      - name: parse-tag-2
+        id: parse-tag-2
+        uses: ./parse-tag
+        with:
+            tag: v2.12.0/us
+
+      - name: test 2
+        run: |
+          [ "${{ steps.parse-tag-2.outputs.version }}" = "2.12.0" ]
+          [ "${{ steps.parse-tag-2.outputs.variant }}" = "us" ]
+          [ "${{ steps.parse-tag-2.outputs.type }}" = "" ]

@@ -1,0 +1,18 @@
+name: S3 Increment Example
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      old-number: ${{ steps.increment-build-number.outputs.old-build-number }}
+      new-number: ${{ steps.increment-build-number.outputs.new-build-number }}
+
+    steps:
+      - name: Increment build number
+        id: increment-build-number
+        uses: fibricheck/actions-build-fibri-android-app/s3-increment-build-number@main
+        with:
+          s3-file-path: 's3://example.fibricheck.com/example/example.json'
+          key-selector: '.appBuildNumbers.example'
+          access-key-id: ${{ vars.AWS_S3_BUILDS_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.AWS_S3_BUILDS_SECRET_ACCESS_KEY }}

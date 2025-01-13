@@ -1,0 +1,20 @@
+name: S3 Parse Tag Example
+on: 
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+/*/?*'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.parse-tag.outputs.version }}
+      variant: ${{ steps.parse-tag.outputs.variant }}
+      type: ${{ steps.parse-tag.outputs.type }}
+
+    steps:
+      - name: Parse Tag
+        id: parse-tag
+        uses: fibricheck/actions-build-fibri-android-app/parse-tag@main
+        with:
+          tag: ${{ github.ref }}
