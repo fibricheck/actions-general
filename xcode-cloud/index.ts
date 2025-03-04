@@ -12,10 +12,11 @@ import {
   CiProductsWorkflowsGetToManyRelatedIncludeEnum,
   ScmRepositoriesApi,
   ScmRepositoriesGetCollectionFieldsScmGitReferencesEnum,
+  ScmRepositoryAttributes,
 } from "appstore-connect-sdk/openapi";
 
 function sleep(time) {
-  return new Promise((resolve) => {
+  return new Promise<void>((resolve) => {
     setTimeout(() => {
       resolve();
     }, time);
@@ -48,7 +49,7 @@ function getAppStoreClient(input) {
   });
 }
 
-async function getRepositoryAndProduct(appstoreClient, repositoryName) {
+async function getRepositoryAndProduct(appstoreClient: AppStoreConnectAPI, repositoryName: string) {
   const ciApi = await appstoreClient.create(CiProductsApi);
 
   const result = await ciApi.ciProductsGetCollection({
@@ -66,11 +67,13 @@ async function getRepositoryAndProduct(appstoreClient, repositoryName) {
   );
 
   if (!repository) {
-    throw new Error(`Repository ${input.repositoryName} not found`);
+    throw new Error(`Repository ${repositoryName} not found`);
   }
 
+  const attributes = repository.attributes as ScmRepositoryAttributes
+
   console.log(
-    `[xcode-cloud] found repository ${repository.attributes.ownerName}/${repository.attributes.repositoryName}, id: ${repository.id}`
+    `[xcode-cloud] found repository ${attributes.ownerName}/${attributes.repositoryName}, id: ${repository.id}`
   );
 
   const product = result.data.find(
@@ -88,7 +91,7 @@ async function getRepositoryAndProduct(appstoreClient, repositoryName) {
   return { repository, product };
 }
 
-async function getWorkflow(appstoreClient, productId, workflowName) {
+async function getWorkflow(appstoreClient: AppStoreConnectAPI, productId: string, workflowName: string) {
   const ciApi = await appstoreClient.create(CiProductsApi);
 
   const allWorkflows = await ciApi.ciProductsWorkflowsGetToManyRelated({
@@ -109,12 +112,15 @@ async function getWorkflow(appstoreClient, productId, workflowName) {
   return correctWorkflow;
 }
 
-async function getGitReference(appstoreClient, repositoryId, gitRef) {
+async function getGitReference(appstoreClient: AppStoreConnectAPI, repositoryId: string, gitRef: string) {
   const scmApi = await appstoreClient.create(ScmRepositoriesApi);
 
   let retries = 10;
   let timeBetween = 10 * 1000;
   
+  // When the github action is triggered too soon after pushing a tag
+  // It's possible that the xcode cloud repository is not yet updated with the tag
+  // So we keep retrying until we find it.
   while (retries > 0) {
     const names = await scmApi.scmRepositoriesGitReferencesGetToManyRelated({
       id: repositoryId,
@@ -128,6 +134,10 @@ async function getGitReference(appstoreClient, repositoryId, gitRef) {
     );
 
     if (!!gitReference) {
+      console.log(
+        `[xcode-cloud] found git reference ${gitRef}, id: ${gitReference.id}`
+      );
+
       return gitReference;
     }
 
@@ -137,15 +147,9 @@ async function getGitReference(appstoreClient, repositoryId, gitRef) {
   }
   
   throw new Error(`Git reference ${gitRef} not found`);
-
-  console.log(
-    `[xcode-cloud] found git reference ${gitRef}, id: ${gitReference.id}`
-  );
-
-  return gitReference;
 }
 
-async function startBuildRun(appstoreClient, workflowId, gitRefId) {
+async function startBuildRun(appstoreClient: AppStoreConnectAPI, workflowId: string, gitRefId: string) {
   const buildRunApi = await appstoreClient.create(CiBuildRunsApi);
 
   const buildRun = await buildRunApi.ciBuildRunsCreateInstance({
@@ -196,7 +200,7 @@ try {
   core.setOutput("repository-id", repository.id);
   core.setOutput("product-id", product.id);
   core.setOutput("workflow-id", workflow.id);
-  core.setOutput("build-id", buildRun.id);
+  core.setOutput("build-id", buildRun.data.id);
 } catch (error) {
   core.setFailed(error.message);
 }
