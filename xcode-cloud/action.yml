@@ -1,0 +1,35 @@
+name: 'XCode Cloud'
+description: 'XCode Cloud Github Action'
+inputs:
+  appstore-issuer-id:  # id of input
+    description: 'AppStore Issuer ID'
+    required: true
+  appstore-private-key-id:
+    description: 'AppStore Private Key ID'
+    required: true
+  appstore-private-key:
+    description: 'AppStore Private Key'
+    required: true
+  repository-name:
+    description: 'Name of the repository'
+    required: true
+  workflow-name:
+    description: 'Name of the XCode Cloud workflow'
+    required: true
+  git-ref:
+    description: 'Git reference to build'
+    required: true
+
+outputs:
+  repository-id: # id of output
+    description: 'The id of the repository used'
+  product-id:
+    description: 'The id of the product used'
+  workflow-id:
+    description: 'The id of the workflow used'
+  build-id:
+    description: 'The id of the build'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
