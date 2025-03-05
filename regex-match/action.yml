@@ -1,0 +1,63 @@
+name: 'Regex Match'
+description: 'Matches and extracts a string with a regex'
+inputs:
+  target: 
+    description: 'The string to check with the regex'
+    required: true
+    type: string
+
+  regex:
+    description: 'The regex string'
+    required: true
+    type: string
+
+  global:
+    description: 'Sets the global flag for the regex match'
+    type: boolean
+    default: false
+
+  case-insensitive:
+    description: 'Sets the case-insensitive flag for the regex match'
+    type: boolean
+    default: false
+  
+  multiline:
+    description: 'Sets the multi-line flag for the regex match'
+    type: boolean
+    default: false
+
+outputs:
+  matches:
+    description: 'Was there a regex match'
+    type: boolean
+  group1:
+    description: 'The first capture group'
+    type: string
+  group2:
+    description: 'The second capture group'
+    type: string
+  group3:
+    description: 'The third capture group'
+    type: string
+  group4:
+    description: 'The fourth capture group'
+    type: string
+  group5:
+    description: 'The fifth capture group'
+    type: string
+  group6:
+    description: 'The sixth capture group'
+    type: string
+  group7:
+    description: 'The seventh capture group'
+    type: string
+  group8:
+    description: 'The eigth capture group'
+    type: string
+  group9:
+    description: 'The ninth capture group'
+    type: string
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
