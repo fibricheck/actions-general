@@ -202,5 +202,6 @@ try {
   core.setOutput("workflow-id", workflow.id);
   core.setOutput("build-id", buildRun.data.id);
 } catch (error) {
+  console.warn(error);
   core.setFailed(error.message);
 }
