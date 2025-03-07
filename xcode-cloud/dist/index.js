@@ -25555,1993 +25555,22 @@ module.exports = {
 
 /***/ }),
 
-/***/ 98:
-/***/ ((module, __unused_webpack___webpack_exports__, __nccwpck_require__) => {
-
-__nccwpck_require__.a(module, async (__webpack_handle_async_dependencies__, __webpack_async_result__) => { try {
-/* harmony import */ var appstore_connect_sdk__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(7505);
-/* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(7484);
-/* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__nccwpck_require__.n(_actions_core__WEBPACK_IMPORTED_MODULE_1__);
-/* harmony import */ var appstore_connect_sdk_openapi__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(7137);
-
-
-
-function sleep(time) {
-    return new Promise((resolve) => {
-        setTimeout(() => {
-            resolve();
-        }, time);
-    });
-}
-function getInput() {
-    const issuerId = _actions_core__WEBPACK_IMPORTED_MODULE_1__.getInput("appstore-issuer-id");
-    const privateKeyId = _actions_core__WEBPACK_IMPORTED_MODULE_1__.getInput("appstore-private-key-id");
-    const privateKey = _actions_core__WEBPACK_IMPORTED_MODULE_1__.getInput("appstore-private-key");
-    const repositoryName = _actions_core__WEBPACK_IMPORTED_MODULE_1__.getInput("repository-name");
-    const workflowName = _actions_core__WEBPACK_IMPORTED_MODULE_1__.getInput("workflow-name");
-    const gitRef = _actions_core__WEBPACK_IMPORTED_MODULE_1__.getInput("git-ref");
-    return {
-        issuerId,
-        privateKeyId,
-        privateKey,
-        repositoryName,
-        workflowName,
-        gitRef,
-    };
-}
-function getAppStoreClient(input) {
-    return new appstore_connect_sdk__WEBPACK_IMPORTED_MODULE_0__/* .AppStoreConnectAPI */ .z({
-        issuerId: input.issuerId,
-        privateKeyId: input.privateKeyId,
-        privateKey: input.privateKey,
-    });
-}
-async function getRepositoryAndProduct(appstoreClient, repositoryName) {
-    const ciApi = await appstoreClient.create(appstore_connect_sdk_openapi__WEBPACK_IMPORTED_MODULE_2__/* .CiProductsApi */ .NlL);
-    const result = await ciApi.ciProductsGetCollection({
-        filterProductType: [appstore_connect_sdk_openapi__WEBPACK_IMPORTED_MODULE_2__/* .CiProductsGetCollectionFilterProductTypeEnum */ .H36.App],
-        include: [
-            appstore_connect_sdk_openapi__WEBPACK_IMPORTED_MODULE_2__/* .CiProductsGetCollectionIncludeEnum */ .uqs.PrimaryRepositories,
-            appstore_connect_sdk_openapi__WEBPACK_IMPORTED_MODULE_2__/* .CiProductsGetCollectionIncludeEnum */ .uqs.BundleId,
-        ],
-    });
-    const repository = result.included?.find((includedItem) => includedItem.type === "scmRepositories" &&
-        includedItem.attributes.repositoryName === repositoryName);
-    if (!repository) {
-        throw new Error(`Repository ${repositoryName} not found`);
-    }
-    const attributes = repository.attributes;
-    console.log(`[xcode-cloud] found repository ${attributes.ownerName}/${attributes.repositoryName}, id: ${repository.id}`);
-    const product = result.data.find((ciProduct) => ciProduct.relationships?.primaryRepositories?.data?.find((repo) => repo.id === repository.id) !== undefined);
-    if (!product) {
-        throw new Error(`Product for repository ${repository.id} not be found.`);
-    }
-    console.log(`[xcode-cloud] found product, id: ${product.id}`);
-    return { repository, product };
-}
-async function getWorkflow(appstoreClient, productId, workflowName) {
-    const ciApi = await appstoreClient.create(appstore_connect_sdk_openapi__WEBPACK_IMPORTED_MODULE_2__/* .CiProductsApi */ .NlL);
-    const allWorkflows = await ciApi.ciProductsWorkflowsGetToManyRelated({
-        id: productId,
-        include: [appstore_connect_sdk_openapi__WEBPACK_IMPORTED_MODULE_2__/* .CiProductsWorkflowsGetToManyRelatedIncludeEnum */ .ff7.Repository],
-    });
-    const correctWorkflow = allWorkflows.data.find((workflow) => workflow.attributes.name === workflowName);
-    if (!correctWorkflow) {
-        throw new Error(`Workflow ${workflowName} not found`);
-    }
-    console.log(`[xcode-cloud] found workflow ${workflowName}, id: ${correctWorkflow.id}`);
-    return correctWorkflow;
-}
-async function getGitReference(appstoreClient, repositoryId, gitRef) {
-    const scmApi = await appstoreClient.create(appstore_connect_sdk_openapi__WEBPACK_IMPORTED_MODULE_2__/* .ScmRepositoriesApi */ .mfw);
-    let retries = 10;
-    let timeBetween = 10 * 1000;
-    // When the github action is triggered too soon after pushing a tag
-    // It's possible that the xcode cloud repository is not yet updated with the tag
-    // So we keep retrying until we find it.
-    while (retries > 0) {
-        const names = await scmApi.scmRepositoriesGitReferencesGetToManyRelated({
-            id: repositoryId,
-            fieldsScmGitReferences: [
-                appstore_connect_sdk_openapi__WEBPACK_IMPORTED_MODULE_2__/* .ScmRepositoriesGetCollectionFieldsScmGitReferencesEnum */ .ZZD.CanonicalName,
-            ],
-        });
-        const gitReference = names.data.find((reference) => reference.attributes.canonicalName === gitRef);
-        if (!!gitReference) {
-            console.log(`[xcode-cloud] found git reference ${gitRef}, id: ${gitReference.id}`);
-            return gitReference;
-        }
-        await sleep(timeBetween);
-        retries--;
-        timeBetween *= 1.5;
-    }
-    throw new Error(`Git reference ${gitRef} not found`);
-}
-async function startBuildRun(appstoreClient, workflowId, gitRefId) {
-    const buildRunApi = await appstoreClient.create(appstore_connect_sdk_openapi__WEBPACK_IMPORTED_MODULE_2__/* .CiBuildRunsApi */ .LAR);
-    const buildRun = await buildRunApi.ciBuildRunsCreateInstance({
-        ciBuildRunCreateRequest: {
-            data: {
-                type: appstore_connect_sdk_openapi__WEBPACK_IMPORTED_MODULE_2__/* .CiBuildRunCreateRequestDataTypeEnum */ .oh7.CiBuildRuns,
-                relationships: {
-                    workflow: {
-                        data: {
-                            id: workflowId,
-                            type: appstore_connect_sdk_openapi__WEBPACK_IMPORTED_MODULE_2__/* .CiBuildRunRelationshipsWorkflowDataTypeEnum */ .r_K.CiWorkflows,
-                        },
-                    },
-                    sourceBranchOrTag: {
-                        data: {
-                            id: gitRefId,
-                            type: appstore_connect_sdk_openapi__WEBPACK_IMPORTED_MODULE_2__/* .CiBuildRunRelationshipsSourceBranchOrTagDataTypeEnum */ .yiV.ScmGitReferences,
-                        },
-                    },
-                },
-            },
-        },
-    });
-    return buildRun;
-}
-try {
-    const { workflowName, gitRef, ...input } = getInput();
-    const appstoreClient = getAppStoreClient(input);
-    const { repository, product } = await getRepositoryAndProduct(appstoreClient, input.repositoryName);
-    const gitReference = await getGitReference(appstoreClient, repository.id, gitRef);
-    const workflow = await getWorkflow(appstoreClient, product.id, workflowName);
-    const buildRun = await startBuildRun(appstoreClient, workflow.id, gitReference.id);
-    _actions_core__WEBPACK_IMPORTED_MODULE_1__.setOutput("repository-id", repository.id);
-    _actions_core__WEBPACK_IMPORTED_MODULE_1__.setOutput("product-id", product.id);
-    _actions_core__WEBPACK_IMPORTED_MODULE_1__.setOutput("workflow-id", workflow.id);
-    _actions_core__WEBPACK_IMPORTED_MODULE_1__.setOutput("build-id", buildRun.data.id);
-}
-catch (error) {
-    _actions_core__WEBPACK_IMPORTED_MODULE_1__.setFailed(error.message);
-}
-
-__webpack_async_result__();
-} catch(e) { __webpack_async_result__(e); } }, 1);
-
-/***/ }),
-
-/***/ 2613:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("assert");
-
-/***/ }),
-
-/***/ 290:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("async_hooks");
-
-/***/ }),
-
-/***/ 181:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("buffer");
-
-/***/ }),
-
-/***/ 5317:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("child_process");
-
-/***/ }),
-
-/***/ 4236:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("console");
-
-/***/ }),
-
-/***/ 6982:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("crypto");
-
-/***/ }),
-
-/***/ 1637:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("diagnostics_channel");
-
-/***/ }),
-
-/***/ 4434:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("events");
-
-/***/ }),
-
-/***/ 9896:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("fs");
-
-/***/ }),
-
-/***/ 8611:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("http");
-
-/***/ }),
-
-/***/ 5675:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("http2");
-
-/***/ }),
-
-/***/ 5692:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("https");
-
-/***/ }),
-
-/***/ 9278:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("net");
-
-/***/ }),
-
-/***/ 7598:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:crypto");
-
-/***/ }),
-
-/***/ 8474:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:events");
-
-/***/ }),
-
-/***/ 7075:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:stream");
-
-/***/ }),
-
-/***/ 7975:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:util");
-
-/***/ }),
-
-/***/ 857:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("os");
-
-/***/ }),
-
-/***/ 6928:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("path");
-
-/***/ }),
-
-/***/ 2987:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("perf_hooks");
-
-/***/ }),
-
-/***/ 3480:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("querystring");
-
-/***/ }),
-
-/***/ 2203:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("stream");
-
-/***/ }),
-
-/***/ 3774:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("stream/web");
-
-/***/ }),
-
-/***/ 3193:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("string_decoder");
-
-/***/ }),
-
-/***/ 3557:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("timers");
-
-/***/ }),
-
-/***/ 4756:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("tls");
-
-/***/ }),
-
-/***/ 7016:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("url");
-
-/***/ }),
-
-/***/ 9023:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("util");
-
-/***/ }),
-
-/***/ 8253:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("util/types");
-
-/***/ }),
-
-/***/ 8167:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("worker_threads");
-
-/***/ }),
-
-/***/ 3106:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("zlib");
-
-/***/ }),
-
-/***/ 7182:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-
-
-const WritableStream = (__nccwpck_require__(7075).Writable)
-const inherits = (__nccwpck_require__(7975).inherits)
-
-const StreamSearch = __nccwpck_require__(4136)
-
-const PartStream = __nccwpck_require__(612)
-const HeaderParser = __nccwpck_require__(2271)
-
-const DASH = 45
-const B_ONEDASH = Buffer.from('-')
-const B_CRLF = Buffer.from('\r\n')
-const EMPTY_FN = function () {}
-
-function Dicer (cfg) {
-  if (!(this instanceof Dicer)) { return new Dicer(cfg) }
-  WritableStream.call(this, cfg)
-
-  if (!cfg || (!cfg.headerFirst && typeof cfg.boundary !== 'string')) { throw new TypeError('Boundary required') }
-
-  if (typeof cfg.boundary === 'string') { this.setBoundary(cfg.boundary) } else { this._bparser = undefined }
-
-  this._headerFirst = cfg.headerFirst
-
-  this._dashes = 0
-  this._parts = 0
-  this._finished = false
-  this._realFinish = false
-  this._isPreamble = true
-  this._justMatched = false
-  this._firstWrite = true
-  this._inHeader = true
-  this._part = undefined
-  this._cb = undefined
-  this._ignoreData = false
-  this._partOpts = { highWaterMark: cfg.partHwm }
-  this._pause = false
-
-  const self = this
-  this._hparser = new HeaderParser(cfg)
-  this._hparser.on('header', function (header) {
-    self._inHeader = false
-    self._part.emit('header', header)
-  })
-}
-inherits(Dicer, WritableStream)
-
-Dicer.prototype.emit = function (ev) {
-  if (ev === 'finish' && !this._realFinish) {
-    if (!this._finished) {
-      const self = this
-      process.nextTick(function () {
-        self.emit('error', new Error('Unexpected end of multipart data'))
-        if (self._part && !self._ignoreData) {
-          const type = (self._isPreamble ? 'Preamble' : 'Part')
-          self._part.emit('error', new Error(type + ' terminated early due to unexpected end of multipart data'))
-          self._part.push(null)
-          process.nextTick(function () {
-            self._realFinish = true
-            self.emit('finish')
-            self._realFinish = false
-          })
-          return
-        }
-        self._realFinish = true
-        self.emit('finish')
-        self._realFinish = false
-      })
-    }
-  } else { WritableStream.prototype.emit.apply(this, arguments) }
-}
-
-Dicer.prototype._write = function (data, encoding, cb) {
-  // ignore unexpected data (e.g. extra trailer data after finished)
-  if (!this._hparser && !this._bparser) { return cb() }
-
-  if (this._headerFirst && this._isPreamble) {
-    if (!this._part) {
-      this._part = new PartStream(this._partOpts)
-      if (this.listenerCount('preamble') !== 0) { this.emit('preamble', this._part) } else { this._ignore() }
-    }
-    const r = this._hparser.push(data)
-    if (!this._inHeader && r !== undefined && r < data.length) { data = data.slice(r) } else { return cb() }
-  }
-
-  // allows for "easier" testing
-  if (this._firstWrite) {
-    this._bparser.push(B_CRLF)
-    this._firstWrite = false
-  }
-
-  this._bparser.push(data)
-
-  if (this._pause) { this._cb = cb } else { cb() }
-}
-
-Dicer.prototype.reset = function () {
-  this._part = undefined
-  this._bparser = undefined
-  this._hparser = undefined
-}
-
-Dicer.prototype.setBoundary = function (boundary) {
-  const self = this
-  this._bparser = new StreamSearch('\r\n--' + boundary)
-  this._bparser.on('info', function (isMatch, data, start, end) {
-    self._oninfo(isMatch, data, start, end)
-  })
-}
-
-Dicer.prototype._ignore = function () {
-  if (this._part && !this._ignoreData) {
-    this._ignoreData = true
-    this._part.on('error', EMPTY_FN)
-    // we must perform some kind of read on the stream even though we are
-    // ignoring the data, otherwise node's Readable stream will not emit 'end'
-    // after pushing null to the stream
-    this._part.resume()
-  }
-}
-
-Dicer.prototype._oninfo = function (isMatch, data, start, end) {
-  let buf; const self = this; let i = 0; let r; let shouldWriteMore = true
-
-  if (!this._part && this._justMatched && data) {
-    while (this._dashes < 2 && (start + i) < end) {
-      if (data[start + i] === DASH) {
-        ++i
-        ++this._dashes
-      } else {
-        if (this._dashes) { buf = B_ONEDASH }
-        this._dashes = 0
-        break
-      }
-    }
-    if (this._dashes === 2) {
-      if ((start + i) < end && this.listenerCount('trailer') !== 0) { this.emit('trailer', data.slice(start + i, end)) }
-      this.reset()
-      this._finished = true
-      // no more parts will be added
-      if (self._parts === 0) {
-        self._realFinish = true
-        self.emit('finish')
-        self._realFinish = false
-      }
-    }
-    if (this._dashes) { return }
-  }
-  if (this._justMatched) { this._justMatched = false }
-  if (!this._part) {
-    this._part = new PartStream(this._partOpts)
-    this._part._read = function (n) {
-      self._unpause()
-    }
-    if (this._isPreamble && this.listenerCount('preamble') !== 0) {
-      this.emit('preamble', this._part)
-    } else if (this._isPreamble !== true && this.listenerCount('part') !== 0) {
-      this.emit('part', this._part)
-    } else {
-      this._ignore()
-    }
-    if (!this._isPreamble) { this._inHeader = true }
-  }
-  if (data && start < end && !this._ignoreData) {
-    if (this._isPreamble || !this._inHeader) {
-      if (buf) { shouldWriteMore = this._part.push(buf) }
-      shouldWriteMore = this._part.push(data.slice(start, end))
-      if (!shouldWriteMore) { this._pause = true }
-    } else if (!this._isPreamble && this._inHeader) {
-      if (buf) { this._hparser.push(buf) }
-      r = this._hparser.push(data.slice(start, end))
-      if (!this._inHeader && r !== undefined && r < end) { this._oninfo(false, data, start + r, end) }
-    }
-  }
-  if (isMatch) {
-    this._hparser.reset()
-    if (this._isPreamble) { this._isPreamble = false } else {
-      if (start !== end) {
-        ++this._parts
-        this._part.on('end', function () {
-          if (--self._parts === 0) {
-            if (self._finished) {
-              self._realFinish = true
-              self.emit('finish')
-              self._realFinish = false
-            } else {
-              self._unpause()
-            }
-          }
-        })
-      }
-    }
-    this._part.push(null)
-    this._part = undefined
-    this._ignoreData = false
-    this._justMatched = true
-    this._dashes = 0
-  }
-}
-
-Dicer.prototype._unpause = function () {
-  if (!this._pause) { return }
-
-  this._pause = false
-  if (this._cb) {
-    const cb = this._cb
-    this._cb = undefined
-    cb()
-  }
-}
-
-module.exports = Dicer
-
-
-/***/ }),
-
-/***/ 2271:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-
-
-const EventEmitter = (__nccwpck_require__(8474).EventEmitter)
-const inherits = (__nccwpck_require__(7975).inherits)
-const getLimit = __nccwpck_require__(2393)
-
-const StreamSearch = __nccwpck_require__(4136)
-
-const B_DCRLF = Buffer.from('\r\n\r\n')
-const RE_CRLF = /\r\n/g
-const RE_HDR = /^([^:]+):[ \t]?([\x00-\xFF]+)?$/ // eslint-disable-line no-control-regex
-
-function HeaderParser (cfg) {
-  EventEmitter.call(this)
-
-  cfg = cfg || {}
-  const self = this
-  this.nread = 0
-  this.maxed = false
-  this.npairs = 0
-  this.maxHeaderPairs = getLimit(cfg, 'maxHeaderPairs', 2000)
-  this.maxHeaderSize = getLimit(cfg, 'maxHeaderSize', 80 * 1024)
-  this.buffer = ''
-  this.header = {}
-  this.finished = false
-  this.ss = new StreamSearch(B_DCRLF)
-  this.ss.on('info', function (isMatch, data, start, end) {
-    if (data && !self.maxed) {
-      if (self.nread + end - start >= self.maxHeaderSize) {
-        end = self.maxHeaderSize - self.nread + start
-        self.nread = self.maxHeaderSize
-        self.maxed = true
-      } else { self.nread += (end - start) }
-
-      self.buffer += data.toString('binary', start, end)
-    }
-    if (isMatch) { self._finish() }
-  })
-}
-inherits(HeaderParser, EventEmitter)
-
-HeaderParser.prototype.push = function (data) {
-  const r = this.ss.push(data)
-  if (this.finished) { return r }
-}
-
-HeaderParser.prototype.reset = function () {
-  this.finished = false
-  this.buffer = ''
-  this.header = {}
-  this.ss.reset()
-}
-
-HeaderParser.prototype._finish = function () {
-  if (this.buffer) { this._parseHeader() }
-  this.ss.matches = this.ss.maxMatches
-  const header = this.header
-  this.header = {}
-  this.buffer = ''
-  this.finished = true
-  this.nread = this.npairs = 0
-  this.maxed = false
-  this.emit('header', header)
-}
-
-HeaderParser.prototype._parseHeader = function () {
-  if (this.npairs === this.maxHeaderPairs) { return }
-
-  const lines = this.buffer.split(RE_CRLF)
-  const len = lines.length
-  let m, h
-
-  for (var i = 0; i < len; ++i) { // eslint-disable-line no-var
-    if (lines[i].length === 0) { continue }
-    if (lines[i][0] === '\t' || lines[i][0] === ' ') {
-      // folded header content
-      // RFC2822 says to just remove the CRLF and not the whitespace following
-      // it, so we follow the RFC and include the leading whitespace ...
-      if (h) {
-        this.header[h][this.header[h].length - 1] += lines[i]
-        continue
-      }
-    }
-
-    const posColon = lines[i].indexOf(':')
-    if (
-      posColon === -1 ||
-      posColon === 0
-    ) {
-      return
-    }
-    m = RE_HDR.exec(lines[i])
-    h = m[1].toLowerCase()
-    this.header[h] = this.header[h] || []
-    this.header[h].push((m[2] || ''))
-    if (++this.npairs === this.maxHeaderPairs) { break }
-  }
-}
-
-module.exports = HeaderParser
-
-
-/***/ }),
-
-/***/ 612:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-
-
-const inherits = (__nccwpck_require__(7975).inherits)
-const ReadableStream = (__nccwpck_require__(7075).Readable)
-
-function PartStream (opts) {
-  ReadableStream.call(this, opts)
-}
-inherits(PartStream, ReadableStream)
-
-PartStream.prototype._read = function (n) {}
-
-module.exports = PartStream
-
-
-/***/ }),
-
-/***/ 4136:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-
-
-/**
- * Copyright Brian White. All rights reserved.
- *
- * @see https://github.com/mscdex/streamsearch
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal in the Software without restriction, including without limitation the
- * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
- * sell copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
- * IN THE SOFTWARE.
- *
- * Based heavily on the Streaming Boyer-Moore-Horspool C++ implementation
- * by Hongli Lai at: https://github.com/FooBarWidget/boyer-moore-horspool
- */
-const EventEmitter = (__nccwpck_require__(8474).EventEmitter)
-const inherits = (__nccwpck_require__(7975).inherits)
-
-function SBMH (needle) {
-  if (typeof needle === 'string') {
-    needle = Buffer.from(needle)
-  }
-
-  if (!Buffer.isBuffer(needle)) {
-    throw new TypeError('The needle has to be a String or a Buffer.')
-  }
-
-  const needleLength = needle.length
-
-  if (needleLength === 0) {
-    throw new Error('The needle cannot be an empty String/Buffer.')
-  }
-
-  if (needleLength > 256) {
-    throw new Error('The needle cannot have a length bigger than 256.')
-  }
-
-  this.maxMatches = Infinity
-  this.matches = 0
-
-  this._occ = new Array(256)
-    .fill(needleLength) // Initialize occurrence table.
-  this._lookbehind_size = 0
-  this._needle = needle
-  this._bufpos = 0
-
-  this._lookbehind = Buffer.alloc(needleLength)
-
-  // Populate occurrence table with analysis of the needle,
-  // ignoring last letter.
-  for (var i = 0; i < needleLength - 1; ++i) { // eslint-disable-line no-var
-    this._occ[needle[i]] = needleLength - 1 - i
-  }
-}
-inherits(SBMH, EventEmitter)
-
-SBMH.prototype.reset = function () {
-  this._lookbehind_size = 0
-  this.matches = 0
-  this._bufpos = 0
-}
-
-SBMH.prototype.push = function (chunk, pos) {
-  if (!Buffer.isBuffer(chunk)) {
-    chunk = Buffer.from(chunk, 'binary')
-  }
-  const chlen = chunk.length
-  this._bufpos = pos || 0
-  let r
-  while (r !== chlen && this.matches < this.maxMatches) { r = this._sbmh_feed(chunk) }
-  return r
-}
-
-SBMH.prototype._sbmh_feed = function (data) {
-  const len = data.length
-  const needle = this._needle
-  const needleLength = needle.length
-  const lastNeedleChar = needle[needleLength - 1]
-
-  // Positive: points to a position in `data`
-  //           pos == 3 points to data[3]
-  // Negative: points to a position in the lookbehind buffer
-  //           pos == -2 points to lookbehind[lookbehind_size - 2]
-  let pos = -this._lookbehind_size
-  let ch
-
-  if (pos < 0) {
-    // Lookbehind buffer is not empty. Perform Boyer-Moore-Horspool
-    // search with character lookup code that considers both the
-    // lookbehind buffer and the current round's haystack data.
-    //
-    // Loop until
-    //   there is a match.
-    // or until
-    //   we've moved past the position that requires the
-    //   lookbehind buffer. In this case we switch to the
-    //   optimized loop.
-    // or until
-    //   the character to look at lies outside the haystack.
-    while (pos < 0 && pos <= len - needleLength) {
-      ch = this._sbmh_lookup_char(data, pos + needleLength - 1)
-
-      if (
-        ch === lastNeedleChar &&
-        this._sbmh_memcmp(data, pos, needleLength - 1)
-      ) {
-        this._lookbehind_size = 0
-        ++this.matches
-        this.emit('info', true)
-
-        return (this._bufpos = pos + needleLength)
-      }
-      pos += this._occ[ch]
-    }
-
-    // No match.
-
-    if (pos < 0) {
-      // There's too few data for Boyer-Moore-Horspool to run,
-      // so let's use a different algorithm to skip as much as
-      // we can.
-      // Forward pos until
-      //   the trailing part of lookbehind + data
-      //   looks like the beginning of the needle
-      // or until
-      //   pos == 0
-      while (pos < 0 && !this._sbmh_memcmp(data, pos, len - pos)) { ++pos }
-    }
-
-    if (pos >= 0) {
-      // Discard lookbehind buffer.
-      this.emit('info', false, this._lookbehind, 0, this._lookbehind_size)
-      this._lookbehind_size = 0
-    } else {
-      // Cut off part of the lookbehind buffer that has
-      // been processed and append the entire haystack
-      // into it.
-      const bytesToCutOff = this._lookbehind_size + pos
-      if (bytesToCutOff > 0) {
-        // The cut off data is guaranteed not to contain the needle.
-        this.emit('info', false, this._lookbehind, 0, bytesToCutOff)
-      }
-
-      this._lookbehind.copy(this._lookbehind, 0, bytesToCutOff,
-        this._lookbehind_size - bytesToCutOff)
-      this._lookbehind_size -= bytesToCutOff
-
-      data.copy(this._lookbehind, this._lookbehind_size)
-      this._lookbehind_size += len
-
-      this._bufpos = len
-      return len
-    }
-  }
-
-  pos += (pos >= 0) * this._bufpos
-
-  // Lookbehind buffer is now empty. We only need to check if the
-  // needle is in the haystack.
-  if (data.indexOf(needle, pos) !== -1) {
-    pos = data.indexOf(needle, pos)
-    ++this.matches
-    if (pos > 0) { this.emit('info', true, data, this._bufpos, pos) } else { this.emit('info', true) }
-
-    return (this._bufpos = pos + needleLength)
-  } else {
-    pos = len - needleLength
-  }
-
-  // There was no match. If there's trailing haystack data that we cannot
-  // match yet using the Boyer-Moore-Horspool algorithm (because the trailing
-  // data is less than the needle size) then match using a modified
-  // algorithm that starts matching from the beginning instead of the end.
-  // Whatever trailing data is left after running this algorithm is added to
-  // the lookbehind buffer.
-  while (
-    pos < len &&
-    (
-      data[pos] !== needle[0] ||
-      (
-        (Buffer.compare(
-          data.subarray(pos, pos + len - pos),
-          needle.subarray(0, len - pos)
-        ) !== 0)
-      )
-    )
-  ) {
-    ++pos
-  }
-  if (pos < len) {
-    data.copy(this._lookbehind, 0, pos, pos + (len - pos))
-    this._lookbehind_size = len - pos
-  }
-
-  // Everything until pos is guaranteed not to contain needle data.
-  if (pos > 0) { this.emit('info', false, data, this._bufpos, pos < len ? pos : len) }
-
-  this._bufpos = len
-  return len
-}
-
-SBMH.prototype._sbmh_lookup_char = function (data, pos) {
-  return (pos < 0)
-    ? this._lookbehind[this._lookbehind_size + pos]
-    : data[pos]
-}
-
-SBMH.prototype._sbmh_memcmp = function (data, pos, len) {
-  for (var i = 0; i < len; ++i) { // eslint-disable-line no-var
-    if (this._sbmh_lookup_char(data, pos + i) !== this._needle[i]) { return false }
-  }
-  return true
-}
-
-module.exports = SBMH
-
-
-/***/ }),
-
-/***/ 9581:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-
-
-const WritableStream = (__nccwpck_require__(7075).Writable)
-const { inherits } = __nccwpck_require__(7975)
-const Dicer = __nccwpck_require__(7182)
-
-const MultipartParser = __nccwpck_require__(1192)
-const UrlencodedParser = __nccwpck_require__(855)
-const parseParams = __nccwpck_require__(8929)
-
-function Busboy (opts) {
-  if (!(this instanceof Busboy)) { return new Busboy(opts) }
-
-  if (typeof opts !== 'object') {
-    throw new TypeError('Busboy expected an options-Object.')
-  }
-  if (typeof opts.headers !== 'object') {
-    throw new TypeError('Busboy expected an options-Object with headers-attribute.')
-  }
-  if (typeof opts.headers['content-type'] !== 'string') {
-    throw new TypeError('Missing Content-Type-header.')
-  }
-
-  const {
-    headers,
-    ...streamOptions
-  } = opts
-
-  this.opts = {
-    autoDestroy: false,
-    ...streamOptions
-  }
-  WritableStream.call(this, this.opts)
-
-  this._done = false
-  this._parser = this.getParserByHeaders(headers)
-  this._finished = false
-}
-inherits(Busboy, WritableStream)
-
-Busboy.prototype.emit = function (ev) {
-  if (ev === 'finish') {
-    if (!this._done) {
-      this._parser?.end()
-      return
-    } else if (this._finished) {
-      return
-    }
-    this._finished = true
-  }
-  WritableStream.prototype.emit.apply(this, arguments)
-}
-
-Busboy.prototype.getParserByHeaders = function (headers) {
-  const parsed = parseParams(headers['content-type'])
-
-  const cfg = {
-    defCharset: this.opts.defCharset,
-    fileHwm: this.opts.fileHwm,
-    headers,
-    highWaterMark: this.opts.highWaterMark,
-    isPartAFile: this.opts.isPartAFile,
-    limits: this.opts.limits,
-    parsedConType: parsed,
-    preservePath: this.opts.preservePath
-  }
-
-  if (MultipartParser.detect.test(parsed[0])) {
-    return new MultipartParser(this, cfg)
-  }
-  if (UrlencodedParser.detect.test(parsed[0])) {
-    return new UrlencodedParser(this, cfg)
-  }
-  throw new Error('Unsupported Content-Type.')
-}
-
-Busboy.prototype._write = function (chunk, encoding, cb) {
-  this._parser.write(chunk, cb)
-}
-
-module.exports = Busboy
-module.exports["default"] = Busboy
-module.exports.Busboy = Busboy
-
-module.exports.Dicer = Dicer
-
-
-/***/ }),
-
-/***/ 1192:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-
-
-// TODO:
-//  * support 1 nested multipart level
-//    (see second multipart example here:
-//     http://www.w3.org/TR/html401/interact/forms.html#didx-multipartform-data)
-//  * support limits.fieldNameSize
-//     -- this will require modifications to utils.parseParams
-
-const { Readable } = __nccwpck_require__(7075)
-const { inherits } = __nccwpck_require__(7975)
-
-const Dicer = __nccwpck_require__(7182)
-
-const parseParams = __nccwpck_require__(8929)
-const decodeText = __nccwpck_require__(2747)
-const basename = __nccwpck_require__(692)
-const getLimit = __nccwpck_require__(2393)
-
-const RE_BOUNDARY = /^boundary$/i
-const RE_FIELD = /^form-data$/i
-const RE_CHARSET = /^charset$/i
-const RE_FILENAME = /^filename$/i
-const RE_NAME = /^name$/i
-
-Multipart.detect = /^multipart\/form-data/i
-function Multipart (boy, cfg) {
-  let i
-  let len
-  const self = this
-  let boundary
-  const limits = cfg.limits
-  const isPartAFile = cfg.isPartAFile || ((fieldName, contentType, fileName) => (contentType === 'application/octet-stream' || fileName !== undefined))
-  const parsedConType = cfg.parsedConType || []
-  const defCharset = cfg.defCharset || 'utf8'
-  const preservePath = cfg.preservePath
-  const fileOpts = { highWaterMark: cfg.fileHwm }
-
-  for (i = 0, len = parsedConType.length; i < len; ++i) {
-    if (Array.isArray(parsedConType[i]) &&
-      RE_BOUNDARY.test(parsedConType[i][0])) {
-      boundary = parsedConType[i][1]
-      break
-    }
-  }
-
-  function checkFinished () {
-    if (nends === 0 && finished && !boy._done) {
-      finished = false
-      self.end()
-    }
-  }
-
-  if (typeof boundary !== 'string') { throw new Error('Multipart: Boundary not found') }
-
-  const fieldSizeLimit = getLimit(limits, 'fieldSize', 1 * 1024 * 1024)
-  const fileSizeLimit = getLimit(limits, 'fileSize', Infinity)
-  const filesLimit = getLimit(limits, 'files', Infinity)
-  const fieldsLimit = getLimit(limits, 'fields', Infinity)
-  const partsLimit = getLimit(limits, 'parts', Infinity)
-  const headerPairsLimit = getLimit(limits, 'headerPairs', 2000)
-  const headerSizeLimit = getLimit(limits, 'headerSize', 80 * 1024)
-
-  let nfiles = 0
-  let nfields = 0
-  let nends = 0
-  let curFile
-  let curField
-  let finished = false
-
-  this._needDrain = false
-  this._pause = false
-  this._cb = undefined
-  this._nparts = 0
-  this._boy = boy
-
-  const parserCfg = {
-    boundary,
-    maxHeaderPairs: headerPairsLimit,
-    maxHeaderSize: headerSizeLimit,
-    partHwm: fileOpts.highWaterMark,
-    highWaterMark: cfg.highWaterMark
-  }
-
-  this.parser = new Dicer(parserCfg)
-  this.parser.on('drain', function () {
-    self._needDrain = false
-    if (self._cb && !self._pause) {
-      const cb = self._cb
-      self._cb = undefined
-      cb()
-    }
-  }).on('part', function onPart (part) {
-    if (++self._nparts > partsLimit) {
-      self.parser.removeListener('part', onPart)
-      self.parser.on('part', skipPart)
-      boy.hitPartsLimit = true
-      boy.emit('partsLimit')
-      return skipPart(part)
-    }
-
-    // hack because streams2 _always_ doesn't emit 'end' until nextTick, so let
-    // us emit 'end' early since we know the part has ended if we are already
-    // seeing the next part
-    if (curField) {
-      const field = curField
-      field.emit('end')
-      field.removeAllListeners('end')
-    }
-
-    part.on('header', function (header) {
-      let contype
-      let fieldname
-      let parsed
-      let charset
-      let encoding
-      let filename
-      let nsize = 0
-
-      if (header['content-type']) {
-        parsed = parseParams(header['content-type'][0])
-        if (parsed[0]) {
-          contype = parsed[0].toLowerCase()
-          for (i = 0, len = parsed.length; i < len; ++i) {
-            if (RE_CHARSET.test(parsed[i][0])) {
-              charset = parsed[i][1].toLowerCase()
-              break
-            }
-          }
-        }
-      }
-
-      if (contype === undefined) { contype = 'text/plain' }
-      if (charset === undefined) { charset = defCharset }
-
-      if (header['content-disposition']) {
-        parsed = parseParams(header['content-disposition'][0])
-        if (!RE_FIELD.test(parsed[0])) { return skipPart(part) }
-        for (i = 0, len = parsed.length; i < len; ++i) {
-          if (RE_NAME.test(parsed[i][0])) {
-            fieldname = parsed[i][1]
-          } else if (RE_FILENAME.test(parsed[i][0])) {
-            filename = parsed[i][1]
-            if (!preservePath) { filename = basename(filename) }
-          }
-        }
-      } else { return skipPart(part) }
-
-      if (header['content-transfer-encoding']) { encoding = header['content-transfer-encoding'][0].toLowerCase() } else { encoding = '7bit' }
-
-      let onData,
-        onEnd
-
-      if (isPartAFile(fieldname, contype, filename)) {
-        // file/binary field
-        if (nfiles === filesLimit) {
-          if (!boy.hitFilesLimit) {
-            boy.hitFilesLimit = true
-            boy.emit('filesLimit')
-          }
-          return skipPart(part)
-        }
-
-        ++nfiles
-
-        if (boy.listenerCount('file') === 0) {
-          self.parser._ignore()
-          return
-        }
-
-        ++nends
-        const file = new FileStream(fileOpts)
-        curFile = file
-        file.on('end', function () {
-          --nends
-          self._pause = false
-          checkFinished()
-          if (self._cb && !self._needDrain) {
-            const cb = self._cb
-            self._cb = undefined
-            cb()
-          }
-        })
-        file._read = function (n) {
-          if (!self._pause) { return }
-          self._pause = false
-          if (self._cb && !self._needDrain) {
-            const cb = self._cb
-            self._cb = undefined
-            cb()
-          }
-        }
-        boy.emit('file', fieldname, file, filename, encoding, contype)
-
-        onData = function (data) {
-          if ((nsize += data.length) > fileSizeLimit) {
-            const extralen = fileSizeLimit - nsize + data.length
-            if (extralen > 0) { file.push(data.slice(0, extralen)) }
-            file.truncated = true
-            file.bytesRead = fileSizeLimit
-            part.removeAllListeners('data')
-            file.emit('limit')
-            return
-          } else if (!file.push(data)) { self._pause = true }
-
-          file.bytesRead = nsize
-        }
-
-        onEnd = function () {
-          curFile = undefined
-          file.push(null)
-        }
-      } else {
-        // non-file field
-        if (nfields === fieldsLimit) {
-          if (!boy.hitFieldsLimit) {
-            boy.hitFieldsLimit = true
-            boy.emit('fieldsLimit')
-          }
-          return skipPart(part)
-        }
-
-        ++nfields
-        ++nends
-        let buffer = ''
-        let truncated = false
-        curField = part
-
-        onData = function (data) {
-          if ((nsize += data.length) > fieldSizeLimit) {
-            const extralen = (fieldSizeLimit - (nsize - data.length))
-            buffer += data.toString('binary', 0, extralen)
-            truncated = true
-            part.removeAllListeners('data')
-          } else { buffer += data.toString('binary') }
-        }
-
-        onEnd = function () {
-          curField = undefined
-          if (buffer.length) { buffer = decodeText(buffer, 'binary', charset) }
-          boy.emit('field', fieldname, buffer, false, truncated, encoding, contype)
-          --nends
-          checkFinished()
-        }
-      }
-
-      /* As of node@2efe4ab761666 (v0.10.29+/v0.11.14+), busboy had become
-         broken. Streams2/streams3 is a huge black box of confusion, but
-         somehow overriding the sync state seems to fix things again (and still
-         seems to work for previous node versions).
-      */
-      part._readableState.sync = false
-
-      part.on('data', onData)
-      part.on('end', onEnd)
-    }).on('error', function (err) {
-      if (curFile) { curFile.emit('error', err) }
-    })
-  }).on('error', function (err) {
-    boy.emit('error', err)
-  }).on('finish', function () {
-    finished = true
-    checkFinished()
-  })
-}
-
-Multipart.prototype.write = function (chunk, cb) {
-  const r = this.parser.write(chunk)
-  if (r && !this._pause) {
-    cb()
-  } else {
-    this._needDrain = !r
-    this._cb = cb
-  }
-}
-
-Multipart.prototype.end = function () {
-  const self = this
-
-  if (self.parser.writable) {
-    self.parser.end()
-  } else if (!self._boy._done) {
-    process.nextTick(function () {
-      self._boy._done = true
-      self._boy.emit('finish')
-    })
-  }
-}
-
-function skipPart (part) {
-  part.resume()
-}
-
-function FileStream (opts) {
-  Readable.call(this, opts)
-
-  this.bytesRead = 0
-
-  this.truncated = false
-}
-
-inherits(FileStream, Readable)
-
-FileStream.prototype._read = function (n) {}
-
-module.exports = Multipart
-
-
-/***/ }),
-
-/***/ 855:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-
-
-const Decoder = __nccwpck_require__(1496)
-const decodeText = __nccwpck_require__(2747)
-const getLimit = __nccwpck_require__(2393)
-
-const RE_CHARSET = /^charset$/i
-
-UrlEncoded.detect = /^application\/x-www-form-urlencoded/i
-function UrlEncoded (boy, cfg) {
-  const limits = cfg.limits
-  const parsedConType = cfg.parsedConType
-  this.boy = boy
-
-  this.fieldSizeLimit = getLimit(limits, 'fieldSize', 1 * 1024 * 1024)
-  this.fieldNameSizeLimit = getLimit(limits, 'fieldNameSize', 100)
-  this.fieldsLimit = getLimit(limits, 'fields', Infinity)
-
-  let charset
-  for (var i = 0, len = parsedConType.length; i < len; ++i) { // eslint-disable-line no-var
-    if (Array.isArray(parsedConType[i]) &&
-        RE_CHARSET.test(parsedConType[i][0])) {
-      charset = parsedConType[i][1].toLowerCase()
-      break
-    }
-  }
-
-  if (charset === undefined) { charset = cfg.defCharset || 'utf8' }
-
-  this.decoder = new Decoder()
-  this.charset = charset
-  this._fields = 0
-  this._state = 'key'
-  this._checkingBytes = true
-  this._bytesKey = 0
-  this._bytesVal = 0
-  this._key = ''
-  this._val = ''
-  this._keyTrunc = false
-  this._valTrunc = false
-  this._hitLimit = false
-}
-
-UrlEncoded.prototype.write = function (data, cb) {
-  if (this._fields === this.fieldsLimit) {
-    if (!this.boy.hitFieldsLimit) {
-      this.boy.hitFieldsLimit = true
-      this.boy.emit('fieldsLimit')
-    }
-    return cb()
-  }
-
-  let idxeq; let idxamp; let i; let p = 0; const len = data.length
-
-  while (p < len) {
-    if (this._state === 'key') {
-      idxeq = idxamp = undefined
-      for (i = p; i < len; ++i) {
-        if (!this._checkingBytes) { ++p }
-        if (data[i] === 0x3D/* = */) {
-          idxeq = i
-          break
-        } else if (data[i] === 0x26/* & */) {
-          idxamp = i
-          break
-        }
-        if (this._checkingBytes && this._bytesKey === this.fieldNameSizeLimit) {
-          this._hitLimit = true
-          break
-        } else if (this._checkingBytes) { ++this._bytesKey }
-      }
-
-      if (idxeq !== undefined) {
-        // key with assignment
-        if (idxeq > p) { this._key += this.decoder.write(data.toString('binary', p, idxeq)) }
-        this._state = 'val'
-
-        this._hitLimit = false
-        this._checkingBytes = true
-        this._val = ''
-        this._bytesVal = 0
-        this._valTrunc = false
-        this.decoder.reset()
-
-        p = idxeq + 1
-      } else if (idxamp !== undefined) {
-        // key with no assignment
-        ++this._fields
-        let key; const keyTrunc = this._keyTrunc
-        if (idxamp > p) { key = (this._key += this.decoder.write(data.toString('binary', p, idxamp))) } else { key = this._key }
-
-        this._hitLimit = false
-        this._checkingBytes = true
-        this._key = ''
-        this._bytesKey = 0
-        this._keyTrunc = false
-        this.decoder.reset()
-
-        if (key.length) {
-          this.boy.emit('field', decodeText(key, 'binary', this.charset),
-            '',
-            keyTrunc,
-            false)
-        }
-
-        p = idxamp + 1
-        if (this._fields === this.fieldsLimit) { return cb() }
-      } else if (this._hitLimit) {
-        // we may not have hit the actual limit if there are encoded bytes...
-        if (i > p) { this._key += this.decoder.write(data.toString('binary', p, i)) }
-        p = i
-        if ((this._bytesKey = this._key.length) === this.fieldNameSizeLimit) {
-          // yep, we actually did hit the limit
-          this._checkingBytes = false
-          this._keyTrunc = true
-        }
-      } else {
-        if (p < len) { this._key += this.decoder.write(data.toString('binary', p)) }
-        p = len
-      }
-    } else {
-      idxamp = undefined
-      for (i = p; i < len; ++i) {
-        if (!this._checkingBytes) { ++p }
-        if (data[i] === 0x26/* & */) {
-          idxamp = i
-          break
-        }
-        if (this._checkingBytes && this._bytesVal === this.fieldSizeLimit) {
-          this._hitLimit = true
-          break
-        } else if (this._checkingBytes) { ++this._bytesVal }
-      }
-
-      if (idxamp !== undefined) {
-        ++this._fields
-        if (idxamp > p) { this._val += this.decoder.write(data.toString('binary', p, idxamp)) }
-        this.boy.emit('field', decodeText(this._key, 'binary', this.charset),
-          decodeText(this._val, 'binary', this.charset),
-          this._keyTrunc,
-          this._valTrunc)
-        this._state = 'key'
-
-        this._hitLimit = false
-        this._checkingBytes = true
-        this._key = ''
-        this._bytesKey = 0
-        this._keyTrunc = false
-        this.decoder.reset()
-
-        p = idxamp + 1
-        if (this._fields === this.fieldsLimit) { return cb() }
-      } else if (this._hitLimit) {
-        // we may not have hit the actual limit if there are encoded bytes...
-        if (i > p) { this._val += this.decoder.write(data.toString('binary', p, i)) }
-        p = i
-        if ((this._val === '' && this.fieldSizeLimit === 0) ||
-            (this._bytesVal = this._val.length) === this.fieldSizeLimit) {
-          // yep, we actually did hit the limit
-          this._checkingBytes = false
-          this._valTrunc = true
-        }
-      } else {
-        if (p < len) { this._val += this.decoder.write(data.toString('binary', p)) }
-        p = len
-      }
-    }
-  }
-  cb()
-}
-
-UrlEncoded.prototype.end = function () {
-  if (this.boy._done) { return }
-
-  if (this._state === 'key' && this._key.length > 0) {
-    this.boy.emit('field', decodeText(this._key, 'binary', this.charset),
-      '',
-      this._keyTrunc,
-      false)
-  } else if (this._state === 'val') {
-    this.boy.emit('field', decodeText(this._key, 'binary', this.charset),
-      decodeText(this._val, 'binary', this.charset),
-      this._keyTrunc,
-      this._valTrunc)
-  }
-  this.boy._done = true
-  this.boy.emit('finish')
-}
-
-module.exports = UrlEncoded
-
-
-/***/ }),
-
-/***/ 1496:
-/***/ ((module) => {
-
-
-
-const RE_PLUS = /\+/g
-
-const HEX = [
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
-  0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-]
-
-function Decoder () {
-  this.buffer = undefined
-}
-Decoder.prototype.write = function (str) {
-  // Replace '+' with ' ' before decoding
-  str = str.replace(RE_PLUS, ' ')
-  let res = ''
-  let i = 0; let p = 0; const len = str.length
-  for (; i < len; ++i) {
-    if (this.buffer !== undefined) {
-      if (!HEX[str.charCodeAt(i)]) {
-        res += '%' + this.buffer
-        this.buffer = undefined
-        --i // retry character
-      } else {
-        this.buffer += str[i]
-        ++p
-        if (this.buffer.length === 2) {
-          res += String.fromCharCode(parseInt(this.buffer, 16))
-          this.buffer = undefined
-        }
-      }
-    } else if (str[i] === '%') {
-      if (i > p) {
-        res += str.substring(p, i)
-        p = i
-      }
-      this.buffer = ''
-      ++p
-    }
-  }
-  if (p < len && this.buffer === undefined) { res += str.substring(p) }
-  return res
-}
-Decoder.prototype.reset = function () {
-  this.buffer = undefined
-}
-
-module.exports = Decoder
-
-
-/***/ }),
-
-/***/ 692:
-/***/ ((module) => {
-
-
-
-module.exports = function basename (path) {
-  if (typeof path !== 'string') { return '' }
-  for (var i = path.length - 1; i >= 0; --i) { // eslint-disable-line no-var
-    switch (path.charCodeAt(i)) {
-      case 0x2F: // '/'
-      case 0x5C: // '\'
-        path = path.slice(i + 1)
-        return (path === '..' || path === '.' ? '' : path)
-    }
-  }
-  return (path === '..' || path === '.' ? '' : path)
-}
-
-
-/***/ }),
-
-/***/ 2747:
-/***/ (function(module) {
-
-
-
-// Node has always utf-8
-const utf8Decoder = new TextDecoder('utf-8')
-const textDecoders = new Map([
-  ['utf-8', utf8Decoder],
-  ['utf8', utf8Decoder]
-])
-
-function getDecoder (charset) {
-  let lc
-  while (true) {
-    switch (charset) {
-      case 'utf-8':
-      case 'utf8':
-        return decoders.utf8
-      case 'latin1':
-      case 'ascii': // TODO: Make these a separate, strict decoder?
-      case 'us-ascii':
-      case 'iso-8859-1':
-      case 'iso8859-1':
-      case 'iso88591':
-      case 'iso_8859-1':
-      case 'windows-1252':
-      case 'iso_8859-1:1987':
-      case 'cp1252':
-      case 'x-cp1252':
-        return decoders.latin1
-      case 'utf16le':
-      case 'utf-16le':
-      case 'ucs2':
-      case 'ucs-2':
-        return decoders.utf16le
-      case 'base64':
-        return decoders.base64
-      default:
-        if (lc === undefined) {
-          lc = true
-          charset = charset.toLowerCase()
-          continue
-        }
-        return decoders.other.bind(charset)
-    }
-  }
-}
-
-const decoders = {
-  utf8: (data, sourceEncoding) => {
-    if (data.length === 0) {
-      return ''
-    }
-    if (typeof data === 'string') {
-      data = Buffer.from(data, sourceEncoding)
-    }
-    return data.utf8Slice(0, data.length)
-  },
-
-  latin1: (data, sourceEncoding) => {
-    if (data.length === 0) {
-      return ''
-    }
-    if (typeof data === 'string') {
-      return data
-    }
-    return data.latin1Slice(0, data.length)
-  },
-
-  utf16le: (data, sourceEncoding) => {
-    if (data.length === 0) {
-      return ''
-    }
-    if (typeof data === 'string') {
-      data = Buffer.from(data, sourceEncoding)
-    }
-    return data.ucs2Slice(0, data.length)
-  },
-
-  base64: (data, sourceEncoding) => {
-    if (data.length === 0) {
-      return ''
-    }
-    if (typeof data === 'string') {
-      data = Buffer.from(data, sourceEncoding)
-    }
-    return data.base64Slice(0, data.length)
-  },
-
-  other: (data, sourceEncoding) => {
-    if (data.length === 0) {
-      return ''
-    }
-    if (typeof data === 'string') {
-      data = Buffer.from(data, sourceEncoding)
-    }
-
-    if (textDecoders.has(this.toString())) {
-      try {
-        return textDecoders.get(this).decode(data)
-      } catch {}
-    }
-    return typeof data === 'string'
-      ? data
-      : data.toString()
-  }
-}
-
-function decodeText (text, sourceEncoding, destEncoding) {
-  if (text) {
-    return getDecoder(destEncoding)(text, sourceEncoding)
-  }
-  return text
-}
-
-module.exports = decodeText
-
-
-/***/ }),
-
-/***/ 2393:
-/***/ ((module) => {
-
-
-
-module.exports = function getLimit (limits, name, defaultLimit) {
-  if (
-    !limits ||
-    limits[name] === undefined ||
-    limits[name] === null
-  ) { return defaultLimit }
-
-  if (
-    typeof limits[name] !== 'number' ||
-    isNaN(limits[name])
-  ) { throw new TypeError('Limit ' + name + ' is not a valid number') }
-
-  return limits[name]
-}
-
-
-/***/ }),
-
-/***/ 8929:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-/* eslint-disable object-property-newline */
-
-
-const decodeText = __nccwpck_require__(2747)
-
-const RE_ENCODED = /%[a-fA-F0-9][a-fA-F0-9]/g
-
-const EncodedLookup = {
-  '%00': '\x00', '%01': '\x01', '%02': '\x02', '%03': '\x03', '%04': '\x04',
-  '%05': '\x05', '%06': '\x06', '%07': '\x07', '%08': '\x08', '%09': '\x09',
-  '%0a': '\x0a', '%0A': '\x0a', '%0b': '\x0b', '%0B': '\x0b', '%0c': '\x0c',
-  '%0C': '\x0c', '%0d': '\x0d', '%0D': '\x0d', '%0e': '\x0e', '%0E': '\x0e',
-  '%0f': '\x0f', '%0F': '\x0f', '%10': '\x10', '%11': '\x11', '%12': '\x12',
-  '%13': '\x13', '%14': '\x14', '%15': '\x15', '%16': '\x16', '%17': '\x17',
-  '%18': '\x18', '%19': '\x19', '%1a': '\x1a', '%1A': '\x1a', '%1b': '\x1b',
-  '%1B': '\x1b', '%1c': '\x1c', '%1C': '\x1c', '%1d': '\x1d', '%1D': '\x1d',
-  '%1e': '\x1e', '%1E': '\x1e', '%1f': '\x1f', '%1F': '\x1f', '%20': '\x20',
-  '%21': '\x21', '%22': '\x22', '%23': '\x23', '%24': '\x24', '%25': '\x25',
-  '%26': '\x26', '%27': '\x27', '%28': '\x28', '%29': '\x29', '%2a': '\x2a',
-  '%2A': '\x2a', '%2b': '\x2b', '%2B': '\x2b', '%2c': '\x2c', '%2C': '\x2c',
-  '%2d': '\x2d', '%2D': '\x2d', '%2e': '\x2e', '%2E': '\x2e', '%2f': '\x2f',
-  '%2F': '\x2f', '%30': '\x30', '%31': '\x31', '%32': '\x32', '%33': '\x33',
-  '%34': '\x34', '%35': '\x35', '%36': '\x36', '%37': '\x37', '%38': '\x38',
-  '%39': '\x39', '%3a': '\x3a', '%3A': '\x3a', '%3b': '\x3b', '%3B': '\x3b',
-  '%3c': '\x3c', '%3C': '\x3c', '%3d': '\x3d', '%3D': '\x3d', '%3e': '\x3e',
-  '%3E': '\x3e', '%3f': '\x3f', '%3F': '\x3f', '%40': '\x40', '%41': '\x41',
-  '%42': '\x42', '%43': '\x43', '%44': '\x44', '%45': '\x45', '%46': '\x46',
-  '%47': '\x47', '%48': '\x48', '%49': '\x49', '%4a': '\x4a', '%4A': '\x4a',
-  '%4b': '\x4b', '%4B': '\x4b', '%4c': '\x4c', '%4C': '\x4c', '%4d': '\x4d',
-  '%4D': '\x4d', '%4e': '\x4e', '%4E': '\x4e', '%4f': '\x4f', '%4F': '\x4f',
-  '%50': '\x50', '%51': '\x51', '%52': '\x52', '%53': '\x53', '%54': '\x54',
-  '%55': '\x55', '%56': '\x56', '%57': '\x57', '%58': '\x58', '%59': '\x59',
-  '%5a': '\x5a', '%5A': '\x5a', '%5b': '\x5b', '%5B': '\x5b', '%5c': '\x5c',
-  '%5C': '\x5c', '%5d': '\x5d', '%5D': '\x5d', '%5e': '\x5e', '%5E': '\x5e',
-  '%5f': '\x5f', '%5F': '\x5f', '%60': '\x60', '%61': '\x61', '%62': '\x62',
-  '%63': '\x63', '%64': '\x64', '%65': '\x65', '%66': '\x66', '%67': '\x67',
-  '%68': '\x68', '%69': '\x69', '%6a': '\x6a', '%6A': '\x6a', '%6b': '\x6b',
-  '%6B': '\x6b', '%6c': '\x6c', '%6C': '\x6c', '%6d': '\x6d', '%6D': '\x6d',
-  '%6e': '\x6e', '%6E': '\x6e', '%6f': '\x6f', '%6F': '\x6f', '%70': '\x70',
-  '%71': '\x71', '%72': '\x72', '%73': '\x73', '%74': '\x74', '%75': '\x75',
-  '%76': '\x76', '%77': '\x77', '%78': '\x78', '%79': '\x79', '%7a': '\x7a',
-  '%7A': '\x7a', '%7b': '\x7b', '%7B': '\x7b', '%7c': '\x7c', '%7C': '\x7c',
-  '%7d': '\x7d', '%7D': '\x7d', '%7e': '\x7e', '%7E': '\x7e', '%7f': '\x7f',
-  '%7F': '\x7f', '%80': '\x80', '%81': '\x81', '%82': '\x82', '%83': '\x83',
-  '%84': '\x84', '%85': '\x85', '%86': '\x86', '%87': '\x87', '%88': '\x88',
-  '%89': '\x89', '%8a': '\x8a', '%8A': '\x8a', '%8b': '\x8b', '%8B': '\x8b',
-  '%8c': '\x8c', '%8C': '\x8c', '%8d': '\x8d', '%8D': '\x8d', '%8e': '\x8e',
-  '%8E': '\x8e', '%8f': '\x8f', '%8F': '\x8f', '%90': '\x90', '%91': '\x91',
-  '%92': '\x92', '%93': '\x93', '%94': '\x94', '%95': '\x95', '%96': '\x96',
-  '%97': '\x97', '%98': '\x98', '%99': '\x99', '%9a': '\x9a', '%9A': '\x9a',
-  '%9b': '\x9b', '%9B': '\x9b', '%9c': '\x9c', '%9C': '\x9c', '%9d': '\x9d',
-  '%9D': '\x9d', '%9e': '\x9e', '%9E': '\x9e', '%9f': '\x9f', '%9F': '\x9f',
-  '%a0': '\xa0', '%A0': '\xa0', '%a1': '\xa1', '%A1': '\xa1', '%a2': '\xa2',
-  '%A2': '\xa2', '%a3': '\xa3', '%A3': '\xa3', '%a4': '\xa4', '%A4': '\xa4',
-  '%a5': '\xa5', '%A5': '\xa5', '%a6': '\xa6', '%A6': '\xa6', '%a7': '\xa7',
-  '%A7': '\xa7', '%a8': '\xa8', '%A8': '\xa8', '%a9': '\xa9', '%A9': '\xa9',
-  '%aa': '\xaa', '%Aa': '\xaa', '%aA': '\xaa', '%AA': '\xaa', '%ab': '\xab',
-  '%Ab': '\xab', '%aB': '\xab', '%AB': '\xab', '%ac': '\xac', '%Ac': '\xac',
-  '%aC': '\xac', '%AC': '\xac', '%ad': '\xad', '%Ad': '\xad', '%aD': '\xad',
-  '%AD': '\xad', '%ae': '\xae', '%Ae': '\xae', '%aE': '\xae', '%AE': '\xae',
-  '%af': '\xaf', '%Af': '\xaf', '%aF': '\xaf', '%AF': '\xaf', '%b0': '\xb0',
-  '%B0': '\xb0', '%b1': '\xb1', '%B1': '\xb1', '%b2': '\xb2', '%B2': '\xb2',
-  '%b3': '\xb3', '%B3': '\xb3', '%b4': '\xb4', '%B4': '\xb4', '%b5': '\xb5',
-  '%B5': '\xb5', '%b6': '\xb6', '%B6': '\xb6', '%b7': '\xb7', '%B7': '\xb7',
-  '%b8': '\xb8', '%B8': '\xb8', '%b9': '\xb9', '%B9': '\xb9', '%ba': '\xba',
-  '%Ba': '\xba', '%bA': '\xba', '%BA': '\xba', '%bb': '\xbb', '%Bb': '\xbb',
-  '%bB': '\xbb', '%BB': '\xbb', '%bc': '\xbc', '%Bc': '\xbc', '%bC': '\xbc',
-  '%BC': '\xbc', '%bd': '\xbd', '%Bd': '\xbd', '%bD': '\xbd', '%BD': '\xbd',
-  '%be': '\xbe', '%Be': '\xbe', '%bE': '\xbe', '%BE': '\xbe', '%bf': '\xbf',
-  '%Bf': '\xbf', '%bF': '\xbf', '%BF': '\xbf', '%c0': '\xc0', '%C0': '\xc0',
-  '%c1': '\xc1', '%C1': '\xc1', '%c2': '\xc2', '%C2': '\xc2', '%c3': '\xc3',
-  '%C3': '\xc3', '%c4': '\xc4', '%C4': '\xc4', '%c5': '\xc5', '%C5': '\xc5',
-  '%c6': '\xc6', '%C6': '\xc6', '%c7': '\xc7', '%C7': '\xc7', '%c8': '\xc8',
-  '%C8': '\xc8', '%c9': '\xc9', '%C9': '\xc9', '%ca': '\xca', '%Ca': '\xca',
-  '%cA': '\xca', '%CA': '\xca', '%cb': '\xcb', '%Cb': '\xcb', '%cB': '\xcb',
-  '%CB': '\xcb', '%cc': '\xcc', '%Cc': '\xcc', '%cC': '\xcc', '%CC': '\xcc',
-  '%cd': '\xcd', '%Cd': '\xcd', '%cD': '\xcd', '%CD': '\xcd', '%ce': '\xce',
-  '%Ce': '\xce', '%cE': '\xce', '%CE': '\xce', '%cf': '\xcf', '%Cf': '\xcf',
-  '%cF': '\xcf', '%CF': '\xcf', '%d0': '\xd0', '%D0': '\xd0', '%d1': '\xd1',
-  '%D1': '\xd1', '%d2': '\xd2', '%D2': '\xd2', '%d3': '\xd3', '%D3': '\xd3',
-  '%d4': '\xd4', '%D4': '\xd4', '%d5': '\xd5', '%D5': '\xd5', '%d6': '\xd6',
-  '%D6': '\xd6', '%d7': '\xd7', '%D7': '\xd7', '%d8': '\xd8', '%D8': '\xd8',
-  '%d9': '\xd9', '%D9': '\xd9', '%da': '\xda', '%Da': '\xda', '%dA': '\xda',
-  '%DA': '\xda', '%db': '\xdb', '%Db': '\xdb', '%dB': '\xdb', '%DB': '\xdb',
-  '%dc': '\xdc', '%Dc': '\xdc', '%dC': '\xdc', '%DC': '\xdc', '%dd': '\xdd',
-  '%Dd': '\xdd', '%dD': '\xdd', '%DD': '\xdd', '%de': '\xde', '%De': '\xde',
-  '%dE': '\xde', '%DE': '\xde', '%df': '\xdf', '%Df': '\xdf', '%dF': '\xdf',
-  '%DF': '\xdf', '%e0': '\xe0', '%E0': '\xe0', '%e1': '\xe1', '%E1': '\xe1',
-  '%e2': '\xe2', '%E2': '\xe2', '%e3': '\xe3', '%E3': '\xe3', '%e4': '\xe4',
-  '%E4': '\xe4', '%e5': '\xe5', '%E5': '\xe5', '%e6': '\xe6', '%E6': '\xe6',
-  '%e7': '\xe7', '%E7': '\xe7', '%e8': '\xe8', '%E8': '\xe8', '%e9': '\xe9',
-  '%E9': '\xe9', '%ea': '\xea', '%Ea': '\xea', '%eA': '\xea', '%EA': '\xea',
-  '%eb': '\xeb', '%Eb': '\xeb', '%eB': '\xeb', '%EB': '\xeb', '%ec': '\xec',
-  '%Ec': '\xec', '%eC': '\xec', '%EC': '\xec', '%ed': '\xed', '%Ed': '\xed',
-  '%eD': '\xed', '%ED': '\xed', '%ee': '\xee', '%Ee': '\xee', '%eE': '\xee',
-  '%EE': '\xee', '%ef': '\xef', '%Ef': '\xef', '%eF': '\xef', '%EF': '\xef',
-  '%f0': '\xf0', '%F0': '\xf0', '%f1': '\xf1', '%F1': '\xf1', '%f2': '\xf2',
-  '%F2': '\xf2', '%f3': '\xf3', '%F3': '\xf3', '%f4': '\xf4', '%F4': '\xf4',
-  '%f5': '\xf5', '%F5': '\xf5', '%f6': '\xf6', '%F6': '\xf6', '%f7': '\xf7',
-  '%F7': '\xf7', '%f8': '\xf8', '%F8': '\xf8', '%f9': '\xf9', '%F9': '\xf9',
-  '%fa': '\xfa', '%Fa': '\xfa', '%fA': '\xfa', '%FA': '\xfa', '%fb': '\xfb',
-  '%Fb': '\xfb', '%fB': '\xfb', '%FB': '\xfb', '%fc': '\xfc', '%Fc': '\xfc',
-  '%fC': '\xfc', '%FC': '\xfc', '%fd': '\xfd', '%Fd': '\xfd', '%fD': '\xfd',
-  '%FD': '\xfd', '%fe': '\xfe', '%Fe': '\xfe', '%fE': '\xfe', '%FE': '\xfe',
-  '%ff': '\xff', '%Ff': '\xff', '%fF': '\xff', '%FF': '\xff'
-}
-
-function encodedReplacer (match) {
-  return EncodedLookup[match]
-}
-
-const STATE_KEY = 0
-const STATE_VALUE = 1
-const STATE_CHARSET = 2
-const STATE_LANG = 3
-
-function parseParams (str) {
-  const res = []
-  let state = STATE_KEY
-  let charset = ''
-  let inquote = false
-  let escaping = false
-  let p = 0
-  let tmp = ''
-  const len = str.length
-
-  for (var i = 0; i < len; ++i) { // eslint-disable-line no-var
-    const char = str[i]
-    if (char === '\\' && inquote) {
-      if (escaping) { escaping = false } else {
-        escaping = true
-        continue
-      }
-    } else if (char === '"') {
-      if (!escaping) {
-        if (inquote) {
-          inquote = false
-          state = STATE_KEY
-        } else { inquote = true }
-        continue
-      } else { escaping = false }
-    } else {
-      if (escaping && inquote) { tmp += '\\' }
-      escaping = false
-      if ((state === STATE_CHARSET || state === STATE_LANG) && char === "'") {
-        if (state === STATE_CHARSET) {
-          state = STATE_LANG
-          charset = tmp.substring(1)
-        } else { state = STATE_VALUE }
-        tmp = ''
-        continue
-      } else if (state === STATE_KEY &&
-        (char === '*' || char === '=') &&
-        res.length) {
-        state = char === '*'
-          ? STATE_CHARSET
-          : STATE_VALUE
-        res[p] = [tmp, undefined]
-        tmp = ''
-        continue
-      } else if (!inquote && char === ';') {
-        state = STATE_KEY
-        if (charset) {
-          if (tmp.length) {
-            tmp = decodeText(tmp.replace(RE_ENCODED, encodedReplacer),
-              'binary',
-              charset)
-          }
-          charset = ''
-        } else if (tmp.length) {
-          tmp = decodeText(tmp, 'binary', 'utf8')
-        }
-        if (res[p] === undefined) { res[p] = tmp } else { res[p][1] = tmp }
-        tmp = ''
-        ++p
-        continue
-      } else if (!inquote && (char === ' ' || char === '\t')) { continue }
-    }
-    tmp += char
-  }
-  if (charset && tmp.length) {
-    tmp = decodeText(tmp.replace(RE_ENCODED, encodedReplacer),
-      'binary',
-      charset)
-  } else if (tmp) {
-    tmp = decodeText(tmp, 'binary', 'utf8')
-  }
-
-  if (res[p] === undefined) {
-    if (tmp) { res[p] = tmp }
-  } else { res[p][1] = tmp }
-
-  return res
-}
-
-module.exports = parseParams
-
-
-/***/ }),
-
-/***/ 7505:
-/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __nccwpck_require__) => {
-
-/* harmony export */ __nccwpck_require__.d(__webpack_exports__, {
-/* harmony export */   z: () => (/* binding */ AppStoreConnectAPI)
-/* harmony export */ });
-/* harmony import */ var buffer__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(181);
-/* harmony import */ var crypto__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(6982);
-/* harmony import */ var util__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(9023);
+/***/ 6699:
+/***/ ((__unused_webpack_module, __webpack_exports__, __nccwpck_require__) => {
+
+
+// EXPORTS
+__nccwpck_require__.d(__webpack_exports__, {
+  J: () => (/* binding */ startXCodeCloudBuild)
+});
+
+// EXTERNAL MODULE: external "buffer"
+var external_buffer_ = __nccwpck_require__(181);
+// EXTERNAL MODULE: external "crypto"
+var external_crypto_ = __nccwpck_require__(6982);
+// EXTERNAL MODULE: external "util"
+var external_util_ = __nccwpck_require__(9023);
+;// CONCATENATED MODULE: ./node_modules/appstore-connect-sdk/dist/main.js
 // src/openapi/runtime.ts
 var BASE_PATH = "https://api.appstoreconnect.apple.com".replace(/\/+$/, "");
 var Configuration = class {
@@ -27762,10 +25791,10 @@ function concat(...buffers) {
 
 // node_modules/jose/dist/node/esm/runtime/base64url.js
 var encode;
-if (buffer__WEBPACK_IMPORTED_MODULE_0__.Buffer.isEncoding("base64url")) {
-  encode = (input) => buffer__WEBPACK_IMPORTED_MODULE_0__.Buffer.from(input).toString("base64url");
+if (external_buffer_.Buffer.isEncoding("base64url")) {
+  encode = (input) => external_buffer_.Buffer.from(input).toString("base64url");
 } else {
-  encode = (input) => buffer__WEBPACK_IMPORTED_MODULE_0__.Buffer.from(input).toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  encode = (input) => external_buffer_.Buffer.from(input).toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
 // node_modules/jose/dist/node/esm/util/errors.js
@@ -27812,14 +25841,14 @@ var JWTInvalid = class extends JOSEError {
 // node_modules/jose/dist/node/esm/runtime/is_key_object.js
 
 
-var is_key_object_default = util__WEBPACK_IMPORTED_MODULE_2__.types.isKeyObject ? (obj) => util__WEBPACK_IMPORTED_MODULE_2__.types.isKeyObject(obj) : (obj) => obj != null && obj instanceof crypto__WEBPACK_IMPORTED_MODULE_1__.KeyObject;
+var is_key_object_default = external_util_.types.isKeyObject ? (obj) => external_util_.types.isKeyObject(obj) : (obj) => obj != null && obj instanceof external_crypto_.KeyObject;
 
 // node_modules/jose/dist/node/esm/runtime/webcrypto.js
 
 
-var webcrypto2 = crypto__WEBPACK_IMPORTED_MODULE_1__.webcrypto;
+var webcrypto2 = external_crypto_.webcrypto;
 var webcrypto_default = webcrypto2;
-var isCryptoKey = util__WEBPACK_IMPORTED_MODULE_2__.types.isCryptoKey ? (key) => util__WEBPACK_IMPORTED_MODULE_2__.types.isCryptoKey(key) : (key) => false;
+var isCryptoKey = external_util_.types.isCryptoKey ? (key) => external_util_.types.isCryptoKey(key) : (key) => false;
 
 // node_modules/jose/dist/node/esm/lib/crypto_key.js
 function unusable(name, prop = "algorithm.name") {
@@ -27995,10 +26024,10 @@ function isObject(input) {
 // node_modules/jose/dist/node/esm/runtime/get_named_curve.js
 
 
-var p256 = buffer__WEBPACK_IMPORTED_MODULE_0__.Buffer.from([42, 134, 72, 206, 61, 3, 1, 7]);
-var p384 = buffer__WEBPACK_IMPORTED_MODULE_0__.Buffer.from([43, 129, 4, 0, 34]);
-var p521 = buffer__WEBPACK_IMPORTED_MODULE_0__.Buffer.from([43, 129, 4, 0, 35]);
-var secp256k1 = buffer__WEBPACK_IMPORTED_MODULE_0__.Buffer.from([43, 129, 4, 0, 10]);
+var p256 = external_buffer_.Buffer.from([42, 134, 72, 206, 61, 3, 1, 7]);
+var p384 = external_buffer_.Buffer.from([43, 129, 4, 0, 34]);
+var p521 = external_buffer_.Buffer.from([43, 129, 4, 0, 35]);
+var secp256k1 = external_buffer_.Buffer.from([43, 129, 4, 0, 10]);
 var weakMap = /* @__PURE__ */ new WeakMap();
 var namedCurveToJOSE = (namedCurve) => {
   switch (namedCurve) {
@@ -28018,7 +26047,7 @@ var getNamedCurve2 = (kee, raw) => {
   var _a;
   let key;
   if (isCryptoKey(kee)) {
-    key = crypto__WEBPACK_IMPORTED_MODULE_1__.KeyObject.from(kee);
+    key = external_crypto_.KeyObject.from(kee);
   } else if (is_key_object_default(kee)) {
     key = kee;
   } else {
@@ -28040,7 +26069,7 @@ var getNamedCurve2 = (kee, raw) => {
       }
       let namedCurve = (_a = key.asymmetricKeyDetails) === null || _a === void 0 ? void 0 : _a.namedCurve;
       if (!namedCurve && key.type === "private") {
-        namedCurve = getNamedCurve2((0,crypto__WEBPACK_IMPORTED_MODULE_1__.createPublicKey)(key), true);
+        namedCurve = getNamedCurve2((0,external_crypto_.createPublicKey)(key), true);
       } else if (!namedCurve) {
         const buf = key.export({ format: "der", type: "spki" });
         const i = buf[1] < 128 ? 14 : 15;
@@ -28118,8 +26147,8 @@ var check_modulus_length_default = (key, alg) => {
 // node_modules/jose/dist/node/esm/runtime/asn1.js
 
 
-var fromPKCS8 = (pem) => (0,crypto__WEBPACK_IMPORTED_MODULE_1__.createPrivateKey)({
-  key: buffer__WEBPACK_IMPORTED_MODULE_0__.Buffer.from(pem.replace(/(?:-----(?:BEGIN|END) PRIVATE KEY-----|\s)/g, ""), "base64"),
+var fromPKCS8 = (pem) => (0,external_crypto_.createPrivateKey)({
+  key: external_buffer_.Buffer.from(pem.replace(/(?:-----(?:BEGIN|END) PRIVATE KEY-----|\s)/g, ""), "base64"),
   type: "pkcs8",
   format: "der"
 });
@@ -28237,8 +26266,8 @@ function dsaDigest(alg) {
 // node_modules/jose/dist/node/esm/runtime/node_key.js
 
 var PSS = {
-  padding: crypto__WEBPACK_IMPORTED_MODULE_1__.constants.RSA_PKCS1_PSS_PADDING,
-  saltLength: crypto__WEBPACK_IMPORTED_MODULE_1__.constants.RSA_PSS_SALTLEN_DIGEST
+  padding: external_crypto_.constants.RSA_PKCS1_PSS_PADDING,
+  saltLength: external_crypto_.constants.RSA_PSS_SALTLEN_DIGEST
 };
 var ecCurveAlgMap = /* @__PURE__ */ new Map([
   ["ES256", "P-256"],
@@ -28330,29 +26359,29 @@ function getSignVerifyKey(alg, key, usage) {
     if (!alg.startsWith("HS")) {
       throw new TypeError(invalid_key_input_default(key, ...types3));
     }
-    return (0,crypto__WEBPACK_IMPORTED_MODULE_1__.createSecretKey)(key);
+    return (0,external_crypto_.createSecretKey)(key);
   }
-  if (key instanceof crypto__WEBPACK_IMPORTED_MODULE_1__.KeyObject) {
+  if (key instanceof external_crypto_.KeyObject) {
     return key;
   }
   if (isCryptoKey(key)) {
     checkSigCryptoKey(key, alg, usage);
-    return crypto__WEBPACK_IMPORTED_MODULE_1__.KeyObject.from(key);
+    return external_crypto_.KeyObject.from(key);
   }
   throw new TypeError(invalid_key_input_default(key, ...types3, "Uint8Array"));
 }
 
 // node_modules/jose/dist/node/esm/runtime/sign.js
 var oneShotSign;
-if (crypto__WEBPACK_IMPORTED_MODULE_1__.sign.length > 3) {
-  oneShotSign = (0,util__WEBPACK_IMPORTED_MODULE_2__.promisify)(crypto__WEBPACK_IMPORTED_MODULE_1__.sign);
+if (external_crypto_.sign.length > 3) {
+  oneShotSign = (0,external_util_.promisify)(external_crypto_.sign);
 } else {
-  oneShotSign = crypto__WEBPACK_IMPORTED_MODULE_1__.sign;
+  oneShotSign = external_crypto_.sign;
 }
 var sign2 = async (alg, key, data) => {
   const keyObject = getSignVerifyKey(alg, key, "sign");
   if (alg.startsWith("HS")) {
-    const hmac = crypto__WEBPACK_IMPORTED_MODULE_1__.createHmac(hmacDigest(alg), keyObject);
+    const hmac = external_crypto_.createHmac(hmacDigest(alg), keyObject);
     hmac.update(data);
     return hmac.digest();
   }
@@ -28693,28 +26722,10 @@ var GlobalAPI = class extends BaseAPI {
 
 //# sourceMappingURL=main.js.map
 
-
-/***/ }),
-
-/***/ 7137:
-/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __nccwpck_require__) => {
-
-/* harmony export */ __nccwpck_require__.d(__webpack_exports__, {
-/* harmony export */   H36: () => (/* binding */ CiProductsGetCollectionFilterProductTypeEnum),
-/* harmony export */   LAR: () => (/* binding */ CiBuildRunsApi),
-/* harmony export */   NlL: () => (/* binding */ CiProductsApi),
-/* harmony export */   ZZD: () => (/* binding */ ScmRepositoriesGetCollectionFieldsScmGitReferencesEnum),
-/* harmony export */   ff7: () => (/* binding */ CiProductsWorkflowsGetToManyRelatedIncludeEnum),
-/* harmony export */   mfw: () => (/* binding */ ScmRepositoriesApi),
-/* harmony export */   oh7: () => (/* binding */ CiBuildRunCreateRequestDataTypeEnum),
-/* harmony export */   r_K: () => (/* binding */ CiBuildRunRelationshipsWorkflowDataTypeEnum),
-/* harmony export */   uqs: () => (/* binding */ CiProductsGetCollectionIncludeEnum),
-/* harmony export */   yiV: () => (/* binding */ CiBuildRunRelationshipsSourceBranchOrTagDataTypeEnum)
-/* harmony export */ });
-/* unused harmony exports AgeRatingDeclarationAttributesAlcoholTobaccoOrDrugUseOrReferencesEnum, AgeRatingDeclarationAttributesContestsEnum, AgeRatingDeclarationAttributesFromJSON, AgeRatingDeclarationAttributesFromJSONTyped, AgeRatingDeclarationAttributesGamblingSimulatedEnum, AgeRatingDeclarationAttributesHorrorOrFearThemesEnum, AgeRatingDeclarationAttributesMatureOrSuggestiveThemesEnum, AgeRatingDeclarationAttributesMedicalOrTreatmentInformationEnum, AgeRatingDeclarationAttributesProfanityOrCrudeHumorEnum, AgeRatingDeclarationAttributesSexualContentGraphicAndNudityEnum, AgeRatingDeclarationAttributesSexualContentOrNudityEnum, AgeRatingDeclarationAttributesToJSON, AgeRatingDeclarationAttributesViolenceCartoonOrFantasyEnum, AgeRatingDeclarationAttributesViolenceRealisticEnum, AgeRatingDeclarationAttributesViolenceRealisticProlongedGraphicOrSadisticEnum, AgeRatingDeclarationFromJSON, AgeRatingDeclarationFromJSONTyped, AgeRatingDeclarationResponseFromJSON, AgeRatingDeclarationResponseFromJSONTyped, AgeRatingDeclarationResponseToJSON, AgeRatingDeclarationToJSON, AgeRatingDeclarationTypeEnum, AgeRatingDeclarationUpdateRequestDataFromJSON, AgeRatingDeclarationUpdateRequestDataFromJSONTyped, AgeRatingDeclarationUpdateRequestDataToJSON, AgeRatingDeclarationUpdateRequestDataTypeEnum, AgeRatingDeclarationUpdateRequestFromJSON, AgeRatingDeclarationUpdateRequestFromJSONTyped, AgeRatingDeclarationUpdateRequestToJSON, AgeRatingDeclarationsApi, AppAttributesContentRightsDeclarationEnum, AppAttributesFromJSON, AppAttributesFromJSONTyped, AppAttributesToJSON, AppBetaTestersLinkagesRequestFromJSON, AppBetaTestersLinkagesRequestFromJSONTyped, AppBetaTestersLinkagesRequestToJSON, AppCategoriesApi, AppCategoriesGetCollectionFieldsAppCategoriesEnum, AppCategoriesGetCollectionFilterPlatformsEnum, AppCategoriesGetCollectionIncludeEnum, AppCategoriesGetInstanceFieldsAppCategoriesEnum, AppCategoriesGetInstanceIncludeEnum, AppCategoriesParentGetToOneRelatedFieldsAppCategoriesEnum, AppCategoriesResponseFromJSON, AppCategoriesResponseFromJSONTyped, AppCategoriesResponseIncludedInnerFromJSON, AppCategoriesResponseIncludedInnerFromJSONTyped, AppCategoriesResponseIncludedInnerToJSON, AppCategoriesResponseToJSON, AppCategoriesSubcategoriesGetToManyRelatedFieldsAppCategoriesEnum, AppCategoryAttributesFromJSON, AppCategoryAttributesFromJSONTyped, AppCategoryAttributesToJSON, AppCategoryFromJSON, AppCategoryFromJSONTyped, AppCategoryRelationshipsFromJSON, AppCategoryRelationshipsFromJSONTyped, AppCategoryRelationshipsParentFromJSON, AppCategoryRelationshipsParentFromJSONTyped, AppCategoryRelationshipsParentToJSON, AppCategoryRelationshipsSubcategoriesDataInnerFromJSON, AppCategoryRelationshipsSubcategoriesDataInnerFromJSONTyped, AppCategoryRelationshipsSubcategoriesDataInnerToJSON, AppCategoryRelationshipsSubcategoriesDataInnerTypeEnum, AppCategoryRelationshipsSubcategoriesFromJSON, AppCategoryRelationshipsSubcategoriesFromJSONTyped, AppCategoryRelationshipsSubcategoriesLinksFromJSON, AppCategoryRelationshipsSubcategoriesLinksFromJSONTyped, AppCategoryRelationshipsSubcategoriesLinksToJSON, AppCategoryRelationshipsSubcategoriesToJSON, AppCategoryRelationshipsToJSON, AppCategoryResponseFromJSON, AppCategoryResponseFromJSONTyped, AppCategoryResponseToJSON, AppCategoryToJSON, AppCategoryTypeEnum, AppClipAction, AppClipActionFromJSON, AppClipActionFromJSONTyped, AppClipActionToJSON, AppClipAdvancedExperienceAttributesBusinessCategoryEnum, AppClipAdvancedExperienceAttributesFromJSON, AppClipAdvancedExperienceAttributesFromJSONTyped, AppClipAdvancedExperienceAttributesPlaceDisplayPointCoordinatesFromJSON, AppClipAdvancedExperienceAttributesPlaceDisplayPointCoordinatesFromJSONTyped, AppClipAdvancedExperienceAttributesPlaceDisplayPointCoordinatesToJSON, AppClipAdvancedExperienceAttributesPlaceDisplayPointFromJSON, AppClipAdvancedExperienceAttributesPlaceDisplayPointFromJSONTyped, AppClipAdvancedExperienceAttributesPlaceDisplayPointSourceEnum, AppClipAdvancedExperienceAttributesPlaceDisplayPointToJSON, AppClipAdvancedExperienceAttributesPlaceFromJSON, AppClipAdvancedExperienceAttributesPlaceFromJSONTyped, AppClipAdvancedExperienceAttributesPlaceMainAddressFromJSON, AppClipAdvancedExperienceAttributesPlaceMainAddressFromJSONTyped, AppClipAdvancedExperienceAttributesPlaceMainAddressStructuredAddressFromJSON, AppClipAdvancedExperienceAttributesPlaceMainAddressStructuredAddressFromJSONTyped, AppClipAdvancedExperienceAttributesPlaceMainAddressStructuredAddressToJSON, AppClipAdvancedExperienceAttributesPlaceMainAddressToJSON, AppClipAdvancedExperienceAttributesPlaceMapActionEnum, AppClipAdvancedExperienceAttributesPlacePhoneNumberFromJSON, AppClipAdvancedExperienceAttributesPlacePhoneNumberFromJSONTyped, AppClipAdvancedExperienceAttributesPlacePhoneNumberToJSON, AppClipAdvancedExperienceAttributesPlacePhoneNumberTypeEnum, AppClipAdvancedExperienceAttributesPlaceRelationshipEnum, AppClipAdvancedExperienceAttributesPlaceStatusEnum, AppClipAdvancedExperienceAttributesPlaceToJSON, AppClipAdvancedExperienceAttributesStatusEnum, AppClipAdvancedExperienceAttributesToJSON, AppClipAdvancedExperienceCreateRequestDataAttributesBusinessCategoryEnum, AppClipAdvancedExperienceCreateRequestDataAttributesFromJSON, AppClipAdvancedExperienceCreateRequestDataAttributesFromJSONTyped, AppClipAdvancedExperienceCreateRequestDataAttributesToJSON, AppClipAdvancedExperienceCreateRequestDataFromJSON, AppClipAdvancedExperienceCreateRequestDataFromJSONTyped, AppClipAdvancedExperienceCreateRequestDataRelationshipsAppClipFromJSON, AppClipAdvancedExperienceCreateRequestDataRelationshipsAppClipFromJSONTyped, AppClipAdvancedExperienceCreateRequestDataRelationshipsAppClipToJSON, AppClipAdvancedExperienceCreateRequestDataRelationshipsFromJSON, AppClipAdvancedExperienceCreateRequestDataRelationshipsFromJSONTyped, AppClipAdvancedExperienceCreateRequestDataRelationshipsHeaderImageFromJSON, AppClipAdvancedExperienceCreateRequestDataRelationshipsHeaderImageFromJSONTyped, AppClipAdvancedExperienceCreateRequestDataRelationshipsHeaderImageToJSON, AppClipAdvancedExperienceCreateRequestDataRelationshipsLocalizationsFromJSON, AppClipAdvancedExperienceCreateRequestDataRelationshipsLocalizationsFromJSONTyped, AppClipAdvancedExperienceCreateRequestDataRelationshipsLocalizationsToJSON, AppClipAdvancedExperienceCreateRequestDataRelationshipsToJSON, AppClipAdvancedExperienceCreateRequestDataToJSON, AppClipAdvancedExperienceCreateRequestDataTypeEnum, AppClipAdvancedExperienceCreateRequestFromJSON, AppClipAdvancedExperienceCreateRequestFromJSONTyped, AppClipAdvancedExperienceCreateRequestToJSON, AppClipAdvancedExperienceFromJSON, AppClipAdvancedExperienceFromJSONTyped, AppClipAdvancedExperienceImageAttributesFromJSON, AppClipAdvancedExperienceImageAttributesFromJSONTyped, AppClipAdvancedExperienceImageAttributesToJSON, AppClipAdvancedExperienceImageCreateRequestDataAttributesFromJSON, AppClipAdvancedExperienceImageCreateRequestDataAttributesFromJSONTyped, AppClipAdvancedExperienceImageCreateRequestDataAttributesToJSON, AppClipAdvancedExperienceImageCreateRequestDataFromJSON, AppClipAdvancedExperienceImageCreateRequestDataFromJSONTyped, AppClipAdvancedExperienceImageCreateRequestDataToJSON, AppClipAdvancedExperienceImageCreateRequestDataTypeEnum, AppClipAdvancedExperienceImageCreateRequestFromJSON, AppClipAdvancedExperienceImageCreateRequestFromJSONTyped, AppClipAdvancedExperienceImageCreateRequestToJSON, AppClipAdvancedExperienceImageFromJSON, AppClipAdvancedExperienceImageFromJSONTyped, AppClipAdvancedExperienceImageResponseFromJSON, AppClipAdvancedExperienceImageResponseFromJSONTyped, AppClipAdvancedExperienceImageResponseToJSON, AppClipAdvancedExperienceImageToJSON, AppClipAdvancedExperienceImageTypeEnum, AppClipAdvancedExperienceImageUpdateRequestDataAttributesFromJSON, AppClipAdvancedExperienceImageUpdateRequestDataAttributesFromJSONTyped, AppClipAdvancedExperienceImageUpdateRequestDataAttributesToJSON, AppClipAdvancedExperienceImageUpdateRequestDataFromJSON, AppClipAdvancedExperienceImageUpdateRequestDataFromJSONTyped, AppClipAdvancedExperienceImageUpdateRequestDataToJSON, AppClipAdvancedExperienceImageUpdateRequestDataTypeEnum, AppClipAdvancedExperienceImageUpdateRequestFromJSON, AppClipAdvancedExperienceImageUpdateRequestFromJSONTyped, AppClipAdvancedExperienceImageUpdateRequestToJSON, AppClipAdvancedExperienceImagesApi, AppClipAdvancedExperienceImagesGetInstanceFieldsAppClipAdvancedExperienceImagesEnum, AppClipAdvancedExperienceLanguage, AppClipAdvancedExperienceLanguageFromJSON, AppClipAdvancedExperienceLanguageFromJSONTyped, AppClipAdvancedExperienceLanguageToJSON, AppClipAdvancedExperienceLocalizationAttributesFromJSON, AppClipAdvancedExperienceLocalizationAttributesFromJSONTyped, AppClipAdvancedExperienceLocalizationAttributesToJSON, AppClipAdvancedExperienceLocalizationFromJSON, AppClipAdvancedExperienceLocalizationFromJSONTyped, AppClipAdvancedExperienceLocalizationInlineCreateFromJSON, AppClipAdvancedExperienceLocalizationInlineCreateFromJSONTyped, AppClipAdvancedExperienceLocalizationInlineCreateToJSON, AppClipAdvancedExperienceLocalizationInlineCreateTypeEnum, AppClipAdvancedExperienceLocalizationToJSON, AppClipAdvancedExperienceLocalizationTypeEnum, AppClipAdvancedExperienceRelationshipsAppClipDataFromJSON, AppClipAdvancedExperienceRelationshipsAppClipDataFromJSONTyped, AppClipAdvancedExperienceRelationshipsAppClipDataToJSON, AppClipAdvancedExperienceRelationshipsAppClipDataTypeEnum, AppClipAdvancedExperienceRelationshipsAppClipFromJSON, AppClipAdvancedExperienceRelationshipsAppClipFromJSONTyped, AppClipAdvancedExperienceRelationshipsAppClipToJSON, AppClipAdvancedExperienceRelationshipsFromJSON, AppClipAdvancedExperienceRelationshipsFromJSONTyped, AppClipAdvancedExperienceRelationshipsHeaderImageDataFromJSON, AppClipAdvancedExperienceRelationshipsHeaderImageDataFromJSONTyped, AppClipAdvancedExperienceRelationshipsHeaderImageDataToJSON, AppClipAdvancedExperienceRelationshipsHeaderImageDataTypeEnum, AppClipAdvancedExperienceRelationshipsHeaderImageFromJSON, AppClipAdvancedExperienceRelationshipsHeaderImageFromJSONTyped, AppClipAdvancedExperienceRelationshipsHeaderImageToJSON, AppClipAdvancedExperienceRelationshipsLocalizationsDataInnerFromJSON, AppClipAdvancedExperienceRelationshipsLocalizationsDataInnerFromJSONTyped, AppClipAdvancedExperienceRelationshipsLocalizationsDataInnerToJSON, AppClipAdvancedExperienceRelationshipsLocalizationsDataInnerTypeEnum, AppClipAdvancedExperienceRelationshipsLocalizationsFromJSON, AppClipAdvancedExperienceRelationshipsLocalizationsFromJSONTyped, AppClipAdvancedExperienceRelationshipsLocalizationsToJSON, AppClipAdvancedExperienceRelationshipsToJSON, AppClipAdvancedExperienceResponseFromJSON, AppClipAdvancedExperienceResponseFromJSONTyped, AppClipAdvancedExperienceResponseToJSON, AppClipAdvancedExperienceToJSON, AppClipAdvancedExperienceTypeEnum, AppClipAdvancedExperienceUpdateRequestDataAttributesBusinessCategoryEnum, AppClipAdvancedExperienceUpdateRequestDataAttributesFromJSON, AppClipAdvancedExperienceUpdateRequestDataAttributesFromJSONTyped, AppClipAdvancedExperienceUpdateRequestDataAttributesToJSON, AppClipAdvancedExperienceUpdateRequestDataFromJSON, AppClipAdvancedExperienceUpdateRequestDataFromJSONTyped, AppClipAdvancedExperienceUpdateRequestDataRelationshipsAppClipFromJSON, AppClipAdvancedExperienceUpdateRequestDataRelationshipsAppClipFromJSONTyped, AppClipAdvancedExperienceUpdateRequestDataRelationshipsAppClipToJSON, AppClipAdvancedExperienceUpdateRequestDataRelationshipsFromJSON, AppClipAdvancedExperienceUpdateRequestDataRelationshipsFromJSONTyped, AppClipAdvancedExperienceUpdateRequestDataRelationshipsHeaderImageFromJSON, AppClipAdvancedExperienceUpdateRequestDataRelationshipsHeaderImageFromJSONTyped, AppClipAdvancedExperienceUpdateRequestDataRelationshipsHeaderImageToJSON, AppClipAdvancedExperienceUpdateRequestDataRelationshipsLocalizationsFromJSON, AppClipAdvancedExperienceUpdateRequestDataRelationshipsLocalizationsFromJSONTyped, AppClipAdvancedExperienceUpdateRequestDataRelationshipsLocalizationsToJSON, AppClipAdvancedExperienceUpdateRequestDataRelationshipsToJSON, AppClipAdvancedExperienceUpdateRequestDataToJSON, AppClipAdvancedExperienceUpdateRequestDataTypeEnum, AppClipAdvancedExperienceUpdateRequestFromJSON, AppClipAdvancedExperienceUpdateRequestFromJSONTyped, AppClipAdvancedExperienceUpdateRequestToJSON, AppClipAdvancedExperiencesApi, AppClipAdvancedExperiencesGetInstanceFieldsAppClipAdvancedExperiencesEnum, AppClipAdvancedExperiencesGetInstanceIncludeEnum, AppClipAdvancedExperiencesResponseFromJSON, AppClipAdvancedExperiencesResponseFromJSONTyped, AppClipAdvancedExperiencesResponseIncludedInnerFromJSON, AppClipAdvancedExperiencesResponseIncludedInnerFromJSONTyped, AppClipAdvancedExperiencesResponseIncludedInnerToJSON, AppClipAdvancedExperiencesResponseToJSON, AppClipAppStoreReviewDetailAttributesFromJSON, AppClipAppStoreReviewDetailAttributesFromJSONTyped, AppClipAppStoreReviewDetailAttributesToJSON, AppClipAppStoreReviewDetailCreateRequestDataFromJSON, AppClipAppStoreReviewDetailCreateRequestDataFromJSONTyped, AppClipAppStoreReviewDetailCreateRequestDataRelationshipsAppClipDefaultExperienceFromJSON, AppClipAppStoreReviewDetailCreateRequestDataRelationshipsAppClipDefaultExperienceFromJSONTyped, AppClipAppStoreReviewDetailCreateRequestDataRelationshipsAppClipDefaultExperienceToJSON, AppClipAppStoreReviewDetailCreateRequestDataRelationshipsFromJSON, AppClipAppStoreReviewDetailCreateRequestDataRelationshipsFromJSONTyped, AppClipAppStoreReviewDetailCreateRequestDataRelationshipsToJSON, AppClipAppStoreReviewDetailCreateRequestDataToJSON, AppClipAppStoreReviewDetailCreateRequestDataTypeEnum, AppClipAppStoreReviewDetailCreateRequestFromJSON, AppClipAppStoreReviewDetailCreateRequestFromJSONTyped, AppClipAppStoreReviewDetailCreateRequestToJSON, AppClipAppStoreReviewDetailFromJSON, AppClipAppStoreReviewDetailFromJSONTyped, AppClipAppStoreReviewDetailRelationshipsAppClipDefaultExperienceDataFromJSON, AppClipAppStoreReviewDetailRelationshipsAppClipDefaultExperienceDataFromJSONTyped, AppClipAppStoreReviewDetailRelationshipsAppClipDefaultExperienceDataToJSON, AppClipAppStoreReviewDetailRelationshipsAppClipDefaultExperienceDataTypeEnum, AppClipAppStoreReviewDetailRelationshipsAppClipDefaultExperienceFromJSON, AppClipAppStoreReviewDetailRelationshipsAppClipDefaultExperienceFromJSONTyped, AppClipAppStoreReviewDetailRelationshipsAppClipDefaultExperienceToJSON, AppClipAppStoreReviewDetailRelationshipsFromJSON, AppClipAppStoreReviewDetailRelationshipsFromJSONTyped, AppClipAppStoreReviewDetailRelationshipsToJSON, AppClipAppStoreReviewDetailResponseFromJSON, AppClipAppStoreReviewDetailResponseFromJSONTyped, AppClipAppStoreReviewDetailResponseToJSON, AppClipAppStoreReviewDetailToJSON, AppClipAppStoreReviewDetailTypeEnum, AppClipAppStoreReviewDetailUpdateRequestDataFromJSON, AppClipAppStoreReviewDetailUpdateRequestDataFromJSONTyped, AppClipAppStoreReviewDetailUpdateRequestDataToJSON, AppClipAppStoreReviewDetailUpdateRequestDataTypeEnum, AppClipAppStoreReviewDetailUpdateRequestFromJSON, AppClipAppStoreReviewDetailUpdateRequestFromJSONTyped, AppClipAppStoreReviewDetailUpdateRequestToJSON, AppClipAppStoreReviewDetailsApi, AppClipAppStoreReviewDetailsGetInstanceFieldsAppClipAppStoreReviewDetailsEnum, AppClipAppStoreReviewDetailsGetInstanceIncludeEnum, AppClipAttributesFromJSON, AppClipAttributesFromJSONTyped, AppClipAttributesToJSON, AppClipDefaultExperienceAttributesFromJSON, AppClipDefaultExperienceAttributesFromJSONTyped, AppClipDefaultExperienceAttributesToJSON, AppClipDefaultExperienceCreateRequestDataFromJSON, AppClipDefaultExperienceCreateRequestDataFromJSONTyped, AppClipDefaultExperienceCreateRequestDataRelationshipsAppClipDefaultExperienceTemplateFromJSON, AppClipDefaultExperienceCreateRequestDataRelationshipsAppClipDefaultExperienceTemplateFromJSONTyped, AppClipDefaultExperienceCreateRequestDataRelationshipsAppClipDefaultExperienceTemplateToJSON, AppClipDefaultExperienceCreateRequestDataRelationshipsFromJSON, AppClipDefaultExperienceCreateRequestDataRelationshipsFromJSONTyped, AppClipDefaultExperienceCreateRequestDataRelationshipsReleaseWithAppStoreVersionFromJSON, AppClipDefaultExperienceCreateRequestDataRelationshipsReleaseWithAppStoreVersionFromJSONTyped, AppClipDefaultExperienceCreateRequestDataRelationshipsReleaseWithAppStoreVersionToJSON, AppClipDefaultExperienceCreateRequestDataRelationshipsToJSON, AppClipDefaultExperienceCreateRequestDataToJSON, AppClipDefaultExperienceCreateRequestDataTypeEnum, AppClipDefaultExperienceCreateRequestFromJSON, AppClipDefaultExperienceCreateRequestFromJSONTyped, AppClipDefaultExperienceCreateRequestToJSON, AppClipDefaultExperienceFromJSON, AppClipDefaultExperienceFromJSONTyped, AppClipDefaultExperienceLocalizationAttributesFromJSON, AppClipDefaultExperienceLocalizationAttributesFromJSONTyped, AppClipDefaultExperienceLocalizationAttributesToJSON, AppClipDefaultExperienceLocalizationCreateRequestDataAttributesFromJSON, AppClipDefaultExperienceLocalizationCreateRequestDataAttributesFromJSONTyped, AppClipDefaultExperienceLocalizationCreateRequestDataAttributesToJSON, AppClipDefaultExperienceLocalizationCreateRequestDataFromJSON, AppClipDefaultExperienceLocalizationCreateRequestDataFromJSONTyped, AppClipDefaultExperienceLocalizationCreateRequestDataToJSON, AppClipDefaultExperienceLocalizationCreateRequestDataTypeEnum, AppClipDefaultExperienceLocalizationCreateRequestFromJSON, AppClipDefaultExperienceLocalizationCreateRequestFromJSONTyped, AppClipDefaultExperienceLocalizationCreateRequestToJSON, AppClipDefaultExperienceLocalizationFromJSON, AppClipDefaultExperienceLocalizationFromJSONTyped, AppClipDefaultExperienceLocalizationRelationshipsAppClipHeaderImageDataFromJSON, AppClipDefaultExperienceLocalizationRelationshipsAppClipHeaderImageDataFromJSONTyped, AppClipDefaultExperienceLocalizationRelationshipsAppClipHeaderImageDataToJSON, AppClipDefaultExperienceLocalizationRelationshipsAppClipHeaderImageDataTypeEnum, AppClipDefaultExperienceLocalizationRelationshipsAppClipHeaderImageFromJSON, AppClipDefaultExperienceLocalizationRelationshipsAppClipHeaderImageFromJSONTyped, AppClipDefaultExperienceLocalizationRelationshipsAppClipHeaderImageToJSON, AppClipDefaultExperienceLocalizationRelationshipsFromJSON, AppClipDefaultExperienceLocalizationRelationshipsFromJSONTyped, AppClipDefaultExperienceLocalizationRelationshipsToJSON, AppClipDefaultExperienceLocalizationResponseFromJSON, AppClipDefaultExperienceLocalizationResponseFromJSONTyped, AppClipDefaultExperienceLocalizationResponseToJSON, AppClipDefaultExperienceLocalizationToJSON, AppClipDefaultExperienceLocalizationTypeEnum, AppClipDefaultExperienceLocalizationUpdateRequestDataAttributesFromJSON, AppClipDefaultExperienceLocalizationUpdateRequestDataAttributesFromJSONTyped, AppClipDefaultExperienceLocalizationUpdateRequestDataAttributesToJSON, AppClipDefaultExperienceLocalizationUpdateRequestDataFromJSON, AppClipDefaultExperienceLocalizationUpdateRequestDataFromJSONTyped, AppClipDefaultExperienceLocalizationUpdateRequestDataToJSON, AppClipDefaultExperienceLocalizationUpdateRequestDataTypeEnum, AppClipDefaultExperienceLocalizationUpdateRequestFromJSON, AppClipDefaultExperienceLocalizationUpdateRequestFromJSONTyped, AppClipDefaultExperienceLocalizationUpdateRequestToJSON, AppClipDefaultExperienceLocalizationsApi, AppClipDefaultExperienceLocalizationsAppClipHeaderImageGetToOneRelatedFieldsAppClipDefaultExperienceLocalizationsEnum, AppClipDefaultExperienceLocalizationsAppClipHeaderImageGetToOneRelatedFieldsAppClipHeaderImagesEnum, AppClipDefaultExperienceLocalizationsAppClipHeaderImageGetToOneRelatedIncludeEnum, AppClipDefaultExperienceLocalizationsGetInstanceFieldsAppClipDefaultExperienceLocalizationsEnum, AppClipDefaultExperienceLocalizationsGetInstanceFieldsAppClipHeaderImagesEnum, AppClipDefaultExperienceLocalizationsGetInstanceIncludeEnum, AppClipDefaultExperienceLocalizationsResponseFromJSON, AppClipDefaultExperienceLocalizationsResponseFromJSONTyped, AppClipDefaultExperienceLocalizationsResponseIncludedInnerFromJSON, AppClipDefaultExperienceLocalizationsResponseIncludedInnerFromJSONTyped, AppClipDefaultExperienceLocalizationsResponseIncludedInnerToJSON, AppClipDefaultExperienceLocalizationsResponseToJSON, AppClipDefaultExperienceRelationshipsAppClipAppStoreReviewDetailDataFromJSON, AppClipDefaultExperienceRelationshipsAppClipAppStoreReviewDetailDataFromJSONTyped, AppClipDefaultExperienceRelationshipsAppClipAppStoreReviewDetailDataToJSON, AppClipDefaultExperienceRelationshipsAppClipAppStoreReviewDetailDataTypeEnum, AppClipDefaultExperienceRelationshipsAppClipAppStoreReviewDetailFromJSON, AppClipDefaultExperienceRelationshipsAppClipAppStoreReviewDetailFromJSONTyped, AppClipDefaultExperienceRelationshipsAppClipAppStoreReviewDetailToJSON, AppClipDefaultExperienceRelationshipsAppClipDefaultExperienceLocalizationsDataInnerFromJSON, AppClipDefaultExperienceRelationshipsAppClipDefaultExperienceLocalizationsDataInnerFromJSONTyped, AppClipDefaultExperienceRelationshipsAppClipDefaultExperienceLocalizationsDataInnerToJSON, AppClipDefaultExperienceRelationshipsAppClipDefaultExperienceLocalizationsDataInnerTypeEnum, AppClipDefaultExperienceRelationshipsAppClipDefaultExperienceLocalizationsFromJSON, AppClipDefaultExperienceRelationshipsAppClipDefaultExperienceLocalizationsFromJSONTyped, AppClipDefaultExperienceRelationshipsAppClipDefaultExperienceLocalizationsToJSON, AppClipDefaultExperienceRelationshipsFromJSON, AppClipDefaultExperienceRelationshipsFromJSONTyped, AppClipDefaultExperienceRelationshipsReleaseWithAppStoreVersionDataFromJSON, AppClipDefaultExperienceRelationshipsReleaseWithAppStoreVersionDataFromJSONTyped, AppClipDefaultExperienceRelationshipsReleaseWithAppStoreVersionDataToJSON, AppClipDefaultExperienceRelationshipsReleaseWithAppStoreVersionDataTypeEnum, AppClipDefaultExperienceRelationshipsReleaseWithAppStoreVersionFromJSON, AppClipDefaultExperienceRelationshipsReleaseWithAppStoreVersionFromJSONTyped, AppClipDefaultExperienceRelationshipsReleaseWithAppStoreVersionToJSON, AppClipDefaultExperienceRelationshipsToJSON, AppClipDefaultExperienceReleaseWithAppStoreVersionLinkageRequestFromJSON, AppClipDefaultExperienceReleaseWithAppStoreVersionLinkageRequestFromJSONTyped, AppClipDefaultExperienceReleaseWithAppStoreVersionLinkageRequestToJSON, AppClipDefaultExperienceReleaseWithAppStoreVersionLinkageResponseFromJSON, AppClipDefaultExperienceReleaseWithAppStoreVersionLinkageResponseFromJSONTyped, AppClipDefaultExperienceReleaseWithAppStoreVersionLinkageResponseToJSON, AppClipDefaultExperienceResponseFromJSON, AppClipDefaultExperienceResponseFromJSONTyped, AppClipDefaultExperienceResponseToJSON, AppClipDefaultExperienceToJSON, AppClipDefaultExperienceTypeEnum, AppClipDefaultExperienceUpdateRequestDataFromJSON, AppClipDefaultExperienceUpdateRequestDataFromJSONTyped, AppClipDefaultExperienceUpdateRequestDataRelationshipsFromJSON, AppClipDefaultExperienceUpdateRequestDataRelationshipsFromJSONTyped, AppClipDefaultExperienceUpdateRequestDataRelationshipsToJSON, AppClipDefaultExperienceUpdateRequestDataToJSON, AppClipDefaultExperienceUpdateRequestDataTypeEnum, AppClipDefaultExperienceUpdateRequestFromJSON, AppClipDefaultExperienceUpdateRequestFromJSONTyped, AppClipDefaultExperienceUpdateRequestToJSON, AppClipDefaultExperiencesApi, AppClipDefaultExperiencesAppClipAppStoreReviewDetailGetToOneRelatedFieldsAppClipAppStoreReviewDetailsEnum, AppClipDefaultExperiencesAppClipAppStoreReviewDetailGetToOneRelatedFieldsAppClipDefaultExperiencesEnum, AppClipDefaultExperiencesAppClipAppStoreReviewDetailGetToOneRelatedIncludeEnum, AppClipDefaultExperiencesAppClipDefaultExperienceLocalizationsGetToManyRelatedFieldsAppClipDefaultExperienceLocalizationsEnum, AppClipDefaultExperiencesAppClipDefaultExperienceLocalizationsGetToManyRelatedFieldsAppClipDefaultExperiencesEnum, AppClipDefaultExperiencesAppClipDefaultExperienceLocalizationsGetToManyRelatedFieldsAppClipHeaderImagesEnum, AppClipDefaultExperiencesAppClipDefaultExperienceLocalizationsGetToManyRelatedIncludeEnum, AppClipDefaultExperiencesGetInstanceFieldsAppClipAppStoreReviewDetailsEnum, AppClipDefaultExperiencesGetInstanceFieldsAppClipDefaultExperienceLocalizationsEnum, AppClipDefaultExperiencesGetInstanceFieldsAppClipDefaultExperiencesEnum, AppClipDefaultExperiencesGetInstanceFieldsAppStoreVersionsEnum, AppClipDefaultExperiencesGetInstanceIncludeEnum, AppClipDefaultExperiencesReleaseWithAppStoreVersionGetToOneRelatedFieldsAgeRatingDeclarationsEnum, AppClipDefaultExperiencesReleaseWithAppStoreVersionGetToOneRelatedFieldsAppClipDefaultExperiencesEnum, AppClipDefaultExperiencesReleaseWithAppStoreVersionGetToOneRelatedFieldsAppStoreReviewDetailsEnum, AppClipDefaultExperiencesReleaseWithAppStoreVersionGetToOneRelatedFieldsAppStoreVersionExperimentsEnum, AppClipDefaultExperiencesReleaseWithAppStoreVersionGetToOneRelatedFieldsAppStoreVersionLocalizationsEnum, AppClipDefaultExperiencesReleaseWithAppStoreVersionGetToOneRelatedFieldsAppStoreVersionPhasedReleasesEnum, AppClipDefaultExperiencesReleaseWithAppStoreVersionGetToOneRelatedFieldsAppStoreVersionSubmissionsEnum, AppClipDefaultExperiencesReleaseWithAppStoreVersionGetToOneRelatedFieldsAppStoreVersionsEnum, AppClipDefaultExperiencesReleaseWithAppStoreVersionGetToOneRelatedFieldsAppsEnum, AppClipDefaultExperiencesReleaseWithAppStoreVersionGetToOneRelatedFieldsBuildsEnum, AppClipDefaultExperiencesReleaseWithAppStoreVersionGetToOneRelatedFieldsRoutingAppCoveragesEnum, AppClipDefaultExperiencesReleaseWithAppStoreVersionGetToOneRelatedIncludeEnum, AppClipDefaultExperiencesResponseFromJSON, AppClipDefaultExperiencesResponseFromJSONTyped, AppClipDefaultExperiencesResponseIncludedInnerFromJSON, AppClipDefaultExperiencesResponseIncludedInnerFromJSONTyped, AppClipDefaultExperiencesResponseIncludedInnerToJSON, AppClipDefaultExperiencesResponseToJSON, AppClipDomainStatusAttributesDomainsInnerErrorCodeEnum, AppClipDomainStatusAttributesDomainsInnerFromJSON, AppClipDomainStatusAttributesDomainsInnerFromJSONTyped, AppClipDomainStatusAttributesDomainsInnerToJSON, AppClipDomainStatusAttributesFromJSON, AppClipDomainStatusAttributesFromJSONTyped, AppClipDomainStatusAttributesToJSON, AppClipDomainStatusFromJSON, AppClipDomainStatusFromJSONTyped, AppClipDomainStatusResponseFromJSON, AppClipDomainStatusResponseFromJSONTyped, AppClipDomainStatusResponseToJSON, AppClipDomainStatusToJSON, AppClipDomainStatusTypeEnum, AppClipFromJSON, AppClipFromJSONTyped, AppClipHeaderImageCreateRequestDataFromJSON, AppClipHeaderImageCreateRequestDataFromJSONTyped, AppClipHeaderImageCreateRequestDataRelationshipsAppClipDefaultExperienceLocalizationFromJSON, AppClipHeaderImageCreateRequestDataRelationshipsAppClipDefaultExperienceLocalizationFromJSONTyped, AppClipHeaderImageCreateRequestDataRelationshipsAppClipDefaultExperienceLocalizationToJSON, AppClipHeaderImageCreateRequestDataRelationshipsFromJSON, AppClipHeaderImageCreateRequestDataRelationshipsFromJSONTyped, AppClipHeaderImageCreateRequestDataRelationshipsToJSON, AppClipHeaderImageCreateRequestDataToJSON, AppClipHeaderImageCreateRequestDataTypeEnum, AppClipHeaderImageCreateRequestFromJSON, AppClipHeaderImageCreateRequestFromJSONTyped, AppClipHeaderImageCreateRequestToJSON, AppClipHeaderImageFromJSON, AppClipHeaderImageFromJSONTyped, AppClipHeaderImageRelationshipsAppClipDefaultExperienceLocalizationFromJSON, AppClipHeaderImageRelationshipsAppClipDefaultExperienceLocalizationFromJSONTyped, AppClipHeaderImageRelationshipsAppClipDefaultExperienceLocalizationToJSON, AppClipHeaderImageRelationshipsFromJSON, AppClipHeaderImageRelationshipsFromJSONTyped, AppClipHeaderImageRelationshipsToJSON, AppClipHeaderImageResponseFromJSON, AppClipHeaderImageResponseFromJSONTyped, AppClipHeaderImageResponseToJSON, AppClipHeaderImageToJSON, AppClipHeaderImageTypeEnum, AppClipHeaderImageUpdateRequestDataFromJSON, AppClipHeaderImageUpdateRequestDataFromJSONTyped, AppClipHeaderImageUpdateRequestDataToJSON, AppClipHeaderImageUpdateRequestDataTypeEnum, AppClipHeaderImageUpdateRequestFromJSON, AppClipHeaderImageUpdateRequestFromJSONTyped, AppClipHeaderImageUpdateRequestToJSON, AppClipHeaderImagesApi, AppClipHeaderImagesGetInstanceFieldsAppClipHeaderImagesEnum, AppClipHeaderImagesGetInstanceIncludeEnum, AppClipRelationshipsAppClipDefaultExperiencesFromJSON, AppClipRelationshipsAppClipDefaultExperiencesFromJSONTyped, AppClipRelationshipsAppClipDefaultExperiencesToJSON, AppClipRelationshipsAppDataFromJSON, AppClipRelationshipsAppDataFromJSONTyped, AppClipRelationshipsAppDataToJSON, AppClipRelationshipsAppDataTypeEnum, AppClipRelationshipsAppFromJSON, AppClipRelationshipsAppFromJSONTyped, AppClipRelationshipsAppToJSON, AppClipRelationshipsFromJSON, AppClipRelationshipsFromJSONTyped, AppClipRelationshipsToJSON, AppClipResponseFromJSON, AppClipResponseFromJSONTyped, AppClipResponseToJSON, AppClipToJSON, AppClipTypeEnum, AppClipsApi, AppClipsAppClipAdvancedExperiencesGetToManyRelatedFieldsAppClipAdvancedExperienceImagesEnum, AppClipsAppClipAdvancedExperiencesGetToManyRelatedFieldsAppClipAdvancedExperienceLocalizationsEnum, AppClipsAppClipAdvancedExperiencesGetToManyRelatedFieldsAppClipAdvancedExperiencesEnum, AppClipsAppClipAdvancedExperiencesGetToManyRelatedFieldsAppClipsEnum, AppClipsAppClipAdvancedExperiencesGetToManyRelatedFilterActionEnum, AppClipsAppClipAdvancedExperiencesGetToManyRelatedFilterPlaceStatusEnum, AppClipsAppClipAdvancedExperiencesGetToManyRelatedFilterStatusEnum, AppClipsAppClipAdvancedExperiencesGetToManyRelatedIncludeEnum, AppClipsAppClipDefaultExperiencesGetToManyRelatedFieldsAppClipAppStoreReviewDetailsEnum, AppClipsAppClipDefaultExperiencesGetToManyRelatedFieldsAppClipDefaultExperienceLocalizationsEnum, AppClipsAppClipDefaultExperiencesGetToManyRelatedFieldsAppClipDefaultExperiencesEnum, AppClipsAppClipDefaultExperiencesGetToManyRelatedFieldsAppClipsEnum, AppClipsAppClipDefaultExperiencesGetToManyRelatedFieldsAppStoreVersionsEnum, AppClipsAppClipDefaultExperiencesGetToManyRelatedIncludeEnum, AppClipsGetInstanceFieldsAppClipAdvancedExperiencesEnum, AppClipsGetInstanceFieldsAppClipDefaultExperiencesEnum, AppClipsGetInstanceFieldsAppClipsEnum, AppClipsGetInstanceIncludeEnum, AppClipsResponseFromJSON, AppClipsResponseFromJSONTyped, AppClipsResponseIncludedInnerFromJSON, AppClipsResponseIncludedInnerFromJSONTyped, AppClipsResponseIncludedInnerToJSON, AppClipsResponseToJSON, AppCustomProductPageAttributesFromJSON, AppCustomProductPageAttributesFromJSONTyped, AppCustomProductPageAttributesToJSON, AppCustomProductPageCreateRequestDataAttributesFromJSON, AppCustomProductPageCreateRequestDataAttributesFromJSONTyped, AppCustomProductPageCreateRequestDataAttributesToJSON, AppCustomProductPageCreateRequestDataFromJSON, AppCustomProductPageCreateRequestDataFromJSONTyped, AppCustomProductPageCreateRequestDataRelationshipsAppCustomProductPageVersionsFromJSON, AppCustomProductPageCreateRequestDataRelationshipsAppCustomProductPageVersionsFromJSONTyped, AppCustomProductPageCreateRequestDataRelationshipsAppCustomProductPageVersionsToJSON, AppCustomProductPageCreateRequestDataRelationshipsAppFromJSON, AppCustomProductPageCreateRequestDataRelationshipsAppFromJSONTyped, AppCustomProductPageCreateRequestDataRelationshipsAppToJSON, AppCustomProductPageCreateRequestDataRelationshipsFromJSON, AppCustomProductPageCreateRequestDataRelationshipsFromJSONTyped, AppCustomProductPageCreateRequestDataRelationshipsToJSON, AppCustomProductPageCreateRequestDataToJSON, AppCustomProductPageCreateRequestDataTypeEnum, AppCustomProductPageCreateRequestFromJSON, AppCustomProductPageCreateRequestFromJSONTyped, AppCustomProductPageCreateRequestIncludedInnerFromJSON, AppCustomProductPageCreateRequestIncludedInnerFromJSONTyped, AppCustomProductPageCreateRequestIncludedInnerToJSON, AppCustomProductPageCreateRequestToJSON, AppCustomProductPageFromJSON, AppCustomProductPageFromJSONTyped, AppCustomProductPageLocalizationAttributesFromJSON, AppCustomProductPageLocalizationAttributesFromJSONTyped, AppCustomProductPageLocalizationAttributesToJSON, AppCustomProductPageLocalizationCreateRequestDataFromJSON, AppCustomProductPageLocalizationCreateRequestDataFromJSONTyped, AppCustomProductPageLocalizationCreateRequestDataRelationshipsAppCustomProductPageVersionFromJSON, AppCustomProductPageLocalizationCreateRequestDataRelationshipsAppCustomProductPageVersionFromJSONTyped, AppCustomProductPageLocalizationCreateRequestDataRelationshipsAppCustomProductPageVersionToJSON, AppCustomProductPageLocalizationCreateRequestDataRelationshipsFromJSON, AppCustomProductPageLocalizationCreateRequestDataRelationshipsFromJSONTyped, AppCustomProductPageLocalizationCreateRequestDataRelationshipsToJSON, AppCustomProductPageLocalizationCreateRequestDataToJSON, AppCustomProductPageLocalizationCreateRequestDataTypeEnum, AppCustomProductPageLocalizationCreateRequestFromJSON, AppCustomProductPageLocalizationCreateRequestFromJSONTyped, AppCustomProductPageLocalizationCreateRequestToJSON, AppCustomProductPageLocalizationFromJSON, AppCustomProductPageLocalizationFromJSONTyped, AppCustomProductPageLocalizationInlineCreateAttributesFromJSON, AppCustomProductPageLocalizationInlineCreateAttributesFromJSONTyped, AppCustomProductPageLocalizationInlineCreateAttributesToJSON, AppCustomProductPageLocalizationInlineCreateFromJSON, AppCustomProductPageLocalizationInlineCreateFromJSONTyped, AppCustomProductPageLocalizationInlineCreateRelationshipsAppCustomProductPageVersionFromJSON, AppCustomProductPageLocalizationInlineCreateRelationshipsAppCustomProductPageVersionFromJSONTyped, AppCustomProductPageLocalizationInlineCreateRelationshipsAppCustomProductPageVersionToJSON, AppCustomProductPageLocalizationInlineCreateRelationshipsFromJSON, AppCustomProductPageLocalizationInlineCreateRelationshipsFromJSONTyped, AppCustomProductPageLocalizationInlineCreateRelationshipsToJSON, AppCustomProductPageLocalizationInlineCreateToJSON, AppCustomProductPageLocalizationInlineCreateTypeEnum, AppCustomProductPageLocalizationRelationshipsAppCustomProductPageVersionDataFromJSON, AppCustomProductPageLocalizationRelationshipsAppCustomProductPageVersionDataFromJSONTyped, AppCustomProductPageLocalizationRelationshipsAppCustomProductPageVersionDataToJSON, AppCustomProductPageLocalizationRelationshipsAppCustomProductPageVersionDataTypeEnum, AppCustomProductPageLocalizationRelationshipsAppCustomProductPageVersionFromJSON, AppCustomProductPageLocalizationRelationshipsAppCustomProductPageVersionFromJSONTyped, AppCustomProductPageLocalizationRelationshipsAppCustomProductPageVersionToJSON, AppCustomProductPageLocalizationRelationshipsAppPreviewSetsDataInnerFromJSON, AppCustomProductPageLocalizationRelationshipsAppPreviewSetsDataInnerFromJSONTyped, AppCustomProductPageLocalizationRelationshipsAppPreviewSetsDataInnerToJSON, AppCustomProductPageLocalizationRelationshipsAppPreviewSetsDataInnerTypeEnum, AppCustomProductPageLocalizationRelationshipsAppPreviewSetsFromJSON, AppCustomProductPageLocalizationRelationshipsAppPreviewSetsFromJSONTyped, AppCustomProductPageLocalizationRelationshipsAppPreviewSetsToJSON, AppCustomProductPageLocalizationRelationshipsAppScreenshotSetsDataInnerFromJSON, AppCustomProductPageLocalizationRelationshipsAppScreenshotSetsDataInnerFromJSONTyped, AppCustomProductPageLocalizationRelationshipsAppScreenshotSetsDataInnerToJSON, AppCustomProductPageLocalizationRelationshipsAppScreenshotSetsDataInnerTypeEnum, AppCustomProductPageLocalizationRelationshipsAppScreenshotSetsFromJSON, AppCustomProductPageLocalizationRelationshipsAppScreenshotSetsFromJSONTyped, AppCustomProductPageLocalizationRelationshipsAppScreenshotSetsToJSON, AppCustomProductPageLocalizationRelationshipsFromJSON, AppCustomProductPageLocalizationRelationshipsFromJSONTyped, AppCustomProductPageLocalizationRelationshipsToJSON, AppCustomProductPageLocalizationResponseFromJSON, AppCustomProductPageLocalizationResponseFromJSONTyped, AppCustomProductPageLocalizationResponseToJSON, AppCustomProductPageLocalizationToJSON, AppCustomProductPageLocalizationTypeEnum, AppCustomProductPageLocalizationUpdateRequestDataAttributesFromJSON, AppCustomProductPageLocalizationUpdateRequestDataAttributesFromJSONTyped, AppCustomProductPageLocalizationUpdateRequestDataAttributesToJSON, AppCustomProductPageLocalizationUpdateRequestDataFromJSON, AppCustomProductPageLocalizationUpdateRequestDataFromJSONTyped, AppCustomProductPageLocalizationUpdateRequestDataToJSON, AppCustomProductPageLocalizationUpdateRequestDataTypeEnum, AppCustomProductPageLocalizationUpdateRequestFromJSON, AppCustomProductPageLocalizationUpdateRequestFromJSONTyped, AppCustomProductPageLocalizationUpdateRequestToJSON, AppCustomProductPageLocalizationsApi, AppCustomProductPageLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppCustomProductPageLocalizationsEnum, AppCustomProductPageLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppPreviewSetsEnum, AppCustomProductPageLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppPreviewsEnum, AppCustomProductPageLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppStoreVersionExperimentTreatmentLocalizationsEnum, AppCustomProductPageLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppStoreVersionLocalizationsEnum, AppCustomProductPageLocalizationsAppPreviewSetsGetToManyRelatedFilterPreviewTypeEnum, AppCustomProductPageLocalizationsAppPreviewSetsGetToManyRelatedIncludeEnum, AppCustomProductPageLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppCustomProductPageLocalizationsEnum, AppCustomProductPageLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppScreenshotSetsEnum, AppCustomProductPageLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppScreenshotsEnum, AppCustomProductPageLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppStoreVersionExperimentTreatmentLocalizationsEnum, AppCustomProductPageLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppStoreVersionLocalizationsEnum, AppCustomProductPageLocalizationsAppScreenshotSetsGetToManyRelatedFilterScreenshotDisplayTypeEnum, AppCustomProductPageLocalizationsAppScreenshotSetsGetToManyRelatedIncludeEnum, AppCustomProductPageLocalizationsGetInstanceFieldsAppCustomProductPageLocalizationsEnum, AppCustomProductPageLocalizationsGetInstanceFieldsAppPreviewSetsEnum, AppCustomProductPageLocalizationsGetInstanceFieldsAppScreenshotSetsEnum, AppCustomProductPageLocalizationsGetInstanceIncludeEnum, AppCustomProductPageLocalizationsResponseFromJSON, AppCustomProductPageLocalizationsResponseFromJSONTyped, AppCustomProductPageLocalizationsResponseIncludedInnerFromJSON, AppCustomProductPageLocalizationsResponseIncludedInnerFromJSONTyped, AppCustomProductPageLocalizationsResponseIncludedInnerToJSON, AppCustomProductPageLocalizationsResponseToJSON, AppCustomProductPageRelationshipsAppCustomProductPageVersionsFromJSON, AppCustomProductPageRelationshipsAppCustomProductPageVersionsFromJSONTyped, AppCustomProductPageRelationshipsAppCustomProductPageVersionsToJSON, AppCustomProductPageRelationshipsFromJSON, AppCustomProductPageRelationshipsFromJSONTyped, AppCustomProductPageRelationshipsToJSON, AppCustomProductPageResponseFromJSON, AppCustomProductPageResponseFromJSONTyped, AppCustomProductPageResponseToJSON, AppCustomProductPageToJSON, AppCustomProductPageTypeEnum, AppCustomProductPageUpdateRequestDataAttributesFromJSON, AppCustomProductPageUpdateRequestDataAttributesFromJSONTyped, AppCustomProductPageUpdateRequestDataAttributesToJSON, AppCustomProductPageUpdateRequestDataFromJSON, AppCustomProductPageUpdateRequestDataFromJSONTyped, AppCustomProductPageUpdateRequestDataToJSON, AppCustomProductPageUpdateRequestDataTypeEnum, AppCustomProductPageUpdateRequestFromJSON, AppCustomProductPageUpdateRequestFromJSONTyped, AppCustomProductPageUpdateRequestToJSON, AppCustomProductPageVersionAttributesFromJSON, AppCustomProductPageVersionAttributesFromJSONTyped, AppCustomProductPageVersionAttributesStateEnum, AppCustomProductPageVersionAttributesToJSON, AppCustomProductPageVersionCreateRequestDataFromJSON, AppCustomProductPageVersionCreateRequestDataFromJSONTyped, AppCustomProductPageVersionCreateRequestDataRelationshipsAppCustomProductPageFromJSON, AppCustomProductPageVersionCreateRequestDataRelationshipsAppCustomProductPageFromJSONTyped, AppCustomProductPageVersionCreateRequestDataRelationshipsAppCustomProductPageToJSON, AppCustomProductPageVersionCreateRequestDataRelationshipsFromJSON, AppCustomProductPageVersionCreateRequestDataRelationshipsFromJSONTyped, AppCustomProductPageVersionCreateRequestDataRelationshipsToJSON, AppCustomProductPageVersionCreateRequestDataToJSON, AppCustomProductPageVersionCreateRequestDataTypeEnum, AppCustomProductPageVersionCreateRequestFromJSON, AppCustomProductPageVersionCreateRequestFromJSONTyped, AppCustomProductPageVersionCreateRequestToJSON, AppCustomProductPageVersionFromJSON, AppCustomProductPageVersionFromJSONTyped, AppCustomProductPageVersionInlineCreateFromJSON, AppCustomProductPageVersionInlineCreateFromJSONTyped, AppCustomProductPageVersionInlineCreateRelationshipsAppCustomProductPageFromJSON, AppCustomProductPageVersionInlineCreateRelationshipsAppCustomProductPageFromJSONTyped, AppCustomProductPageVersionInlineCreateRelationshipsAppCustomProductPageLocalizationsFromJSON, AppCustomProductPageVersionInlineCreateRelationshipsAppCustomProductPageLocalizationsFromJSONTyped, AppCustomProductPageVersionInlineCreateRelationshipsAppCustomProductPageLocalizationsToJSON, AppCustomProductPageVersionInlineCreateRelationshipsAppCustomProductPageToJSON, AppCustomProductPageVersionInlineCreateRelationshipsFromJSON, AppCustomProductPageVersionInlineCreateRelationshipsFromJSONTyped, AppCustomProductPageVersionInlineCreateRelationshipsToJSON, AppCustomProductPageVersionInlineCreateToJSON, AppCustomProductPageVersionInlineCreateTypeEnum, AppCustomProductPageVersionRelationshipsAppCustomProductPageDataFromJSON, AppCustomProductPageVersionRelationshipsAppCustomProductPageDataFromJSONTyped, AppCustomProductPageVersionRelationshipsAppCustomProductPageDataToJSON, AppCustomProductPageVersionRelationshipsAppCustomProductPageDataTypeEnum, AppCustomProductPageVersionRelationshipsAppCustomProductPageFromJSON, AppCustomProductPageVersionRelationshipsAppCustomProductPageFromJSONTyped, AppCustomProductPageVersionRelationshipsAppCustomProductPageLocalizationsDataInnerFromJSON, AppCustomProductPageVersionRelationshipsAppCustomProductPageLocalizationsDataInnerFromJSONTyped, AppCustomProductPageVersionRelationshipsAppCustomProductPageLocalizationsDataInnerToJSON, AppCustomProductPageVersionRelationshipsAppCustomProductPageLocalizationsDataInnerTypeEnum, AppCustomProductPageVersionRelationshipsAppCustomProductPageLocalizationsFromJSON, AppCustomProductPageVersionRelationshipsAppCustomProductPageLocalizationsFromJSONTyped, AppCustomProductPageVersionRelationshipsAppCustomProductPageLocalizationsToJSON, AppCustomProductPageVersionRelationshipsAppCustomProductPageToJSON, AppCustomProductPageVersionRelationshipsFromJSON, AppCustomProductPageVersionRelationshipsFromJSONTyped, AppCustomProductPageVersionRelationshipsToJSON, AppCustomProductPageVersionResponseFromJSON, AppCustomProductPageVersionResponseFromJSONTyped, AppCustomProductPageVersionResponseToJSON, AppCustomProductPageVersionToJSON, AppCustomProductPageVersionTypeEnum, AppCustomProductPageVersionsApi, AppCustomProductPageVersionsAppCustomProductPageLocalizationsGetToManyRelatedFieldsAppCustomProductPageLocalizationsEnum, AppCustomProductPageVersionsAppCustomProductPageLocalizationsGetToManyRelatedFieldsAppCustomProductPageVersionsEnum, AppCustomProductPageVersionsAppCustomProductPageLocalizationsGetToManyRelatedFieldsAppPreviewSetsEnum, AppCustomProductPageVersionsAppCustomProductPageLocalizationsGetToManyRelatedFieldsAppScreenshotSetsEnum, AppCustomProductPageVersionsAppCustomProductPageLocalizationsGetToManyRelatedIncludeEnum, AppCustomProductPageVersionsGetInstanceFieldsAppCustomProductPageLocalizationsEnum, AppCustomProductPageVersionsGetInstanceFieldsAppCustomProductPageVersionsEnum, AppCustomProductPageVersionsGetInstanceIncludeEnum, AppCustomProductPageVersionsResponseFromJSON, AppCustomProductPageVersionsResponseFromJSONTyped, AppCustomProductPageVersionsResponseIncludedInnerFromJSON, AppCustomProductPageVersionsResponseIncludedInnerFromJSONTyped, AppCustomProductPageVersionsResponseIncludedInnerToJSON, AppCustomProductPageVersionsResponseToJSON, AppCustomProductPagesApi, AppCustomProductPagesAppCustomProductPageVersionsGetToManyRelatedFieldsAppCustomProductPageLocalizationsEnum, AppCustomProductPagesAppCustomProductPageVersionsGetToManyRelatedFieldsAppCustomProductPageVersionsEnum, AppCustomProductPagesAppCustomProductPageVersionsGetToManyRelatedFieldsAppCustomProductPagesEnum, AppCustomProductPagesAppCustomProductPageVersionsGetToManyRelatedFilterStateEnum, AppCustomProductPagesAppCustomProductPageVersionsGetToManyRelatedIncludeEnum, AppCustomProductPagesGetInstanceFieldsAppCustomProductPageVersionsEnum, AppCustomProductPagesGetInstanceFieldsAppCustomProductPagesEnum, AppCustomProductPagesGetInstanceIncludeEnum, AppCustomProductPagesResponseFromJSON, AppCustomProductPagesResponseFromJSONTyped, AppCustomProductPagesResponseIncludedInnerFromJSON, AppCustomProductPagesResponseIncludedInnerFromJSONTyped, AppCustomProductPagesResponseIncludedInnerToJSON, AppCustomProductPagesResponseToJSON, AppEncryptionDeclarationAttributesFromJSON, AppEncryptionDeclarationAttributesFromJSONTyped, AppEncryptionDeclarationAttributesToJSON, AppEncryptionDeclarationBuildsLinkagesRequestFromJSON, AppEncryptionDeclarationBuildsLinkagesRequestFromJSONTyped, AppEncryptionDeclarationBuildsLinkagesRequestToJSON, AppEncryptionDeclarationDocumentAttributesFromJSON, AppEncryptionDeclarationDocumentAttributesFromJSONTyped, AppEncryptionDeclarationDocumentAttributesToJSON, AppEncryptionDeclarationDocumentCreateRequestDataFromJSON, AppEncryptionDeclarationDocumentCreateRequestDataFromJSONTyped, AppEncryptionDeclarationDocumentCreateRequestDataRelationshipsAppEncryptionDeclarationDataFromJSON, AppEncryptionDeclarationDocumentCreateRequestDataRelationshipsAppEncryptionDeclarationDataFromJSONTyped, AppEncryptionDeclarationDocumentCreateRequestDataRelationshipsAppEncryptionDeclarationDataToJSON, AppEncryptionDeclarationDocumentCreateRequestDataRelationshipsAppEncryptionDeclarationDataTypeEnum, AppEncryptionDeclarationDocumentCreateRequestDataRelationshipsAppEncryptionDeclarationFromJSON, AppEncryptionDeclarationDocumentCreateRequestDataRelationshipsAppEncryptionDeclarationFromJSONTyped, AppEncryptionDeclarationDocumentCreateRequestDataRelationshipsAppEncryptionDeclarationToJSON, AppEncryptionDeclarationDocumentCreateRequestDataRelationshipsFromJSON, AppEncryptionDeclarationDocumentCreateRequestDataRelationshipsFromJSONTyped, AppEncryptionDeclarationDocumentCreateRequestDataRelationshipsToJSON, AppEncryptionDeclarationDocumentCreateRequestDataToJSON, AppEncryptionDeclarationDocumentCreateRequestDataTypeEnum, AppEncryptionDeclarationDocumentCreateRequestFromJSON, AppEncryptionDeclarationDocumentCreateRequestFromJSONTyped, AppEncryptionDeclarationDocumentCreateRequestToJSON, AppEncryptionDeclarationDocumentFromJSON, AppEncryptionDeclarationDocumentFromJSONTyped, AppEncryptionDeclarationDocumentResponseFromJSON, AppEncryptionDeclarationDocumentResponseFromJSONTyped, AppEncryptionDeclarationDocumentResponseToJSON, AppEncryptionDeclarationDocumentToJSON, AppEncryptionDeclarationDocumentTypeEnum, AppEncryptionDeclarationDocumentUpdateRequestDataFromJSON, AppEncryptionDeclarationDocumentUpdateRequestDataFromJSONTyped, AppEncryptionDeclarationDocumentUpdateRequestDataToJSON, AppEncryptionDeclarationDocumentUpdateRequestDataTypeEnum, AppEncryptionDeclarationDocumentUpdateRequestFromJSON, AppEncryptionDeclarationDocumentUpdateRequestFromJSONTyped, AppEncryptionDeclarationDocumentUpdateRequestToJSON, AppEncryptionDeclarationDocumentsApi, AppEncryptionDeclarationDocumentsGetInstanceFieldsAppEncryptionDeclarationDocumentsEnum, AppEncryptionDeclarationFromJSON, AppEncryptionDeclarationFromJSONTyped, AppEncryptionDeclarationRelationshipsAppEncryptionDeclarationDocumentDataFromJSON, AppEncryptionDeclarationRelationshipsAppEncryptionDeclarationDocumentDataFromJSONTyped, AppEncryptionDeclarationRelationshipsAppEncryptionDeclarationDocumentDataToJSON, AppEncryptionDeclarationRelationshipsAppEncryptionDeclarationDocumentDataTypeEnum, AppEncryptionDeclarationRelationshipsAppEncryptionDeclarationDocumentFromJSON, AppEncryptionDeclarationRelationshipsAppEncryptionDeclarationDocumentFromJSONTyped, AppEncryptionDeclarationRelationshipsAppEncryptionDeclarationDocumentToJSON, AppEncryptionDeclarationRelationshipsBuildsDataInnerFromJSON, AppEncryptionDeclarationRelationshipsBuildsDataInnerFromJSONTyped, AppEncryptionDeclarationRelationshipsBuildsDataInnerToJSON, AppEncryptionDeclarationRelationshipsBuildsDataInnerTypeEnum, AppEncryptionDeclarationRelationshipsBuildsFromJSON, AppEncryptionDeclarationRelationshipsBuildsFromJSONTyped, AppEncryptionDeclarationRelationshipsBuildsToJSON, AppEncryptionDeclarationRelationshipsFromJSON, AppEncryptionDeclarationRelationshipsFromJSONTyped, AppEncryptionDeclarationRelationshipsToJSON, AppEncryptionDeclarationResponseFromJSON, AppEncryptionDeclarationResponseFromJSONTyped, AppEncryptionDeclarationResponseToJSON, AppEncryptionDeclarationState, AppEncryptionDeclarationStateFromJSON, AppEncryptionDeclarationStateFromJSONTyped, AppEncryptionDeclarationStateToJSON, AppEncryptionDeclarationToJSON, AppEncryptionDeclarationTypeEnum, AppEncryptionDeclarationsApi, AppEncryptionDeclarationsAppEncryptionDeclarationDocumentGetToOneRelatedFieldsAppEncryptionDeclarationDocumentsEnum, AppEncryptionDeclarationsAppGetToOneRelatedFieldsAppsEnum, AppEncryptionDeclarationsGetCollectionFieldsAppEncryptionDeclarationDocumentsEnum, AppEncryptionDeclarationsGetCollectionFieldsAppEncryptionDeclarationsEnum, AppEncryptionDeclarationsGetCollectionFieldsAppsEnum, AppEncryptionDeclarationsGetCollectionFilterPlatformEnum, AppEncryptionDeclarationsGetCollectionIncludeEnum, AppEncryptionDeclarationsGetInstanceFieldsAppEncryptionDeclarationDocumentsEnum, AppEncryptionDeclarationsGetInstanceFieldsAppEncryptionDeclarationsEnum, AppEncryptionDeclarationsGetInstanceFieldsAppsEnum, AppEncryptionDeclarationsGetInstanceIncludeEnum, AppEncryptionDeclarationsResponseFromJSON, AppEncryptionDeclarationsResponseFromJSONTyped, AppEncryptionDeclarationsResponseIncludedInnerFromJSON, AppEncryptionDeclarationsResponseIncludedInnerFromJSONTyped, AppEncryptionDeclarationsResponseIncludedInnerToJSON, AppEncryptionDeclarationsResponseToJSON, AppEventAssetType, AppEventAssetTypeFromJSON, AppEventAssetTypeFromJSONTyped, AppEventAssetTypeToJSON, AppEventAttributesBadgeEnum, AppEventAttributesEventStateEnum, AppEventAttributesFromJSON, AppEventAttributesFromJSONTyped, AppEventAttributesPriorityEnum, AppEventAttributesPurchaseRequirementEnum, AppEventAttributesPurposeEnum, AppEventAttributesTerritorySchedulesInnerFromJSON, AppEventAttributesTerritorySchedulesInnerFromJSONTyped, AppEventAttributesTerritorySchedulesInnerToJSON, AppEventAttributesToJSON, AppEventCreateRequestDataAttributesBadgeEnum, AppEventCreateRequestDataAttributesFromJSON, AppEventCreateRequestDataAttributesFromJSONTyped, AppEventCreateRequestDataAttributesPriorityEnum, AppEventCreateRequestDataAttributesPurchaseRequirementEnum, AppEventCreateRequestDataAttributesPurposeEnum, AppEventCreateRequestDataAttributesToJSON, AppEventCreateRequestDataFromJSON, AppEventCreateRequestDataFromJSONTyped, AppEventCreateRequestDataRelationshipsFromJSON, AppEventCreateRequestDataRelationshipsFromJSONTyped, AppEventCreateRequestDataRelationshipsToJSON, AppEventCreateRequestDataToJSON, AppEventCreateRequestDataTypeEnum, AppEventCreateRequestFromJSON, AppEventCreateRequestFromJSONTyped, AppEventCreateRequestToJSON, AppEventFromJSON, AppEventFromJSONTyped, AppEventLocalizationAttributesFromJSON, AppEventLocalizationAttributesFromJSONTyped, AppEventLocalizationAttributesToJSON, AppEventLocalizationCreateRequestDataAttributesFromJSON, AppEventLocalizationCreateRequestDataAttributesFromJSONTyped, AppEventLocalizationCreateRequestDataAttributesToJSON, AppEventLocalizationCreateRequestDataFromJSON, AppEventLocalizationCreateRequestDataFromJSONTyped, AppEventLocalizationCreateRequestDataRelationshipsAppEventFromJSON, AppEventLocalizationCreateRequestDataRelationshipsAppEventFromJSONTyped, AppEventLocalizationCreateRequestDataRelationshipsAppEventToJSON, AppEventLocalizationCreateRequestDataRelationshipsFromJSON, AppEventLocalizationCreateRequestDataRelationshipsFromJSONTyped, AppEventLocalizationCreateRequestDataRelationshipsToJSON, AppEventLocalizationCreateRequestDataToJSON, AppEventLocalizationCreateRequestDataTypeEnum, AppEventLocalizationCreateRequestFromJSON, AppEventLocalizationCreateRequestFromJSONTyped, AppEventLocalizationCreateRequestToJSON, AppEventLocalizationFromJSON, AppEventLocalizationFromJSONTyped, AppEventLocalizationRelationshipsAppEventDataFromJSON, AppEventLocalizationRelationshipsAppEventDataFromJSONTyped, AppEventLocalizationRelationshipsAppEventDataToJSON, AppEventLocalizationRelationshipsAppEventDataTypeEnum, AppEventLocalizationRelationshipsAppEventFromJSON, AppEventLocalizationRelationshipsAppEventFromJSONTyped, AppEventLocalizationRelationshipsAppEventScreenshotsDataInnerFromJSON, AppEventLocalizationRelationshipsAppEventScreenshotsDataInnerFromJSONTyped, AppEventLocalizationRelationshipsAppEventScreenshotsDataInnerToJSON, AppEventLocalizationRelationshipsAppEventScreenshotsDataInnerTypeEnum, AppEventLocalizationRelationshipsAppEventScreenshotsFromJSON, AppEventLocalizationRelationshipsAppEventScreenshotsFromJSONTyped, AppEventLocalizationRelationshipsAppEventScreenshotsToJSON, AppEventLocalizationRelationshipsAppEventToJSON, AppEventLocalizationRelationshipsAppEventVideoClipsDataInnerFromJSON, AppEventLocalizationRelationshipsAppEventVideoClipsDataInnerFromJSONTyped, AppEventLocalizationRelationshipsAppEventVideoClipsDataInnerToJSON, AppEventLocalizationRelationshipsAppEventVideoClipsDataInnerTypeEnum, AppEventLocalizationRelationshipsAppEventVideoClipsFromJSON, AppEventLocalizationRelationshipsAppEventVideoClipsFromJSONTyped, AppEventLocalizationRelationshipsAppEventVideoClipsToJSON, AppEventLocalizationRelationshipsFromJSON, AppEventLocalizationRelationshipsFromJSONTyped, AppEventLocalizationRelationshipsToJSON, AppEventLocalizationResponseFromJSON, AppEventLocalizationResponseFromJSONTyped, AppEventLocalizationResponseToJSON, AppEventLocalizationToJSON, AppEventLocalizationTypeEnum, AppEventLocalizationUpdateRequestDataAttributesFromJSON, AppEventLocalizationUpdateRequestDataAttributesFromJSONTyped, AppEventLocalizationUpdateRequestDataAttributesToJSON, AppEventLocalizationUpdateRequestDataFromJSON, AppEventLocalizationUpdateRequestDataFromJSONTyped, AppEventLocalizationUpdateRequestDataToJSON, AppEventLocalizationUpdateRequestDataTypeEnum, AppEventLocalizationUpdateRequestFromJSON, AppEventLocalizationUpdateRequestFromJSONTyped, AppEventLocalizationUpdateRequestToJSON, AppEventLocalizationsApi, AppEventLocalizationsAppEventScreenshotsGetToManyRelatedFieldsAppEventLocalizationsEnum, AppEventLocalizationsAppEventScreenshotsGetToManyRelatedFieldsAppEventScreenshotsEnum, AppEventLocalizationsAppEventScreenshotsGetToManyRelatedIncludeEnum, AppEventLocalizationsAppEventVideoClipsGetToManyRelatedFieldsAppEventLocalizationsEnum, AppEventLocalizationsAppEventVideoClipsGetToManyRelatedFieldsAppEventVideoClipsEnum, AppEventLocalizationsAppEventVideoClipsGetToManyRelatedIncludeEnum, AppEventLocalizationsGetInstanceFieldsAppEventLocalizationsEnum, AppEventLocalizationsGetInstanceFieldsAppEventScreenshotsEnum, AppEventLocalizationsGetInstanceFieldsAppEventVideoClipsEnum, AppEventLocalizationsGetInstanceIncludeEnum, AppEventLocalizationsResponseFromJSON, AppEventLocalizationsResponseFromJSONTyped, AppEventLocalizationsResponseIncludedInnerFromJSON, AppEventLocalizationsResponseIncludedInnerFromJSONTyped, AppEventLocalizationsResponseIncludedInnerToJSON, AppEventLocalizationsResponseToJSON, AppEventRelationshipsFromJSON, AppEventRelationshipsFromJSONTyped, AppEventRelationshipsLocalizationsFromJSON, AppEventRelationshipsLocalizationsFromJSONTyped, AppEventRelationshipsLocalizationsToJSON, AppEventRelationshipsToJSON, AppEventResponseFromJSON, AppEventResponseFromJSONTyped, AppEventResponseToJSON, AppEventScreenshotAttributesFromJSON, AppEventScreenshotAttributesFromJSONTyped, AppEventScreenshotAttributesToJSON, AppEventScreenshotCreateRequestDataAttributesFromJSON, AppEventScreenshotCreateRequestDataAttributesFromJSONTyped, AppEventScreenshotCreateRequestDataAttributesToJSON, AppEventScreenshotCreateRequestDataFromJSON, AppEventScreenshotCreateRequestDataFromJSONTyped, AppEventScreenshotCreateRequestDataRelationshipsAppEventLocalizationFromJSON, AppEventScreenshotCreateRequestDataRelationshipsAppEventLocalizationFromJSONTyped, AppEventScreenshotCreateRequestDataRelationshipsAppEventLocalizationToJSON, AppEventScreenshotCreateRequestDataRelationshipsFromJSON, AppEventScreenshotCreateRequestDataRelationshipsFromJSONTyped, AppEventScreenshotCreateRequestDataRelationshipsToJSON, AppEventScreenshotCreateRequestDataToJSON, AppEventScreenshotCreateRequestDataTypeEnum, AppEventScreenshotCreateRequestFromJSON, AppEventScreenshotCreateRequestFromJSONTyped, AppEventScreenshotCreateRequestToJSON, AppEventScreenshotFromJSON, AppEventScreenshotFromJSONTyped, AppEventScreenshotRelationshipsAppEventLocalizationDataFromJSON, AppEventScreenshotRelationshipsAppEventLocalizationDataFromJSONTyped, AppEventScreenshotRelationshipsAppEventLocalizationDataToJSON, AppEventScreenshotRelationshipsAppEventLocalizationDataTypeEnum, AppEventScreenshotRelationshipsAppEventLocalizationFromJSON, AppEventScreenshotRelationshipsAppEventLocalizationFromJSONTyped, AppEventScreenshotRelationshipsAppEventLocalizationToJSON, AppEventScreenshotRelationshipsFromJSON, AppEventScreenshotRelationshipsFromJSONTyped, AppEventScreenshotRelationshipsToJSON, AppEventScreenshotResponseFromJSON, AppEventScreenshotResponseFromJSONTyped, AppEventScreenshotResponseToJSON, AppEventScreenshotToJSON, AppEventScreenshotTypeEnum, AppEventScreenshotUpdateRequestDataAttributesFromJSON, AppEventScreenshotUpdateRequestDataAttributesFromJSONTyped, AppEventScreenshotUpdateRequestDataAttributesToJSON, AppEventScreenshotUpdateRequestDataFromJSON, AppEventScreenshotUpdateRequestDataFromJSONTyped, AppEventScreenshotUpdateRequestDataToJSON, AppEventScreenshotUpdateRequestDataTypeEnum, AppEventScreenshotUpdateRequestFromJSON, AppEventScreenshotUpdateRequestFromJSONTyped, AppEventScreenshotUpdateRequestToJSON, AppEventScreenshotsApi, AppEventScreenshotsGetInstanceFieldsAppEventScreenshotsEnum, AppEventScreenshotsGetInstanceIncludeEnum, AppEventScreenshotsResponseFromJSON, AppEventScreenshotsResponseFromJSONTyped, AppEventScreenshotsResponseToJSON, AppEventToJSON, AppEventTypeEnum, AppEventUpdateRequestDataAttributesBadgeEnum, AppEventUpdateRequestDataAttributesFromJSON, AppEventUpdateRequestDataAttributesFromJSONTyped, AppEventUpdateRequestDataAttributesPriorityEnum, AppEventUpdateRequestDataAttributesPurchaseRequirementEnum, AppEventUpdateRequestDataAttributesPurposeEnum, AppEventUpdateRequestDataAttributesToJSON, AppEventUpdateRequestDataFromJSON, AppEventUpdateRequestDataFromJSONTyped, AppEventUpdateRequestDataToJSON, AppEventUpdateRequestDataTypeEnum, AppEventUpdateRequestFromJSON, AppEventUpdateRequestFromJSONTyped, AppEventUpdateRequestToJSON, AppEventVideoClipAttributesFromJSON, AppEventVideoClipAttributesFromJSONTyped, AppEventVideoClipAttributesToJSON, AppEventVideoClipCreateRequestDataAttributesFromJSON, AppEventVideoClipCreateRequestDataAttributesFromJSONTyped, AppEventVideoClipCreateRequestDataAttributesToJSON, AppEventVideoClipCreateRequestDataFromJSON, AppEventVideoClipCreateRequestDataFromJSONTyped, AppEventVideoClipCreateRequestDataToJSON, AppEventVideoClipCreateRequestDataTypeEnum, AppEventVideoClipCreateRequestFromJSON, AppEventVideoClipCreateRequestFromJSONTyped, AppEventVideoClipCreateRequestToJSON, AppEventVideoClipFromJSON, AppEventVideoClipFromJSONTyped, AppEventVideoClipResponseFromJSON, AppEventVideoClipResponseFromJSONTyped, AppEventVideoClipResponseToJSON, AppEventVideoClipToJSON, AppEventVideoClipTypeEnum, AppEventVideoClipUpdateRequestDataAttributesFromJSON, AppEventVideoClipUpdateRequestDataAttributesFromJSONTyped, AppEventVideoClipUpdateRequestDataAttributesToJSON, AppEventVideoClipUpdateRequestDataFromJSON, AppEventVideoClipUpdateRequestDataFromJSONTyped, AppEventVideoClipUpdateRequestDataToJSON, AppEventVideoClipUpdateRequestDataTypeEnum, AppEventVideoClipUpdateRequestFromJSON, AppEventVideoClipUpdateRequestFromJSONTyped, AppEventVideoClipUpdateRequestToJSON, AppEventVideoClipsApi, AppEventVideoClipsGetInstanceFieldsAppEventVideoClipsEnum, AppEventVideoClipsGetInstanceIncludeEnum, AppEventVideoClipsResponseFromJSON, AppEventVideoClipsResponseFromJSONTyped, AppEventVideoClipsResponseToJSON, AppEventsApi, AppEventsGetInstanceFieldsAppEventLocalizationsEnum, AppEventsGetInstanceFieldsAppEventsEnum, AppEventsGetInstanceIncludeEnum, AppEventsLocalizationsGetToManyRelatedFieldsAppEventLocalizationsEnum, AppEventsLocalizationsGetToManyRelatedFieldsAppEventScreenshotsEnum, AppEventsLocalizationsGetToManyRelatedFieldsAppEventVideoClipsEnum, AppEventsLocalizationsGetToManyRelatedFieldsAppEventsEnum, AppEventsLocalizationsGetToManyRelatedIncludeEnum, AppEventsResponseFromJSON, AppEventsResponseFromJSONTyped, AppEventsResponseToJSON, AppFromJSON, AppFromJSONTyped, AppInfoAttributesBrazilAgeRatingV2Enum, AppInfoAttributesFromJSON, AppInfoAttributesFromJSONTyped, AppInfoAttributesToJSON, AppInfoFromJSON, AppInfoFromJSONTyped, AppInfoLocalizationAttributesFromJSON, AppInfoLocalizationAttributesFromJSONTyped, AppInfoLocalizationAttributesToJSON, AppInfoLocalizationCreateRequestDataAttributesFromJSON, AppInfoLocalizationCreateRequestDataAttributesFromJSONTyped, AppInfoLocalizationCreateRequestDataAttributesToJSON, AppInfoLocalizationCreateRequestDataFromJSON, AppInfoLocalizationCreateRequestDataFromJSONTyped, AppInfoLocalizationCreateRequestDataRelationshipsAppInfoFromJSON, AppInfoLocalizationCreateRequestDataRelationshipsAppInfoFromJSONTyped, AppInfoLocalizationCreateRequestDataRelationshipsAppInfoToJSON, AppInfoLocalizationCreateRequestDataRelationshipsFromJSON, AppInfoLocalizationCreateRequestDataRelationshipsFromJSONTyped, AppInfoLocalizationCreateRequestDataRelationshipsToJSON, AppInfoLocalizationCreateRequestDataToJSON, AppInfoLocalizationCreateRequestDataTypeEnum, AppInfoLocalizationCreateRequestFromJSON, AppInfoLocalizationCreateRequestFromJSONTyped, AppInfoLocalizationCreateRequestToJSON, AppInfoLocalizationFromJSON, AppInfoLocalizationFromJSONTyped, AppInfoLocalizationRelationshipsAppInfoDataFromJSON, AppInfoLocalizationRelationshipsAppInfoDataFromJSONTyped, AppInfoLocalizationRelationshipsAppInfoDataToJSON, AppInfoLocalizationRelationshipsAppInfoDataTypeEnum, AppInfoLocalizationRelationshipsAppInfoFromJSON, AppInfoLocalizationRelationshipsAppInfoFromJSONTyped, AppInfoLocalizationRelationshipsAppInfoToJSON, AppInfoLocalizationRelationshipsFromJSON, AppInfoLocalizationRelationshipsFromJSONTyped, AppInfoLocalizationRelationshipsToJSON, AppInfoLocalizationResponseFromJSON, AppInfoLocalizationResponseFromJSONTyped, AppInfoLocalizationResponseToJSON, AppInfoLocalizationToJSON, AppInfoLocalizationTypeEnum, AppInfoLocalizationUpdateRequestDataAttributesFromJSON, AppInfoLocalizationUpdateRequestDataAttributesFromJSONTyped, AppInfoLocalizationUpdateRequestDataAttributesToJSON, AppInfoLocalizationUpdateRequestDataFromJSON, AppInfoLocalizationUpdateRequestDataFromJSONTyped, AppInfoLocalizationUpdateRequestDataToJSON, AppInfoLocalizationUpdateRequestDataTypeEnum, AppInfoLocalizationUpdateRequestFromJSON, AppInfoLocalizationUpdateRequestFromJSONTyped, AppInfoLocalizationUpdateRequestToJSON, AppInfoLocalizationsApi, AppInfoLocalizationsGetInstanceFieldsAppInfoLocalizationsEnum, AppInfoLocalizationsGetInstanceIncludeEnum, AppInfoLocalizationsResponseFromJSON, AppInfoLocalizationsResponseFromJSONTyped, AppInfoLocalizationsResponseToJSON, AppInfoRelationshipsAgeRatingDeclarationDataFromJSON, AppInfoRelationshipsAgeRatingDeclarationDataFromJSONTyped, AppInfoRelationshipsAgeRatingDeclarationDataToJSON, AppInfoRelationshipsAgeRatingDeclarationDataTypeEnum, AppInfoRelationshipsAgeRatingDeclarationFromJSON, AppInfoRelationshipsAgeRatingDeclarationFromJSONTyped, AppInfoRelationshipsAgeRatingDeclarationToJSON, AppInfoRelationshipsAppInfoLocalizationsDataInnerFromJSON, AppInfoRelationshipsAppInfoLocalizationsDataInnerFromJSONTyped, AppInfoRelationshipsAppInfoLocalizationsDataInnerToJSON, AppInfoRelationshipsAppInfoLocalizationsDataInnerTypeEnum, AppInfoRelationshipsAppInfoLocalizationsFromJSON, AppInfoRelationshipsAppInfoLocalizationsFromJSONTyped, AppInfoRelationshipsAppInfoLocalizationsToJSON, AppInfoRelationshipsFromJSON, AppInfoRelationshipsFromJSONTyped, AppInfoRelationshipsToJSON, AppInfoResponseFromJSON, AppInfoResponseFromJSONTyped, AppInfoResponseToJSON, AppInfoToJSON, AppInfoTypeEnum, AppInfoUpdateRequestDataFromJSON, AppInfoUpdateRequestDataFromJSONTyped, AppInfoUpdateRequestDataRelationshipsFromJSON, AppInfoUpdateRequestDataRelationshipsFromJSONTyped, AppInfoUpdateRequestDataRelationshipsPrimaryCategoryFromJSON, AppInfoUpdateRequestDataRelationshipsPrimaryCategoryFromJSONTyped, AppInfoUpdateRequestDataRelationshipsPrimaryCategoryToJSON, AppInfoUpdateRequestDataRelationshipsToJSON, AppInfoUpdateRequestDataToJSON, AppInfoUpdateRequestDataTypeEnum, AppInfoUpdateRequestFromJSON, AppInfoUpdateRequestFromJSONTyped, AppInfoUpdateRequestToJSON, AppInfosAgeRatingDeclarationGetToOneRelatedFieldsAgeRatingDeclarationsEnum, AppInfosApi, AppInfosAppInfoLocalizationsGetToManyRelatedFieldsAppInfoLocalizationsEnum, AppInfosAppInfoLocalizationsGetToManyRelatedFieldsAppInfosEnum, AppInfosAppInfoLocalizationsGetToManyRelatedIncludeEnum, AppInfosGetInstanceFieldsAgeRatingDeclarationsEnum, AppInfosGetInstanceFieldsAppCategoriesEnum, AppInfosGetInstanceFieldsAppInfoLocalizationsEnum, AppInfosGetInstanceFieldsAppInfosEnum, AppInfosGetInstanceIncludeEnum, AppInfosPrimaryCategoryGetToOneRelatedFieldsAppCategoriesEnum, AppInfosPrimaryCategoryGetToOneRelatedIncludeEnum, AppInfosPrimarySubcategoryOneGetToOneRelatedFieldsAppCategoriesEnum, AppInfosPrimarySubcategoryOneGetToOneRelatedIncludeEnum, AppInfosPrimarySubcategoryTwoGetToOneRelatedFieldsAppCategoriesEnum, AppInfosPrimarySubcategoryTwoGetToOneRelatedIncludeEnum, AppInfosResponseFromJSON, AppInfosResponseFromJSONTyped, AppInfosResponseIncludedInnerFromJSON, AppInfosResponseIncludedInnerFromJSONTyped, AppInfosResponseIncludedInnerToJSON, AppInfosResponseToJSON, AppInfosSecondaryCategoryGetToOneRelatedFieldsAppCategoriesEnum, AppInfosSecondaryCategoryGetToOneRelatedIncludeEnum, AppInfosSecondarySubcategoryOneGetToOneRelatedFieldsAppCategoriesEnum, AppInfosSecondarySubcategoryOneGetToOneRelatedIncludeEnum, AppInfosSecondarySubcategoryTwoGetToOneRelatedFieldsAppCategoriesEnum, AppInfosSecondarySubcategoryTwoGetToOneRelatedIncludeEnum, AppMediaAssetStateFromJSON, AppMediaAssetStateFromJSONTyped, AppMediaAssetStateStateEnum, AppMediaAssetStateToJSON, AppMediaStateErrorFromJSON, AppMediaStateErrorFromJSONTyped, AppMediaStateErrorToJSON, AppPreOrderAttributesFromJSON, AppPreOrderAttributesFromJSONTyped, AppPreOrderAttributesToJSON, AppPreOrderCreateRequestDataAttributesFromJSON, AppPreOrderCreateRequestDataAttributesFromJSONTyped, AppPreOrderCreateRequestDataAttributesToJSON, AppPreOrderCreateRequestDataFromJSON, AppPreOrderCreateRequestDataFromJSONTyped, AppPreOrderCreateRequestDataToJSON, AppPreOrderCreateRequestDataTypeEnum, AppPreOrderCreateRequestFromJSON, AppPreOrderCreateRequestFromJSONTyped, AppPreOrderCreateRequestToJSON, AppPreOrderFromJSON, AppPreOrderFromJSONTyped, AppPreOrderRelationshipsFromJSON, AppPreOrderRelationshipsFromJSONTyped, AppPreOrderRelationshipsToJSON, AppPreOrderResponseFromJSON, AppPreOrderResponseFromJSONTyped, AppPreOrderResponseToJSON, AppPreOrderToJSON, AppPreOrderTypeEnum, AppPreOrderUpdateRequestDataFromJSON, AppPreOrderUpdateRequestDataFromJSONTyped, AppPreOrderUpdateRequestDataToJSON, AppPreOrderUpdateRequestDataTypeEnum, AppPreOrderUpdateRequestFromJSON, AppPreOrderUpdateRequestFromJSONTyped, AppPreOrderUpdateRequestToJSON, AppPreOrdersApi, AppPreOrdersGetInstanceFieldsAppPreOrdersEnum, AppPreOrdersGetInstanceIncludeEnum, AppPreviewAttributesFromJSON, AppPreviewAttributesFromJSONTyped, AppPreviewAttributesToJSON, AppPreviewCreateRequestDataAttributesFromJSON, AppPreviewCreateRequestDataAttributesFromJSONTyped, AppPreviewCreateRequestDataAttributesToJSON, AppPreviewCreateRequestDataFromJSON, AppPreviewCreateRequestDataFromJSONTyped, AppPreviewCreateRequestDataRelationshipsAppPreviewSetFromJSON, AppPreviewCreateRequestDataRelationshipsAppPreviewSetFromJSONTyped, AppPreviewCreateRequestDataRelationshipsAppPreviewSetToJSON, AppPreviewCreateRequestDataRelationshipsFromJSON, AppPreviewCreateRequestDataRelationshipsFromJSONTyped, AppPreviewCreateRequestDataRelationshipsToJSON, AppPreviewCreateRequestDataToJSON, AppPreviewCreateRequestDataTypeEnum, AppPreviewCreateRequestFromJSON, AppPreviewCreateRequestFromJSONTyped, AppPreviewCreateRequestToJSON, AppPreviewFromJSON, AppPreviewFromJSONTyped, AppPreviewRelationshipsAppPreviewSetFromJSON, AppPreviewRelationshipsAppPreviewSetFromJSONTyped, AppPreviewRelationshipsAppPreviewSetToJSON, AppPreviewRelationshipsFromJSON, AppPreviewRelationshipsFromJSONTyped, AppPreviewRelationshipsToJSON, AppPreviewResponseFromJSON, AppPreviewResponseFromJSONTyped, AppPreviewResponseToJSON, AppPreviewSetAppPreviewsLinkagesRequestFromJSON, AppPreviewSetAppPreviewsLinkagesRequestFromJSONTyped, AppPreviewSetAppPreviewsLinkagesRequestToJSON, AppPreviewSetAppPreviewsLinkagesResponseFromJSON, AppPreviewSetAppPreviewsLinkagesResponseFromJSONTyped, AppPreviewSetAppPreviewsLinkagesResponseToJSON, AppPreviewSetAttributesFromJSON, AppPreviewSetAttributesFromJSONTyped, AppPreviewSetAttributesToJSON, AppPreviewSetCreateRequestDataAttributesFromJSON, AppPreviewSetCreateRequestDataAttributesFromJSONTyped, AppPreviewSetCreateRequestDataAttributesToJSON, AppPreviewSetCreateRequestDataFromJSON, AppPreviewSetCreateRequestDataFromJSONTyped, AppPreviewSetCreateRequestDataRelationshipsAppCustomProductPageLocalizationFromJSON, AppPreviewSetCreateRequestDataRelationshipsAppCustomProductPageLocalizationFromJSONTyped, AppPreviewSetCreateRequestDataRelationshipsAppCustomProductPageLocalizationToJSON, AppPreviewSetCreateRequestDataRelationshipsAppStoreVersionExperimentTreatmentLocalizationFromJSON, AppPreviewSetCreateRequestDataRelationshipsAppStoreVersionExperimentTreatmentLocalizationFromJSONTyped, AppPreviewSetCreateRequestDataRelationshipsAppStoreVersionExperimentTreatmentLocalizationToJSON, AppPreviewSetCreateRequestDataRelationshipsAppStoreVersionLocalizationFromJSON, AppPreviewSetCreateRequestDataRelationshipsAppStoreVersionLocalizationFromJSONTyped, AppPreviewSetCreateRequestDataRelationshipsAppStoreVersionLocalizationToJSON, AppPreviewSetCreateRequestDataRelationshipsFromJSON, AppPreviewSetCreateRequestDataRelationshipsFromJSONTyped, AppPreviewSetCreateRequestDataRelationshipsToJSON, AppPreviewSetCreateRequestDataToJSON, AppPreviewSetCreateRequestDataTypeEnum, AppPreviewSetCreateRequestFromJSON, AppPreviewSetCreateRequestFromJSONTyped, AppPreviewSetCreateRequestToJSON, AppPreviewSetFromJSON, AppPreviewSetFromJSONTyped, AppPreviewSetRelationshipsAppCustomProductPageLocalizationFromJSON, AppPreviewSetRelationshipsAppCustomProductPageLocalizationFromJSONTyped, AppPreviewSetRelationshipsAppCustomProductPageLocalizationToJSON, AppPreviewSetRelationshipsAppPreviewsDataInnerFromJSON, AppPreviewSetRelationshipsAppPreviewsDataInnerFromJSONTyped, AppPreviewSetRelationshipsAppPreviewsDataInnerToJSON, AppPreviewSetRelationshipsAppPreviewsDataInnerTypeEnum, AppPreviewSetRelationshipsAppPreviewsFromJSON, AppPreviewSetRelationshipsAppPreviewsFromJSONTyped, AppPreviewSetRelationshipsAppPreviewsToJSON, AppPreviewSetRelationshipsAppStoreVersionExperimentTreatmentLocalizationDataFromJSON, AppPreviewSetRelationshipsAppStoreVersionExperimentTreatmentLocalizationDataFromJSONTyped, AppPreviewSetRelationshipsAppStoreVersionExperimentTreatmentLocalizationDataToJSON, AppPreviewSetRelationshipsAppStoreVersionExperimentTreatmentLocalizationDataTypeEnum, AppPreviewSetRelationshipsAppStoreVersionExperimentTreatmentLocalizationFromJSON, AppPreviewSetRelationshipsAppStoreVersionExperimentTreatmentLocalizationFromJSONTyped, AppPreviewSetRelationshipsAppStoreVersionExperimentTreatmentLocalizationToJSON, AppPreviewSetRelationshipsAppStoreVersionLocalizationDataFromJSON, AppPreviewSetRelationshipsAppStoreVersionLocalizationDataFromJSONTyped, AppPreviewSetRelationshipsAppStoreVersionLocalizationDataToJSON, AppPreviewSetRelationshipsAppStoreVersionLocalizationDataTypeEnum, AppPreviewSetRelationshipsAppStoreVersionLocalizationFromJSON, AppPreviewSetRelationshipsAppStoreVersionLocalizationFromJSONTyped, AppPreviewSetRelationshipsAppStoreVersionLocalizationToJSON, AppPreviewSetRelationshipsFromJSON, AppPreviewSetRelationshipsFromJSONTyped, AppPreviewSetRelationshipsToJSON, AppPreviewSetResponseFromJSON, AppPreviewSetResponseFromJSONTyped, AppPreviewSetResponseToJSON, AppPreviewSetToJSON, AppPreviewSetTypeEnum, AppPreviewSetsApi, AppPreviewSetsAppPreviewsGetToManyRelatedFieldsAppPreviewSetsEnum, AppPreviewSetsAppPreviewsGetToManyRelatedFieldsAppPreviewsEnum, AppPreviewSetsAppPreviewsGetToManyRelatedIncludeEnum, AppPreviewSetsGetInstanceFieldsAppPreviewSetsEnum, AppPreviewSetsGetInstanceFieldsAppPreviewsEnum, AppPreviewSetsGetInstanceIncludeEnum, AppPreviewSetsResponseFromJSON, AppPreviewSetsResponseFromJSONTyped, AppPreviewSetsResponseIncludedInnerFromJSON, AppPreviewSetsResponseIncludedInnerFromJSONTyped, AppPreviewSetsResponseIncludedInnerToJSON, AppPreviewSetsResponseToJSON, AppPreviewToJSON, AppPreviewTypeEnum, AppPreviewUpdateRequestDataAttributesFromJSON, AppPreviewUpdateRequestDataAttributesFromJSONTyped, AppPreviewUpdateRequestDataAttributesToJSON, AppPreviewUpdateRequestDataFromJSON, AppPreviewUpdateRequestDataFromJSONTyped, AppPreviewUpdateRequestDataToJSON, AppPreviewUpdateRequestDataTypeEnum, AppPreviewUpdateRequestFromJSON, AppPreviewUpdateRequestFromJSONTyped, AppPreviewUpdateRequestToJSON, AppPreviewsApi, AppPreviewsGetInstanceFieldsAppPreviewsEnum, AppPreviewsGetInstanceIncludeEnum, AppPreviewsResponseFromJSON, AppPreviewsResponseFromJSONTyped, AppPreviewsResponseToJSON, AppPriceFromJSON, AppPriceFromJSONTyped, AppPriceInlineCreateFromJSON, AppPriceInlineCreateFromJSONTyped, AppPriceInlineCreateToJSON, AppPriceInlineCreateTypeEnum, AppPricePointFromJSON, AppPricePointFromJSONTyped, AppPricePointRelationshipsFromJSON, AppPricePointRelationshipsFromJSONTyped, AppPricePointRelationshipsToJSON, AppPricePointResponseFromJSON, AppPricePointResponseFromJSONTyped, AppPricePointResponseToJSON, AppPricePointToJSON, AppPricePointTypeEnum, AppPricePointV2AttributesFromJSON, AppPricePointV2AttributesFromJSONTyped, AppPricePointV2AttributesToJSON, AppPricePointV2FromJSON, AppPricePointV2FromJSONTyped, AppPricePointV2RelationshipsFromJSON, AppPricePointV2RelationshipsFromJSONTyped, AppPricePointV2RelationshipsPriceTierDataFromJSON, AppPricePointV2RelationshipsPriceTierDataFromJSONTyped, AppPricePointV2RelationshipsPriceTierDataToJSON, AppPricePointV2RelationshipsPriceTierDataTypeEnum, AppPricePointV2RelationshipsPriceTierFromJSON, AppPricePointV2RelationshipsPriceTierFromJSONTyped, AppPricePointV2RelationshipsPriceTierToJSON, AppPricePointV2RelationshipsTerritoryDataFromJSON, AppPricePointV2RelationshipsTerritoryDataFromJSONTyped, AppPricePointV2RelationshipsTerritoryDataToJSON, AppPricePointV2RelationshipsTerritoryDataTypeEnum, AppPricePointV2RelationshipsTerritoryFromJSON, AppPricePointV2RelationshipsTerritoryFromJSONTyped, AppPricePointV2RelationshipsTerritoryToJSON, AppPricePointV2RelationshipsToJSON, AppPricePointV2ToJSON, AppPricePointV2TypeEnum, AppPricePointsApi, AppPricePointsGetCollectionFieldsAppPricePointsEnum, AppPricePointsGetCollectionFieldsTerritoriesEnum, AppPricePointsGetCollectionIncludeEnum, AppPricePointsGetInstanceFieldsAppPricePointsEnum, AppPricePointsGetInstanceFieldsTerritoriesEnum, AppPricePointsGetInstanceIncludeEnum, AppPricePointsResponseFromJSON, AppPricePointsResponseFromJSONTyped, AppPricePointsResponseIncludedInnerFromJSON, AppPricePointsResponseIncludedInnerFromJSONTyped, AppPricePointsResponseIncludedInnerToJSON, AppPricePointsResponseToJSON, AppPricePointsTerritoryGetToOneRelatedFieldsTerritoriesEnum, AppPricePointsV2ResponseFromJSON, AppPricePointsV2ResponseFromJSONTyped, AppPricePointsV2ResponseIncludedInnerFromJSON, AppPricePointsV2ResponseIncludedInnerFromJSONTyped, AppPricePointsV2ResponseIncludedInnerToJSON, AppPricePointsV2ResponseToJSON, AppPriceRelationshipsFromJSON, AppPriceRelationshipsFromJSONTyped, AppPriceRelationshipsToJSON, AppPriceResponseFromJSON, AppPriceResponseFromJSONTyped, AppPriceResponseToJSON, AppPriceTierFromJSON, AppPriceTierFromJSONTyped, AppPriceTierRelationshipsFromJSON, AppPriceTierRelationshipsFromJSONTyped, AppPriceTierRelationshipsPricePointsDataInnerFromJSON, AppPriceTierRelationshipsPricePointsDataInnerFromJSONTyped, AppPriceTierRelationshipsPricePointsDataInnerToJSON, AppPriceTierRelationshipsPricePointsDataInnerTypeEnum, AppPriceTierRelationshipsPricePointsFromJSON, AppPriceTierRelationshipsPricePointsFromJSONTyped, AppPriceTierRelationshipsPricePointsToJSON, AppPriceTierRelationshipsToJSON, AppPriceTierResponseFromJSON, AppPriceTierResponseFromJSONTyped, AppPriceTierResponseToJSON, AppPriceTierToJSON, AppPriceTierTypeEnum, AppPriceTiersApi, AppPriceTiersGetCollectionFieldsAppPricePointsEnum, AppPriceTiersGetCollectionFieldsAppPriceTiersEnum, AppPriceTiersGetCollectionIncludeEnum, AppPriceTiersGetInstanceFieldsAppPricePointsEnum, AppPriceTiersGetInstanceFieldsAppPriceTiersEnum, AppPriceTiersGetInstanceIncludeEnum, AppPriceTiersPricePointsGetToManyRelatedFieldsAppPricePointsEnum, AppPriceTiersPricePointsGetToManyRelatedFieldsAppPriceTiersEnum, AppPriceTiersPricePointsGetToManyRelatedFieldsTerritoriesEnum, AppPriceTiersPricePointsGetToManyRelatedIncludeEnum, AppPriceTiersResponseFromJSON, AppPriceTiersResponseFromJSONTyped, AppPriceTiersResponseToJSON, AppPriceToJSON, AppPriceTypeEnum, AppPricesApi, AppPricesGetInstanceFieldsAppPricesEnum, AppPricesGetInstanceIncludeEnum, AppPricesResponseFromJSON, AppPricesResponseFromJSONTyped, AppPricesResponseIncludedInnerFromJSON, AppPricesResponseIncludedInnerFromJSONTyped, AppPricesResponseIncludedInnerToJSON, AppPricesResponseToJSON, AppPromotedPurchasesLinkagesRequestFromJSON, AppPromotedPurchasesLinkagesRequestFromJSONTyped, AppPromotedPurchasesLinkagesRequestToJSON, AppPromotedPurchasesLinkagesResponseFromJSON, AppPromotedPurchasesLinkagesResponseFromJSONTyped, AppPromotedPurchasesLinkagesResponseToJSON, AppRelationshipsAppClipsFromJSON, AppRelationshipsAppClipsFromJSONTyped, AppRelationshipsAppClipsToJSON, AppRelationshipsAppCustomProductPagesFromJSON, AppRelationshipsAppCustomProductPagesFromJSONTyped, AppRelationshipsAppCustomProductPagesToJSON, AppRelationshipsAppEventsFromJSON, AppRelationshipsAppEventsFromJSONTyped, AppRelationshipsAppEventsToJSON, AppRelationshipsAppInfosFromJSON, AppRelationshipsAppInfosFromJSONTyped, AppRelationshipsAppInfosToJSON, AppRelationshipsAppStoreVersionsFromJSON, AppRelationshipsAppStoreVersionsFromJSONTyped, AppRelationshipsAppStoreVersionsToJSON, AppRelationshipsAvailableTerritoriesFromJSON, AppRelationshipsAvailableTerritoriesFromJSONTyped, AppRelationshipsAvailableTerritoriesToJSON, AppRelationshipsBetaAppLocalizationsDataInnerFromJSON, AppRelationshipsBetaAppLocalizationsDataInnerFromJSONTyped, AppRelationshipsBetaAppLocalizationsDataInnerToJSON, AppRelationshipsBetaAppLocalizationsDataInnerTypeEnum, AppRelationshipsBetaAppLocalizationsFromJSON, AppRelationshipsBetaAppLocalizationsFromJSONTyped, AppRelationshipsBetaAppLocalizationsToJSON, AppRelationshipsBetaAppReviewDetailDataFromJSON, AppRelationshipsBetaAppReviewDetailDataFromJSONTyped, AppRelationshipsBetaAppReviewDetailDataToJSON, AppRelationshipsBetaAppReviewDetailDataTypeEnum, AppRelationshipsBetaAppReviewDetailFromJSON, AppRelationshipsBetaAppReviewDetailFromJSONTyped, AppRelationshipsBetaAppReviewDetailToJSON, AppRelationshipsBetaGroupsDataInnerFromJSON, AppRelationshipsBetaGroupsDataInnerFromJSONTyped, AppRelationshipsBetaGroupsDataInnerToJSON, AppRelationshipsBetaGroupsDataInnerTypeEnum, AppRelationshipsBetaGroupsFromJSON, AppRelationshipsBetaGroupsFromJSONTyped, AppRelationshipsBetaGroupsToJSON, AppRelationshipsBetaLicenseAgreementDataFromJSON, AppRelationshipsBetaLicenseAgreementDataFromJSONTyped, AppRelationshipsBetaLicenseAgreementDataToJSON, AppRelationshipsBetaLicenseAgreementDataTypeEnum, AppRelationshipsBetaLicenseAgreementFromJSON, AppRelationshipsBetaLicenseAgreementFromJSONTyped, AppRelationshipsBetaLicenseAgreementToJSON, AppRelationshipsCiProductDataFromJSON, AppRelationshipsCiProductDataFromJSONTyped, AppRelationshipsCiProductDataToJSON, AppRelationshipsCiProductDataTypeEnum, AppRelationshipsCiProductFromJSON, AppRelationshipsCiProductFromJSONTyped, AppRelationshipsCiProductToJSON, AppRelationshipsEndUserLicenseAgreementDataFromJSON, AppRelationshipsEndUserLicenseAgreementDataFromJSONTyped, AppRelationshipsEndUserLicenseAgreementDataToJSON, AppRelationshipsEndUserLicenseAgreementDataTypeEnum, AppRelationshipsEndUserLicenseAgreementFromJSON, AppRelationshipsEndUserLicenseAgreementFromJSONTyped, AppRelationshipsEndUserLicenseAgreementToJSON, AppRelationshipsFromJSON, AppRelationshipsFromJSONTyped, AppRelationshipsGameCenterEnabledVersionsDataInnerFromJSON, AppRelationshipsGameCenterEnabledVersionsDataInnerFromJSONTyped, AppRelationshipsGameCenterEnabledVersionsDataInnerToJSON, AppRelationshipsGameCenterEnabledVersionsDataInnerTypeEnum, AppRelationshipsGameCenterEnabledVersionsFromJSON, AppRelationshipsGameCenterEnabledVersionsFromJSONTyped, AppRelationshipsGameCenterEnabledVersionsToJSON, AppRelationshipsInAppPurchasesDataInnerFromJSON, AppRelationshipsInAppPurchasesDataInnerFromJSONTyped, AppRelationshipsInAppPurchasesDataInnerToJSON, AppRelationshipsInAppPurchasesDataInnerTypeEnum, AppRelationshipsInAppPurchasesFromJSON, AppRelationshipsInAppPurchasesFromJSONTyped, AppRelationshipsInAppPurchasesToJSON, AppRelationshipsInAppPurchasesV2FromJSON, AppRelationshipsInAppPurchasesV2FromJSONTyped, AppRelationshipsInAppPurchasesV2ToJSON, AppRelationshipsPreOrderDataFromJSON, AppRelationshipsPreOrderDataFromJSONTyped, AppRelationshipsPreOrderDataToJSON, AppRelationshipsPreOrderDataTypeEnum, AppRelationshipsPreOrderFromJSON, AppRelationshipsPreOrderFromJSONTyped, AppRelationshipsPreOrderToJSON, AppRelationshipsPreReleaseVersionsDataInnerFromJSON, AppRelationshipsPreReleaseVersionsDataInnerFromJSONTyped, AppRelationshipsPreReleaseVersionsDataInnerToJSON, AppRelationshipsPreReleaseVersionsDataInnerTypeEnum, AppRelationshipsPreReleaseVersionsFromJSON, AppRelationshipsPreReleaseVersionsFromJSONTyped, AppRelationshipsPreReleaseVersionsToJSON, AppRelationshipsPricesDataInnerFromJSON, AppRelationshipsPricesDataInnerFromJSONTyped, AppRelationshipsPricesDataInnerToJSON, AppRelationshipsPricesDataInnerTypeEnum, AppRelationshipsPricesFromJSON, AppRelationshipsPricesFromJSONTyped, AppRelationshipsPricesToJSON, AppRelationshipsPromotedPurchasesDataInnerFromJSON, AppRelationshipsPromotedPurchasesDataInnerFromJSONTyped, AppRelationshipsPromotedPurchasesDataInnerToJSON, AppRelationshipsPromotedPurchasesDataInnerTypeEnum, AppRelationshipsPromotedPurchasesFromJSON, AppRelationshipsPromotedPurchasesFromJSONTyped, AppRelationshipsPromotedPurchasesToJSON, AppRelationshipsReviewSubmissionsDataInnerFromJSON, AppRelationshipsReviewSubmissionsDataInnerFromJSONTyped, AppRelationshipsReviewSubmissionsDataInnerToJSON, AppRelationshipsReviewSubmissionsDataInnerTypeEnum, AppRelationshipsReviewSubmissionsFromJSON, AppRelationshipsReviewSubmissionsFromJSONTyped, AppRelationshipsReviewSubmissionsToJSON, AppRelationshipsSubscriptionGracePeriodDataFromJSON, AppRelationshipsSubscriptionGracePeriodDataFromJSONTyped, AppRelationshipsSubscriptionGracePeriodDataToJSON, AppRelationshipsSubscriptionGracePeriodDataTypeEnum, AppRelationshipsSubscriptionGracePeriodFromJSON, AppRelationshipsSubscriptionGracePeriodFromJSONTyped, AppRelationshipsSubscriptionGracePeriodToJSON, AppRelationshipsSubscriptionGroupsDataInnerFromJSON, AppRelationshipsSubscriptionGroupsDataInnerFromJSONTyped, AppRelationshipsSubscriptionGroupsDataInnerToJSON, AppRelationshipsSubscriptionGroupsDataInnerTypeEnum, AppRelationshipsSubscriptionGroupsFromJSON, AppRelationshipsSubscriptionGroupsFromJSONTyped, AppRelationshipsSubscriptionGroupsToJSON, AppRelationshipsToJSON, AppResponseFromJSON, AppResponseFromJSONTyped, AppResponseToJSON, AppScreenshotAttributesFromJSON, AppScreenshotAttributesFromJSONTyped, AppScreenshotAttributesToJSON, AppScreenshotCreateRequestDataFromJSON, AppScreenshotCreateRequestDataFromJSONTyped, AppScreenshotCreateRequestDataRelationshipsAppScreenshotSetFromJSON, AppScreenshotCreateRequestDataRelationshipsAppScreenshotSetFromJSONTyped, AppScreenshotCreateRequestDataRelationshipsAppScreenshotSetToJSON, AppScreenshotCreateRequestDataRelationshipsFromJSON, AppScreenshotCreateRequestDataRelationshipsFromJSONTyped, AppScreenshotCreateRequestDataRelationshipsToJSON, AppScreenshotCreateRequestDataToJSON, AppScreenshotCreateRequestDataTypeEnum, AppScreenshotCreateRequestFromJSON, AppScreenshotCreateRequestFromJSONTyped, AppScreenshotCreateRequestToJSON, AppScreenshotFromJSON, AppScreenshotFromJSONTyped, AppScreenshotRelationshipsAppScreenshotSetFromJSON, AppScreenshotRelationshipsAppScreenshotSetFromJSONTyped, AppScreenshotRelationshipsAppScreenshotSetToJSON, AppScreenshotRelationshipsFromJSON, AppScreenshotRelationshipsFromJSONTyped, AppScreenshotRelationshipsToJSON, AppScreenshotResponseFromJSON, AppScreenshotResponseFromJSONTyped, AppScreenshotResponseToJSON, AppScreenshotSetAppScreenshotsLinkagesRequestFromJSON, AppScreenshotSetAppScreenshotsLinkagesRequestFromJSONTyped, AppScreenshotSetAppScreenshotsLinkagesRequestToJSON, AppScreenshotSetAppScreenshotsLinkagesResponseFromJSON, AppScreenshotSetAppScreenshotsLinkagesResponseFromJSONTyped, AppScreenshotSetAppScreenshotsLinkagesResponseToJSON, AppScreenshotSetAttributesFromJSON, AppScreenshotSetAttributesFromJSONTyped, AppScreenshotSetAttributesToJSON, AppScreenshotSetCreateRequestDataAttributesFromJSON, AppScreenshotSetCreateRequestDataAttributesFromJSONTyped, AppScreenshotSetCreateRequestDataAttributesToJSON, AppScreenshotSetCreateRequestDataFromJSON, AppScreenshotSetCreateRequestDataFromJSONTyped, AppScreenshotSetCreateRequestDataToJSON, AppScreenshotSetCreateRequestDataTypeEnum, AppScreenshotSetCreateRequestFromJSON, AppScreenshotSetCreateRequestFromJSONTyped, AppScreenshotSetCreateRequestToJSON, AppScreenshotSetFromJSON, AppScreenshotSetFromJSONTyped, AppScreenshotSetRelationshipsAppScreenshotsDataInnerFromJSON, AppScreenshotSetRelationshipsAppScreenshotsDataInnerFromJSONTyped, AppScreenshotSetRelationshipsAppScreenshotsDataInnerToJSON, AppScreenshotSetRelationshipsAppScreenshotsDataInnerTypeEnum, AppScreenshotSetRelationshipsAppScreenshotsFromJSON, AppScreenshotSetRelationshipsAppScreenshotsFromJSONTyped, AppScreenshotSetRelationshipsAppScreenshotsToJSON, AppScreenshotSetRelationshipsFromJSON, AppScreenshotSetRelationshipsFromJSONTyped, AppScreenshotSetRelationshipsToJSON, AppScreenshotSetResponseFromJSON, AppScreenshotSetResponseFromJSONTyped, AppScreenshotSetResponseToJSON, AppScreenshotSetToJSON, AppScreenshotSetTypeEnum, AppScreenshotSetsApi, AppScreenshotSetsAppScreenshotsGetToManyRelatedFieldsAppScreenshotSetsEnum, AppScreenshotSetsAppScreenshotsGetToManyRelatedFieldsAppScreenshotsEnum, AppScreenshotSetsAppScreenshotsGetToManyRelatedIncludeEnum, AppScreenshotSetsGetInstanceFieldsAppScreenshotSetsEnum, AppScreenshotSetsGetInstanceFieldsAppScreenshotsEnum, AppScreenshotSetsGetInstanceIncludeEnum, AppScreenshotSetsResponseFromJSON, AppScreenshotSetsResponseFromJSONTyped, AppScreenshotSetsResponseIncludedInnerFromJSON, AppScreenshotSetsResponseIncludedInnerFromJSONTyped, AppScreenshotSetsResponseIncludedInnerToJSON, AppScreenshotSetsResponseToJSON, AppScreenshotToJSON, AppScreenshotTypeEnum, AppScreenshotUpdateRequestDataFromJSON, AppScreenshotUpdateRequestDataFromJSONTyped, AppScreenshotUpdateRequestDataToJSON, AppScreenshotUpdateRequestDataTypeEnum, AppScreenshotUpdateRequestFromJSON, AppScreenshotUpdateRequestFromJSONTyped, AppScreenshotUpdateRequestToJSON, AppScreenshotsApi, AppScreenshotsGetInstanceFieldsAppScreenshotsEnum, AppScreenshotsGetInstanceIncludeEnum, AppScreenshotsResponseFromJSON, AppScreenshotsResponseFromJSONTyped, AppScreenshotsResponseToJSON, AppStoreAgeRating, AppStoreAgeRatingFromJSON, AppStoreAgeRatingFromJSONTyped, AppStoreAgeRatingToJSON, AppStoreReviewAttachmentAttributesFromJSON, AppStoreReviewAttachmentAttributesFromJSONTyped, AppStoreReviewAttachmentAttributesToJSON, AppStoreReviewAttachmentCreateRequestDataFromJSON, AppStoreReviewAttachmentCreateRequestDataFromJSONTyped, AppStoreReviewAttachmentCreateRequestDataRelationshipsAppStoreReviewDetailFromJSON, AppStoreReviewAttachmentCreateRequestDataRelationshipsAppStoreReviewDetailFromJSONTyped, AppStoreReviewAttachmentCreateRequestDataRelationshipsAppStoreReviewDetailToJSON, AppStoreReviewAttachmentCreateRequestDataRelationshipsFromJSON, AppStoreReviewAttachmentCreateRequestDataRelationshipsFromJSONTyped, AppStoreReviewAttachmentCreateRequestDataRelationshipsToJSON, AppStoreReviewAttachmentCreateRequestDataToJSON, AppStoreReviewAttachmentCreateRequestDataTypeEnum, AppStoreReviewAttachmentCreateRequestFromJSON, AppStoreReviewAttachmentCreateRequestFromJSONTyped, AppStoreReviewAttachmentCreateRequestToJSON, AppStoreReviewAttachmentFromJSON, AppStoreReviewAttachmentFromJSONTyped, AppStoreReviewAttachmentRelationshipsAppStoreReviewDetailDataFromJSON, AppStoreReviewAttachmentRelationshipsAppStoreReviewDetailDataFromJSONTyped, AppStoreReviewAttachmentRelationshipsAppStoreReviewDetailDataToJSON, AppStoreReviewAttachmentRelationshipsAppStoreReviewDetailDataTypeEnum, AppStoreReviewAttachmentRelationshipsAppStoreReviewDetailFromJSON, AppStoreReviewAttachmentRelationshipsAppStoreReviewDetailFromJSONTyped, AppStoreReviewAttachmentRelationshipsAppStoreReviewDetailToJSON, AppStoreReviewAttachmentRelationshipsFromJSON, AppStoreReviewAttachmentRelationshipsFromJSONTyped, AppStoreReviewAttachmentRelationshipsToJSON, AppStoreReviewAttachmentResponseFromJSON, AppStoreReviewAttachmentResponseFromJSONTyped, AppStoreReviewAttachmentResponseToJSON, AppStoreReviewAttachmentToJSON, AppStoreReviewAttachmentTypeEnum, AppStoreReviewAttachmentUpdateRequestDataFromJSON, AppStoreReviewAttachmentUpdateRequestDataFromJSONTyped, AppStoreReviewAttachmentUpdateRequestDataToJSON, AppStoreReviewAttachmentUpdateRequestDataTypeEnum, AppStoreReviewAttachmentUpdateRequestFromJSON, AppStoreReviewAttachmentUpdateRequestFromJSONTyped, AppStoreReviewAttachmentUpdateRequestToJSON, AppStoreReviewAttachmentsApi, AppStoreReviewAttachmentsGetInstanceFieldsAppStoreReviewAttachmentsEnum, AppStoreReviewAttachmentsGetInstanceIncludeEnum, AppStoreReviewAttachmentsResponseFromJSON, AppStoreReviewAttachmentsResponseFromJSONTyped, AppStoreReviewAttachmentsResponseToJSON, AppStoreReviewDetailAttributesFromJSON, AppStoreReviewDetailAttributesFromJSONTyped, AppStoreReviewDetailAttributesToJSON, AppStoreReviewDetailCreateRequestDataFromJSON, AppStoreReviewDetailCreateRequestDataFromJSONTyped, AppStoreReviewDetailCreateRequestDataRelationshipsAppStoreVersionFromJSON, AppStoreReviewDetailCreateRequestDataRelationshipsAppStoreVersionFromJSONTyped, AppStoreReviewDetailCreateRequestDataRelationshipsAppStoreVersionToJSON, AppStoreReviewDetailCreateRequestDataRelationshipsFromJSON, AppStoreReviewDetailCreateRequestDataRelationshipsFromJSONTyped, AppStoreReviewDetailCreateRequestDataRelationshipsToJSON, AppStoreReviewDetailCreateRequestDataToJSON, AppStoreReviewDetailCreateRequestDataTypeEnum, AppStoreReviewDetailCreateRequestFromJSON, AppStoreReviewDetailCreateRequestFromJSONTyped, AppStoreReviewDetailCreateRequestToJSON, AppStoreReviewDetailFromJSON, AppStoreReviewDetailFromJSONTyped, AppStoreReviewDetailRelationshipsAppStoreReviewAttachmentsDataInnerFromJSON, AppStoreReviewDetailRelationshipsAppStoreReviewAttachmentsDataInnerFromJSONTyped, AppStoreReviewDetailRelationshipsAppStoreReviewAttachmentsDataInnerToJSON, AppStoreReviewDetailRelationshipsAppStoreReviewAttachmentsDataInnerTypeEnum, AppStoreReviewDetailRelationshipsAppStoreReviewAttachmentsFromJSON, AppStoreReviewDetailRelationshipsAppStoreReviewAttachmentsFromJSONTyped, AppStoreReviewDetailRelationshipsAppStoreReviewAttachmentsToJSON, AppStoreReviewDetailRelationshipsFromJSON, AppStoreReviewDetailRelationshipsFromJSONTyped, AppStoreReviewDetailRelationshipsToJSON, AppStoreReviewDetailResponseFromJSON, AppStoreReviewDetailResponseFromJSONTyped, AppStoreReviewDetailResponseIncludedInnerFromJSON, AppStoreReviewDetailResponseIncludedInnerFromJSONTyped, AppStoreReviewDetailResponseIncludedInnerToJSON, AppStoreReviewDetailResponseToJSON, AppStoreReviewDetailToJSON, AppStoreReviewDetailTypeEnum, AppStoreReviewDetailUpdateRequestDataFromJSON, AppStoreReviewDetailUpdateRequestDataFromJSONTyped, AppStoreReviewDetailUpdateRequestDataToJSON, AppStoreReviewDetailUpdateRequestDataTypeEnum, AppStoreReviewDetailUpdateRequestFromJSON, AppStoreReviewDetailUpdateRequestFromJSONTyped, AppStoreReviewDetailUpdateRequestToJSON, AppStoreReviewDetailsApi, AppStoreReviewDetailsAppStoreReviewAttachmentsGetToManyRelatedFieldsAppStoreReviewAttachmentsEnum, AppStoreReviewDetailsAppStoreReviewAttachmentsGetToManyRelatedFieldsAppStoreReviewDetailsEnum, AppStoreReviewDetailsAppStoreReviewAttachmentsGetToManyRelatedIncludeEnum, AppStoreReviewDetailsGetInstanceFieldsAppStoreReviewAttachmentsEnum, AppStoreReviewDetailsGetInstanceFieldsAppStoreReviewDetailsEnum, AppStoreReviewDetailsGetInstanceIncludeEnum, AppStoreVersionAppClipDefaultExperienceLinkageRequestFromJSON, AppStoreVersionAppClipDefaultExperienceLinkageRequestFromJSONTyped, AppStoreVersionAppClipDefaultExperienceLinkageRequestToJSON, AppStoreVersionAppClipDefaultExperienceLinkageResponseFromJSON, AppStoreVersionAppClipDefaultExperienceLinkageResponseFromJSONTyped, AppStoreVersionAppClipDefaultExperienceLinkageResponseToJSON, AppStoreVersionAttributesFromJSON, AppStoreVersionAttributesFromJSONTyped, AppStoreVersionAttributesReleaseTypeEnum, AppStoreVersionAttributesToJSON, AppStoreVersionBuildLinkageRequestFromJSON, AppStoreVersionBuildLinkageRequestFromJSONTyped, AppStoreVersionBuildLinkageRequestToJSON, AppStoreVersionBuildLinkageResponseFromJSON, AppStoreVersionBuildLinkageResponseFromJSONTyped, AppStoreVersionBuildLinkageResponseToJSON, AppStoreVersionCreateRequestDataAttributesFromJSON, AppStoreVersionCreateRequestDataAttributesFromJSONTyped, AppStoreVersionCreateRequestDataAttributesReleaseTypeEnum, AppStoreVersionCreateRequestDataAttributesToJSON, AppStoreVersionCreateRequestDataFromJSON, AppStoreVersionCreateRequestDataFromJSONTyped, AppStoreVersionCreateRequestDataRelationshipsAppStoreVersionLocalizationsFromJSON, AppStoreVersionCreateRequestDataRelationshipsAppStoreVersionLocalizationsFromJSONTyped, AppStoreVersionCreateRequestDataRelationshipsAppStoreVersionLocalizationsToJSON, AppStoreVersionCreateRequestDataRelationshipsBuildFromJSON, AppStoreVersionCreateRequestDataRelationshipsBuildFromJSONTyped, AppStoreVersionCreateRequestDataRelationshipsBuildToJSON, AppStoreVersionCreateRequestDataRelationshipsFromJSON, AppStoreVersionCreateRequestDataRelationshipsFromJSONTyped, AppStoreVersionCreateRequestDataRelationshipsToJSON, AppStoreVersionCreateRequestDataToJSON, AppStoreVersionCreateRequestDataTypeEnum, AppStoreVersionCreateRequestFromJSON, AppStoreVersionCreateRequestFromJSONTyped, AppStoreVersionCreateRequestToJSON, AppStoreVersionExperimentAttributesFromJSON, AppStoreVersionExperimentAttributesFromJSONTyped, AppStoreVersionExperimentAttributesStateEnum, AppStoreVersionExperimentAttributesToJSON, AppStoreVersionExperimentCreateRequestDataAttributesFromJSON, AppStoreVersionExperimentCreateRequestDataAttributesFromJSONTyped, AppStoreVersionExperimentCreateRequestDataAttributesToJSON, AppStoreVersionExperimentCreateRequestDataFromJSON, AppStoreVersionExperimentCreateRequestDataFromJSONTyped, AppStoreVersionExperimentCreateRequestDataToJSON, AppStoreVersionExperimentCreateRequestDataTypeEnum, AppStoreVersionExperimentCreateRequestFromJSON, AppStoreVersionExperimentCreateRequestFromJSONTyped, AppStoreVersionExperimentCreateRequestToJSON, AppStoreVersionExperimentFromJSON, AppStoreVersionExperimentFromJSONTyped, AppStoreVersionExperimentRelationshipsAppStoreVersionExperimentTreatmentsFromJSON, AppStoreVersionExperimentRelationshipsAppStoreVersionExperimentTreatmentsFromJSONTyped, AppStoreVersionExperimentRelationshipsAppStoreVersionExperimentTreatmentsToJSON, AppStoreVersionExperimentRelationshipsFromJSON, AppStoreVersionExperimentRelationshipsFromJSONTyped, AppStoreVersionExperimentRelationshipsToJSON, AppStoreVersionExperimentResponseFromJSON, AppStoreVersionExperimentResponseFromJSONTyped, AppStoreVersionExperimentResponseToJSON, AppStoreVersionExperimentToJSON, AppStoreVersionExperimentTreatmentAttributesFromJSON, AppStoreVersionExperimentTreatmentAttributesFromJSONTyped, AppStoreVersionExperimentTreatmentAttributesToJSON, AppStoreVersionExperimentTreatmentCreateRequestDataAttributesFromJSON, AppStoreVersionExperimentTreatmentCreateRequestDataAttributesFromJSONTyped, AppStoreVersionExperimentTreatmentCreateRequestDataAttributesToJSON, AppStoreVersionExperimentTreatmentCreateRequestDataFromJSON, AppStoreVersionExperimentTreatmentCreateRequestDataFromJSONTyped, AppStoreVersionExperimentTreatmentCreateRequestDataRelationshipsAppStoreVersionExperimentFromJSON, AppStoreVersionExperimentTreatmentCreateRequestDataRelationshipsAppStoreVersionExperimentFromJSONTyped, AppStoreVersionExperimentTreatmentCreateRequestDataRelationshipsAppStoreVersionExperimentToJSON, AppStoreVersionExperimentTreatmentCreateRequestDataRelationshipsFromJSON, AppStoreVersionExperimentTreatmentCreateRequestDataRelationshipsFromJSONTyped, AppStoreVersionExperimentTreatmentCreateRequestDataRelationshipsToJSON, AppStoreVersionExperimentTreatmentCreateRequestDataToJSON, AppStoreVersionExperimentTreatmentCreateRequestDataTypeEnum, AppStoreVersionExperimentTreatmentCreateRequestFromJSON, AppStoreVersionExperimentTreatmentCreateRequestFromJSONTyped, AppStoreVersionExperimentTreatmentCreateRequestToJSON, AppStoreVersionExperimentTreatmentFromJSON, AppStoreVersionExperimentTreatmentFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationAttributesFromJSON, AppStoreVersionExperimentTreatmentLocalizationAttributesFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationAttributesToJSON, AppStoreVersionExperimentTreatmentLocalizationCreateRequestDataAttributesFromJSON, AppStoreVersionExperimentTreatmentLocalizationCreateRequestDataAttributesFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationCreateRequestDataAttributesToJSON, AppStoreVersionExperimentTreatmentLocalizationCreateRequestDataFromJSON, AppStoreVersionExperimentTreatmentLocalizationCreateRequestDataFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationCreateRequestDataRelationshipsAppStoreVersionExperimentTreatmentFromJSON, AppStoreVersionExperimentTreatmentLocalizationCreateRequestDataRelationshipsAppStoreVersionExperimentTreatmentFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationCreateRequestDataRelationshipsAppStoreVersionExperimentTreatmentToJSON, AppStoreVersionExperimentTreatmentLocalizationCreateRequestDataRelationshipsFromJSON, AppStoreVersionExperimentTreatmentLocalizationCreateRequestDataRelationshipsFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationCreateRequestDataRelationshipsToJSON, AppStoreVersionExperimentTreatmentLocalizationCreateRequestDataToJSON, AppStoreVersionExperimentTreatmentLocalizationCreateRequestDataTypeEnum, AppStoreVersionExperimentTreatmentLocalizationCreateRequestFromJSON, AppStoreVersionExperimentTreatmentLocalizationCreateRequestFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationCreateRequestToJSON, AppStoreVersionExperimentTreatmentLocalizationFromJSON, AppStoreVersionExperimentTreatmentLocalizationFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationRelationshipsAppStoreVersionExperimentTreatmentDataFromJSON, AppStoreVersionExperimentTreatmentLocalizationRelationshipsAppStoreVersionExperimentTreatmentDataFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationRelationshipsAppStoreVersionExperimentTreatmentDataToJSON, AppStoreVersionExperimentTreatmentLocalizationRelationshipsAppStoreVersionExperimentTreatmentDataTypeEnum, AppStoreVersionExperimentTreatmentLocalizationRelationshipsAppStoreVersionExperimentTreatmentFromJSON, AppStoreVersionExperimentTreatmentLocalizationRelationshipsAppStoreVersionExperimentTreatmentFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationRelationshipsAppStoreVersionExperimentTreatmentToJSON, AppStoreVersionExperimentTreatmentLocalizationRelationshipsFromJSON, AppStoreVersionExperimentTreatmentLocalizationRelationshipsFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationRelationshipsToJSON, AppStoreVersionExperimentTreatmentLocalizationResponseFromJSON, AppStoreVersionExperimentTreatmentLocalizationResponseFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationResponseToJSON, AppStoreVersionExperimentTreatmentLocalizationToJSON, AppStoreVersionExperimentTreatmentLocalizationTypeEnum, AppStoreVersionExperimentTreatmentLocalizationsApi, AppStoreVersionExperimentTreatmentLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppCustomProductPageLocalizationsEnum, AppStoreVersionExperimentTreatmentLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppPreviewSetsEnum, AppStoreVersionExperimentTreatmentLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppPreviewsEnum, AppStoreVersionExperimentTreatmentLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppStoreVersionExperimentTreatmentLocalizationsEnum, AppStoreVersionExperimentTreatmentLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppStoreVersionLocalizationsEnum, AppStoreVersionExperimentTreatmentLocalizationsAppPreviewSetsGetToManyRelatedFilterPreviewTypeEnum, AppStoreVersionExperimentTreatmentLocalizationsAppPreviewSetsGetToManyRelatedIncludeEnum, AppStoreVersionExperimentTreatmentLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppCustomProductPageLocalizationsEnum, AppStoreVersionExperimentTreatmentLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppScreenshotSetsEnum, AppStoreVersionExperimentTreatmentLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppScreenshotsEnum, AppStoreVersionExperimentTreatmentLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppStoreVersionExperimentTreatmentLocalizationsEnum, AppStoreVersionExperimentTreatmentLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppStoreVersionLocalizationsEnum, AppStoreVersionExperimentTreatmentLocalizationsAppScreenshotSetsGetToManyRelatedFilterScreenshotDisplayTypeEnum, AppStoreVersionExperimentTreatmentLocalizationsAppScreenshotSetsGetToManyRelatedIncludeEnum, AppStoreVersionExperimentTreatmentLocalizationsGetInstanceFieldsAppPreviewSetsEnum, AppStoreVersionExperimentTreatmentLocalizationsGetInstanceFieldsAppScreenshotSetsEnum, AppStoreVersionExperimentTreatmentLocalizationsGetInstanceFieldsAppStoreVersionExperimentTreatmentLocalizationsEnum, AppStoreVersionExperimentTreatmentLocalizationsGetInstanceIncludeEnum, AppStoreVersionExperimentTreatmentLocalizationsResponseFromJSON, AppStoreVersionExperimentTreatmentLocalizationsResponseFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationsResponseIncludedInnerFromJSON, AppStoreVersionExperimentTreatmentLocalizationsResponseIncludedInnerFromJSONTyped, AppStoreVersionExperimentTreatmentLocalizationsResponseIncludedInnerToJSON, AppStoreVersionExperimentTreatmentLocalizationsResponseToJSON, AppStoreVersionExperimentTreatmentRelationshipsAppStoreVersionExperimentDataFromJSON, AppStoreVersionExperimentTreatmentRelationshipsAppStoreVersionExperimentDataFromJSONTyped, AppStoreVersionExperimentTreatmentRelationshipsAppStoreVersionExperimentDataToJSON, AppStoreVersionExperimentTreatmentRelationshipsAppStoreVersionExperimentDataTypeEnum, AppStoreVersionExperimentTreatmentRelationshipsAppStoreVersionExperimentFromJSON, AppStoreVersionExperimentTreatmentRelationshipsAppStoreVersionExperimentFromJSONTyped, AppStoreVersionExperimentTreatmentRelationshipsAppStoreVersionExperimentToJSON, AppStoreVersionExperimentTreatmentRelationshipsAppStoreVersionExperimentTreatmentLocalizationsFromJSON, AppStoreVersionExperimentTreatmentRelationshipsAppStoreVersionExperimentTreatmentLocalizationsFromJSONTyped, AppStoreVersionExperimentTreatmentRelationshipsAppStoreVersionExperimentTreatmentLocalizationsToJSON, AppStoreVersionExperimentTreatmentRelationshipsFromJSON, AppStoreVersionExperimentTreatmentRelationshipsFromJSONTyped, AppStoreVersionExperimentTreatmentRelationshipsToJSON, AppStoreVersionExperimentTreatmentResponseFromJSON, AppStoreVersionExperimentTreatmentResponseFromJSONTyped, AppStoreVersionExperimentTreatmentResponseToJSON, AppStoreVersionExperimentTreatmentToJSON, AppStoreVersionExperimentTreatmentTypeEnum, AppStoreVersionExperimentTreatmentUpdateRequestDataAttributesFromJSON, AppStoreVersionExperimentTreatmentUpdateRequestDataAttributesFromJSONTyped, AppStoreVersionExperimentTreatmentUpdateRequestDataAttributesToJSON, AppStoreVersionExperimentTreatmentUpdateRequestDataFromJSON, AppStoreVersionExperimentTreatmentUpdateRequestDataFromJSONTyped, AppStoreVersionExperimentTreatmentUpdateRequestDataToJSON, AppStoreVersionExperimentTreatmentUpdateRequestDataTypeEnum, AppStoreVersionExperimentTreatmentUpdateRequestFromJSON, AppStoreVersionExperimentTreatmentUpdateRequestFromJSONTyped, AppStoreVersionExperimentTreatmentUpdateRequestToJSON, AppStoreVersionExperimentTreatmentsApi, AppStoreVersionExperimentTreatmentsAppStoreVersionExperimentTreatmentLocalizationsGetToManyRelatedFieldsAppPreviewSetsEnum, AppStoreVersionExperimentTreatmentsAppStoreVersionExperimentTreatmentLocalizationsGetToManyRelatedFieldsAppScreenshotSetsEnum, AppStoreVersionExperimentTreatmentsAppStoreVersionExperimentTreatmentLocalizationsGetToManyRelatedFieldsAppStoreVersionExperimentTreatmentLocalizationsEnum, AppStoreVersionExperimentTreatmentsAppStoreVersionExperimentTreatmentLocalizationsGetToManyRelatedFieldsAppStoreVersionExperimentTreatmentsEnum, AppStoreVersionExperimentTreatmentsAppStoreVersionExperimentTreatmentLocalizationsGetToManyRelatedIncludeEnum, AppStoreVersionExperimentTreatmentsGetInstanceFieldsAppStoreVersionExperimentTreatmentLocalizationsEnum, AppStoreVersionExperimentTreatmentsGetInstanceFieldsAppStoreVersionExperimentTreatmentsEnum, AppStoreVersionExperimentTreatmentsGetInstanceIncludeEnum, AppStoreVersionExperimentTreatmentsResponseFromJSON, AppStoreVersionExperimentTreatmentsResponseFromJSONTyped, AppStoreVersionExperimentTreatmentsResponseIncludedInnerFromJSON, AppStoreVersionExperimentTreatmentsResponseIncludedInnerFromJSONTyped, AppStoreVersionExperimentTreatmentsResponseIncludedInnerToJSON, AppStoreVersionExperimentTreatmentsResponseToJSON, AppStoreVersionExperimentTypeEnum, AppStoreVersionExperimentUpdateRequestDataAttributesFromJSON, AppStoreVersionExperimentUpdateRequestDataAttributesFromJSONTyped, AppStoreVersionExperimentUpdateRequestDataAttributesToJSON, AppStoreVersionExperimentUpdateRequestDataFromJSON, AppStoreVersionExperimentUpdateRequestDataFromJSONTyped, AppStoreVersionExperimentUpdateRequestDataToJSON, AppStoreVersionExperimentUpdateRequestDataTypeEnum, AppStoreVersionExperimentUpdateRequestFromJSON, AppStoreVersionExperimentUpdateRequestFromJSONTyped, AppStoreVersionExperimentUpdateRequestToJSON, AppStoreVersionExperimentsApi, AppStoreVersionExperimentsAppStoreVersionExperimentTreatmentsGetToManyRelatedFieldsAppStoreVersionExperimentTreatmentLocalizationsEnum, AppStoreVersionExperimentsAppStoreVersionExperimentTreatmentsGetToManyRelatedFieldsAppStoreVersionExperimentTreatmentsEnum, AppStoreVersionExperimentsAppStoreVersionExperimentTreatmentsGetToManyRelatedFieldsAppStoreVersionExperimentsEnum, AppStoreVersionExperimentsAppStoreVersionExperimentTreatmentsGetToManyRelatedIncludeEnum, AppStoreVersionExperimentsGetInstanceFieldsAppStoreVersionExperimentTreatmentsEnum, AppStoreVersionExperimentsGetInstanceFieldsAppStoreVersionExperimentsEnum, AppStoreVersionExperimentsGetInstanceIncludeEnum, AppStoreVersionExperimentsResponseFromJSON, AppStoreVersionExperimentsResponseFromJSONTyped, AppStoreVersionExperimentsResponseIncludedInnerFromJSON, AppStoreVersionExperimentsResponseIncludedInnerFromJSONTyped, AppStoreVersionExperimentsResponseIncludedInnerToJSON, AppStoreVersionExperimentsResponseToJSON, AppStoreVersionFromJSON, AppStoreVersionFromJSONTyped, AppStoreVersionLocalizationAttributesFromJSON, AppStoreVersionLocalizationAttributesFromJSONTyped, AppStoreVersionLocalizationAttributesToJSON, AppStoreVersionLocalizationCreateRequestDataAttributesFromJSON, AppStoreVersionLocalizationCreateRequestDataAttributesFromJSONTyped, AppStoreVersionLocalizationCreateRequestDataAttributesToJSON, AppStoreVersionLocalizationCreateRequestDataFromJSON, AppStoreVersionLocalizationCreateRequestDataFromJSONTyped, AppStoreVersionLocalizationCreateRequestDataToJSON, AppStoreVersionLocalizationCreateRequestDataTypeEnum, AppStoreVersionLocalizationCreateRequestFromJSON, AppStoreVersionLocalizationCreateRequestFromJSONTyped, AppStoreVersionLocalizationCreateRequestToJSON, AppStoreVersionLocalizationFromJSON, AppStoreVersionLocalizationFromJSONTyped, AppStoreVersionLocalizationRelationshipsFromJSON, AppStoreVersionLocalizationRelationshipsFromJSONTyped, AppStoreVersionLocalizationRelationshipsToJSON, AppStoreVersionLocalizationResponseFromJSON, AppStoreVersionLocalizationResponseFromJSONTyped, AppStoreVersionLocalizationResponseToJSON, AppStoreVersionLocalizationToJSON, AppStoreVersionLocalizationTypeEnum, AppStoreVersionLocalizationUpdateRequestDataAttributesFromJSON, AppStoreVersionLocalizationUpdateRequestDataAttributesFromJSONTyped, AppStoreVersionLocalizationUpdateRequestDataAttributesToJSON, AppStoreVersionLocalizationUpdateRequestDataFromJSON, AppStoreVersionLocalizationUpdateRequestDataFromJSONTyped, AppStoreVersionLocalizationUpdateRequestDataToJSON, AppStoreVersionLocalizationUpdateRequestDataTypeEnum, AppStoreVersionLocalizationUpdateRequestFromJSON, AppStoreVersionLocalizationUpdateRequestFromJSONTyped, AppStoreVersionLocalizationUpdateRequestToJSON, AppStoreVersionLocalizationsApi, AppStoreVersionLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppCustomProductPageLocalizationsEnum, AppStoreVersionLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppPreviewSetsEnum, AppStoreVersionLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppPreviewsEnum, AppStoreVersionLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppStoreVersionExperimentTreatmentLocalizationsEnum, AppStoreVersionLocalizationsAppPreviewSetsGetToManyRelatedFieldsAppStoreVersionLocalizationsEnum, AppStoreVersionLocalizationsAppPreviewSetsGetToManyRelatedFilterPreviewTypeEnum, AppStoreVersionLocalizationsAppPreviewSetsGetToManyRelatedIncludeEnum, AppStoreVersionLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppCustomProductPageLocalizationsEnum, AppStoreVersionLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppScreenshotSetsEnum, AppStoreVersionLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppScreenshotsEnum, AppStoreVersionLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppStoreVersionExperimentTreatmentLocalizationsEnum, AppStoreVersionLocalizationsAppScreenshotSetsGetToManyRelatedFieldsAppStoreVersionLocalizationsEnum, AppStoreVersionLocalizationsAppScreenshotSetsGetToManyRelatedFilterScreenshotDisplayTypeEnum, AppStoreVersionLocalizationsAppScreenshotSetsGetToManyRelatedIncludeEnum, AppStoreVersionLocalizationsGetInstanceFieldsAppPreviewSetsEnum, AppStoreVersionLocalizationsGetInstanceFieldsAppScreenshotSetsEnum, AppStoreVersionLocalizationsGetInstanceFieldsAppStoreVersionLocalizationsEnum, AppStoreVersionLocalizationsGetInstanceIncludeEnum, AppStoreVersionLocalizationsResponseFromJSON, AppStoreVersionLocalizationsResponseFromJSONTyped, AppStoreVersionLocalizationsResponseIncludedInnerFromJSON, AppStoreVersionLocalizationsResponseIncludedInnerFromJSONTyped, AppStoreVersionLocalizationsResponseIncludedInnerToJSON, AppStoreVersionLocalizationsResponseToJSON, AppStoreVersionPhasedReleaseAttributesFromJSON, AppStoreVersionPhasedReleaseAttributesFromJSONTyped, AppStoreVersionPhasedReleaseAttributesToJSON, AppStoreVersionPhasedReleaseCreateRequestDataAttributesFromJSON, AppStoreVersionPhasedReleaseCreateRequestDataAttributesFromJSONTyped, AppStoreVersionPhasedReleaseCreateRequestDataAttributesToJSON, AppStoreVersionPhasedReleaseCreateRequestDataFromJSON, AppStoreVersionPhasedReleaseCreateRequestDataFromJSONTyped, AppStoreVersionPhasedReleaseCreateRequestDataToJSON, AppStoreVersionPhasedReleaseCreateRequestDataTypeEnum, AppStoreVersionPhasedReleaseCreateRequestFromJSON, AppStoreVersionPhasedReleaseCreateRequestFromJSONTyped, AppStoreVersionPhasedReleaseCreateRequestToJSON, AppStoreVersionPhasedReleaseFromJSON, AppStoreVersionPhasedReleaseFromJSONTyped, AppStoreVersionPhasedReleaseResponseFromJSON, AppStoreVersionPhasedReleaseResponseFromJSONTyped, AppStoreVersionPhasedReleaseResponseToJSON, AppStoreVersionPhasedReleaseToJSON, AppStoreVersionPhasedReleaseTypeEnum, AppStoreVersionPhasedReleaseUpdateRequestDataFromJSON, AppStoreVersionPhasedReleaseUpdateRequestDataFromJSONTyped, AppStoreVersionPhasedReleaseUpdateRequestDataToJSON, AppStoreVersionPhasedReleaseUpdateRequestDataTypeEnum, AppStoreVersionPhasedReleaseUpdateRequestFromJSON, AppStoreVersionPhasedReleaseUpdateRequestFromJSONTyped, AppStoreVersionPhasedReleaseUpdateRequestToJSON, AppStoreVersionPhasedReleasesApi, AppStoreVersionPromotionCreateRequestDataFromJSON, AppStoreVersionPromotionCreateRequestDataFromJSONTyped, AppStoreVersionPromotionCreateRequestDataRelationshipsFromJSON, AppStoreVersionPromotionCreateRequestDataRelationshipsFromJSONTyped, AppStoreVersionPromotionCreateRequestDataRelationshipsToJSON, AppStoreVersionPromotionCreateRequestDataToJSON, AppStoreVersionPromotionCreateRequestDataTypeEnum, AppStoreVersionPromotionCreateRequestFromJSON, AppStoreVersionPromotionCreateRequestFromJSONTyped, AppStoreVersionPromotionCreateRequestToJSON, AppStoreVersionPromotionFromJSON, AppStoreVersionPromotionFromJSONTyped, AppStoreVersionPromotionResponseFromJSON, AppStoreVersionPromotionResponseFromJSONTyped, AppStoreVersionPromotionResponseToJSON, AppStoreVersionPromotionToJSON, AppStoreVersionPromotionTypeEnum, AppStoreVersionPromotionsApi, AppStoreVersionRelationshipsAgeRatingDeclarationFromJSON, AppStoreVersionRelationshipsAgeRatingDeclarationFromJSONTyped, AppStoreVersionRelationshipsAgeRatingDeclarationToJSON, AppStoreVersionRelationshipsAppStoreVersionExperimentsFromJSON, AppStoreVersionRelationshipsAppStoreVersionExperimentsFromJSONTyped, AppStoreVersionRelationshipsAppStoreVersionExperimentsToJSON, AppStoreVersionRelationshipsAppStoreVersionLocalizationsFromJSON, AppStoreVersionRelationshipsAppStoreVersionLocalizationsFromJSONTyped, AppStoreVersionRelationshipsAppStoreVersionLocalizationsToJSON, AppStoreVersionRelationshipsAppStoreVersionPhasedReleaseDataFromJSON, AppStoreVersionRelationshipsAppStoreVersionPhasedReleaseDataFromJSONTyped, AppStoreVersionRelationshipsAppStoreVersionPhasedReleaseDataToJSON, AppStoreVersionRelationshipsAppStoreVersionPhasedReleaseDataTypeEnum, AppStoreVersionRelationshipsAppStoreVersionPhasedReleaseFromJSON, AppStoreVersionRelationshipsAppStoreVersionPhasedReleaseFromJSONTyped, AppStoreVersionRelationshipsAppStoreVersionPhasedReleaseToJSON, AppStoreVersionRelationshipsAppStoreVersionSubmissionDataFromJSON, AppStoreVersionRelationshipsAppStoreVersionSubmissionDataFromJSONTyped, AppStoreVersionRelationshipsAppStoreVersionSubmissionDataToJSON, AppStoreVersionRelationshipsAppStoreVersionSubmissionDataTypeEnum, AppStoreVersionRelationshipsAppStoreVersionSubmissionFromJSON, AppStoreVersionRelationshipsAppStoreVersionSubmissionFromJSONTyped, AppStoreVersionRelationshipsAppStoreVersionSubmissionToJSON, AppStoreVersionRelationshipsBuildFromJSON, AppStoreVersionRelationshipsBuildFromJSONTyped, AppStoreVersionRelationshipsBuildToJSON, AppStoreVersionRelationshipsFromJSON, AppStoreVersionRelationshipsFromJSONTyped, AppStoreVersionRelationshipsRoutingAppCoverageDataFromJSON, AppStoreVersionRelationshipsRoutingAppCoverageDataFromJSONTyped, AppStoreVersionRelationshipsRoutingAppCoverageDataToJSON, AppStoreVersionRelationshipsRoutingAppCoverageDataTypeEnum, AppStoreVersionRelationshipsRoutingAppCoverageFromJSON, AppStoreVersionRelationshipsRoutingAppCoverageFromJSONTyped, AppStoreVersionRelationshipsRoutingAppCoverageToJSON, AppStoreVersionRelationshipsToJSON, AppStoreVersionReleaseRequestCreateRequestDataFromJSON, AppStoreVersionReleaseRequestCreateRequestDataFromJSONTyped, AppStoreVersionReleaseRequestCreateRequestDataToJSON, AppStoreVersionReleaseRequestCreateRequestDataTypeEnum, AppStoreVersionReleaseRequestCreateRequestFromJSON, AppStoreVersionReleaseRequestCreateRequestFromJSONTyped, AppStoreVersionReleaseRequestCreateRequestToJSON, AppStoreVersionReleaseRequestFromJSON, AppStoreVersionReleaseRequestFromJSONTyped, AppStoreVersionReleaseRequestResponseFromJSON, AppStoreVersionReleaseRequestResponseFromJSONTyped, AppStoreVersionReleaseRequestResponseToJSON, AppStoreVersionReleaseRequestToJSON, AppStoreVersionReleaseRequestTypeEnum, AppStoreVersionReleaseRequestsApi, AppStoreVersionResponseFromJSON, AppStoreVersionResponseFromJSONTyped, AppStoreVersionResponseToJSON, AppStoreVersionState, AppStoreVersionStateFromJSON, AppStoreVersionStateFromJSONTyped, AppStoreVersionStateToJSON, AppStoreVersionSubmissionCreateRequestDataFromJSON, AppStoreVersionSubmissionCreateRequestDataFromJSONTyped, AppStoreVersionSubmissionCreateRequestDataToJSON, AppStoreVersionSubmissionCreateRequestDataTypeEnum, AppStoreVersionSubmissionCreateRequestFromJSON, AppStoreVersionSubmissionCreateRequestFromJSONTyped, AppStoreVersionSubmissionCreateRequestToJSON, AppStoreVersionSubmissionFromJSON, AppStoreVersionSubmissionFromJSONTyped, AppStoreVersionSubmissionRelationshipsFromJSON, AppStoreVersionSubmissionRelationshipsFromJSONTyped, AppStoreVersionSubmissionRelationshipsToJSON, AppStoreVersionSubmissionResponseFromJSON, AppStoreVersionSubmissionResponseFromJSONTyped, AppStoreVersionSubmissionResponseToJSON, AppStoreVersionSubmissionToJSON, AppStoreVersionSubmissionTypeEnum, AppStoreVersionSubmissionsApi, AppStoreVersionToJSON, AppStoreVersionTypeEnum, AppStoreVersionUpdateRequestDataAttributesFromJSON, AppStoreVersionUpdateRequestDataAttributesFromJSONTyped, AppStoreVersionUpdateRequestDataAttributesReleaseTypeEnum, AppStoreVersionUpdateRequestDataAttributesToJSON, AppStoreVersionUpdateRequestDataFromJSON, AppStoreVersionUpdateRequestDataFromJSONTyped, AppStoreVersionUpdateRequestDataRelationshipsFromJSON, AppStoreVersionUpdateRequestDataRelationshipsFromJSONTyped, AppStoreVersionUpdateRequestDataRelationshipsToJSON, AppStoreVersionUpdateRequestDataToJSON, AppStoreVersionUpdateRequestDataTypeEnum, AppStoreVersionUpdateRequestFromJSON, AppStoreVersionUpdateRequestFromJSONTyped, AppStoreVersionUpdateRequestToJSON, AppStoreVersionsAgeRatingDeclarationGetToOneRelatedFieldsAgeRatingDeclarationsEnum, AppStoreVersionsApi, AppStoreVersionsAppClipDefaultExperienceGetToOneRelatedFieldsAppClipAppStoreReviewDetailsEnum, AppStoreVersionsAppClipDefaultExperienceGetToOneRelatedFieldsAppClipDefaultExperienceLocalizationsEnum, AppStoreVersionsAppClipDefaultExperienceGetToOneRelatedFieldsAppClipDefaultExperiencesEnum, AppStoreVersionsAppClipDefaultExperienceGetToOneRelatedFieldsAppClipsEnum, AppStoreVersionsAppClipDefaultExperienceGetToOneRelatedFieldsAppStoreVersionsEnum, AppStoreVersionsAppClipDefaultExperienceGetToOneRelatedIncludeEnum, AppStoreVersionsAppStoreReviewDetailGetToOneRelatedFieldsAppStoreReviewAttachmentsEnum, AppStoreVersionsAppStoreReviewDetailGetToOneRelatedFieldsAppStoreReviewDetailsEnum, AppStoreVersionsAppStoreReviewDetailGetToOneRelatedFieldsAppStoreVersionsEnum, AppStoreVersionsAppStoreReviewDetailGetToOneRelatedIncludeEnum, AppStoreVersionsAppStoreVersionExperimentsGetToManyRelatedFieldsAppStoreVersionExperimentTreatmentsEnum, AppStoreVersionsAppStoreVersionExperimentsGetToManyRelatedFieldsAppStoreVersionExperimentsEnum, AppStoreVersionsAppStoreVersionExperimentsGetToManyRelatedFieldsAppStoreVersionsEnum, AppStoreVersionsAppStoreVersionExperimentsGetToManyRelatedFilterStateEnum, AppStoreVersionsAppStoreVersionExperimentsGetToManyRelatedIncludeEnum, AppStoreVersionsAppStoreVersionLocalizationsGetToManyRelatedFieldsAppStoreVersionLocalizationsEnum, AppStoreVersionsAppStoreVersionPhasedReleaseGetToOneRelatedFieldsAppStoreVersionPhasedReleasesEnum, AppStoreVersionsAppStoreVersionSubmissionGetToOneRelatedFieldsAppStoreVersionSubmissionsEnum, AppStoreVersionsAppStoreVersionSubmissionGetToOneRelatedFieldsAppStoreVersionsEnum, AppStoreVersionsAppStoreVersionSubmissionGetToOneRelatedIncludeEnum, AppStoreVersionsBuildGetToOneRelatedFieldsBuildsEnum, AppStoreVersionsCustomerReviewsGetToManyRelatedFieldsCustomerReviewResponsesEnum, AppStoreVersionsCustomerReviewsGetToManyRelatedFieldsCustomerReviewsEnum, AppStoreVersionsCustomerReviewsGetToManyRelatedFilterTerritoryEnum, AppStoreVersionsCustomerReviewsGetToManyRelatedIncludeEnum, AppStoreVersionsCustomerReviewsGetToManyRelatedSortEnum, AppStoreVersionsGetInstanceFieldsAgeRatingDeclarationsEnum, AppStoreVersionsGetInstanceFieldsAppClipDefaultExperiencesEnum, AppStoreVersionsGetInstanceFieldsAppStoreReviewDetailsEnum, AppStoreVersionsGetInstanceFieldsAppStoreVersionExperimentsEnum, AppStoreVersionsGetInstanceFieldsAppStoreVersionLocalizationsEnum, AppStoreVersionsGetInstanceFieldsAppStoreVersionPhasedReleasesEnum, AppStoreVersionsGetInstanceFieldsAppStoreVersionSubmissionsEnum, AppStoreVersionsGetInstanceFieldsAppStoreVersionsEnum, AppStoreVersionsGetInstanceFieldsBuildsEnum, AppStoreVersionsGetInstanceFieldsCustomerReviewsEnum, AppStoreVersionsGetInstanceFieldsRoutingAppCoveragesEnum, AppStoreVersionsGetInstanceIncludeEnum, AppStoreVersionsResponseFromJSON, AppStoreVersionsResponseFromJSONTyped, AppStoreVersionsResponseIncludedInnerFromJSON, AppStoreVersionsResponseIncludedInnerFromJSONTyped, AppStoreVersionsResponseIncludedInnerToJSON, AppStoreVersionsResponseToJSON, AppStoreVersionsRoutingAppCoverageGetToOneRelatedFieldsRoutingAppCoveragesEnum, AppToJSON, AppTypeEnum, AppUpdateRequestDataAttributesContentRightsDeclarationEnum, AppUpdateRequestDataAttributesFromJSON, AppUpdateRequestDataAttributesFromJSONTyped, AppUpdateRequestDataAttributesToJSON, AppUpdateRequestDataFromJSON, AppUpdateRequestDataFromJSONTyped, AppUpdateRequestDataRelationshipsAvailableTerritoriesFromJSON, AppUpdateRequestDataRelationshipsAvailableTerritoriesFromJSONTyped, AppUpdateRequestDataRelationshipsAvailableTerritoriesToJSON, AppUpdateRequestDataRelationshipsFromJSON, AppUpdateRequestDataRelationshipsFromJSONTyped, AppUpdateRequestDataRelationshipsPricesFromJSON, AppUpdateRequestDataRelationshipsPricesFromJSONTyped, AppUpdateRequestDataRelationshipsPricesToJSON, AppUpdateRequestDataRelationshipsToJSON, AppUpdateRequestDataToJSON, AppUpdateRequestDataTypeEnum, AppUpdateRequestFromJSON, AppUpdateRequestFromJSONTyped, AppUpdateRequestToJSON, AppsApi, AppsAppClipsGetToManyRelatedFieldsAppClipDefaultExperiencesEnum, AppsAppClipsGetToManyRelatedFieldsAppClipsEnum, AppsAppClipsGetToManyRelatedFieldsAppsEnum, AppsAppClipsGetToManyRelatedIncludeEnum, AppsAppCustomProductPagesGetToManyRelatedFieldsAppCustomProductPageVersionsEnum, AppsAppCustomProductPagesGetToManyRelatedFieldsAppCustomProductPagesEnum, AppsAppCustomProductPagesGetToManyRelatedFieldsAppsEnum, AppsAppCustomProductPagesGetToManyRelatedIncludeEnum, AppsAppEventsGetToManyRelatedFieldsAppEventLocalizationsEnum, AppsAppEventsGetToManyRelatedFieldsAppEventsEnum, AppsAppEventsGetToManyRelatedFilterEventStateEnum, AppsAppEventsGetToManyRelatedIncludeEnum, AppsAppInfosGetToManyRelatedFieldsAgeRatingDeclarationsEnum, AppsAppInfosGetToManyRelatedFieldsAppCategoriesEnum, AppsAppInfosGetToManyRelatedFieldsAppInfoLocalizationsEnum, AppsAppInfosGetToManyRelatedFieldsAppInfosEnum, AppsAppInfosGetToManyRelatedFieldsAppsEnum, AppsAppInfosGetToManyRelatedIncludeEnum, AppsAppStoreVersionsGetToManyRelatedFieldsAgeRatingDeclarationsEnum, AppsAppStoreVersionsGetToManyRelatedFieldsAppClipDefaultExperiencesEnum, AppsAppStoreVersionsGetToManyRelatedFieldsAppStoreReviewDetailsEnum, AppsAppStoreVersionsGetToManyRelatedFieldsAppStoreVersionExperimentsEnum, AppsAppStoreVersionsGetToManyRelatedFieldsAppStoreVersionLocalizationsEnum, AppsAppStoreVersionsGetToManyRelatedFieldsAppStoreVersionPhasedReleasesEnum, AppsAppStoreVersionsGetToManyRelatedFieldsAppStoreVersionSubmissionsEnum, AppsAppStoreVersionsGetToManyRelatedFieldsAppStoreVersionsEnum, AppsAppStoreVersionsGetToManyRelatedFieldsAppsEnum, AppsAppStoreVersionsGetToManyRelatedFieldsBuildsEnum, AppsAppStoreVersionsGetToManyRelatedFieldsRoutingAppCoveragesEnum, AppsAppStoreVersionsGetToManyRelatedFilterAppStoreStateEnum, AppsAppStoreVersionsGetToManyRelatedFilterPlatformEnum, AppsAppStoreVersionsGetToManyRelatedIncludeEnum, AppsAvailableTerritoriesGetToManyRelatedFieldsTerritoriesEnum, AppsBetaAppLocalizationsGetToManyRelatedFieldsBetaAppLocalizationsEnum, AppsBetaAppReviewDetailGetToOneRelatedFieldsBetaAppReviewDetailsEnum, AppsBetaGroupsGetToManyRelatedFieldsBetaGroupsEnum, AppsBetaLicenseAgreementGetToOneRelatedFieldsBetaLicenseAgreementsEnum, AppsBuildsGetToManyRelatedFieldsBuildsEnum, AppsCiProductGetToOneRelatedFieldsAppsEnum, AppsCiProductGetToOneRelatedFieldsBundleIdsEnum, AppsCiProductGetToOneRelatedFieldsCiProductsEnum, AppsCiProductGetToOneRelatedFieldsScmRepositoriesEnum, AppsCiProductGetToOneRelatedIncludeEnum, AppsCustomerReviewsGetToManyRelatedFieldsCustomerReviewResponsesEnum, AppsCustomerReviewsGetToManyRelatedFieldsCustomerReviewsEnum, AppsCustomerReviewsGetToManyRelatedFilterTerritoryEnum, AppsCustomerReviewsGetToManyRelatedIncludeEnum, AppsCustomerReviewsGetToManyRelatedSortEnum, AppsEndUserLicenseAgreementGetToOneRelatedFieldsEndUserLicenseAgreementsEnum, AppsGameCenterEnabledVersionsGetToManyRelatedFieldsAppsEnum, AppsGameCenterEnabledVersionsGetToManyRelatedFieldsGameCenterEnabledVersionsEnum, AppsGameCenterEnabledVersionsGetToManyRelatedFilterPlatformEnum, AppsGameCenterEnabledVersionsGetToManyRelatedIncludeEnum, AppsGameCenterEnabledVersionsGetToManyRelatedSortEnum, AppsGetCollectionFieldsAppClipsEnum, AppsGetCollectionFieldsAppCustomProductPagesEnum, AppsGetCollectionFieldsAppEventsEnum, AppsGetCollectionFieldsAppInfosEnum, AppsGetCollectionFieldsAppPreOrdersEnum, AppsGetCollectionFieldsAppPricePointsEnum, AppsGetCollectionFieldsAppPricesEnum, AppsGetCollectionFieldsAppStoreVersionsEnum, AppsGetCollectionFieldsAppsEnum, AppsGetCollectionFieldsBetaAppLocalizationsEnum, AppsGetCollectionFieldsBetaAppReviewDetailsEnum, AppsGetCollectionFieldsBetaGroupsEnum, AppsGetCollectionFieldsBetaLicenseAgreementsEnum, AppsGetCollectionFieldsBuildsEnum, AppsGetCollectionFieldsCiProductsEnum, AppsGetCollectionFieldsCustomerReviewsEnum, AppsGetCollectionFieldsEndUserLicenseAgreementsEnum, AppsGetCollectionFieldsGameCenterEnabledVersionsEnum, AppsGetCollectionFieldsInAppPurchasesEnum, AppsGetCollectionFieldsPerfPowerMetricsEnum, AppsGetCollectionFieldsPreReleaseVersionsEnum, AppsGetCollectionFieldsPromotedPurchasesEnum, AppsGetCollectionFieldsReviewSubmissionsEnum, AppsGetCollectionFieldsSubscriptionGracePeriodsEnum, AppsGetCollectionFieldsSubscriptionGroupsEnum, AppsGetCollectionFieldsTerritoriesEnum, AppsGetCollectionFilterAppStoreVersionsAppStoreStateEnum, AppsGetCollectionFilterAppStoreVersionsPlatformEnum, AppsGetCollectionIncludeEnum, AppsGetCollectionSortEnum, AppsGetInstanceFieldsAppClipsEnum, AppsGetInstanceFieldsAppCustomProductPagesEnum, AppsGetInstanceFieldsAppEventsEnum, AppsGetInstanceFieldsAppInfosEnum, AppsGetInstanceFieldsAppPreOrdersEnum, AppsGetInstanceFieldsAppPricePointsEnum, AppsGetInstanceFieldsAppPricesEnum, AppsGetInstanceFieldsAppStoreVersionsEnum, AppsGetInstanceFieldsAppsEnum, AppsGetInstanceFieldsBetaAppLocalizationsEnum, AppsGetInstanceFieldsBetaAppReviewDetailsEnum, AppsGetInstanceFieldsBetaGroupsEnum, AppsGetInstanceFieldsBetaLicenseAgreementsEnum, AppsGetInstanceFieldsBuildsEnum, AppsGetInstanceFieldsCiProductsEnum, AppsGetInstanceFieldsCustomerReviewsEnum, AppsGetInstanceFieldsEndUserLicenseAgreementsEnum, AppsGetInstanceFieldsGameCenterEnabledVersionsEnum, AppsGetInstanceFieldsInAppPurchasesEnumMap, AppsGetInstanceFieldsPerfPowerMetricsEnum, AppsGetInstanceFieldsPreReleaseVersionsEnum, AppsGetInstanceFieldsPromotedPurchasesEnum, AppsGetInstanceFieldsReviewSubmissionsEnum, AppsGetInstanceFieldsSubscriptionGracePeriodsEnum, AppsGetInstanceFieldsSubscriptionGroupsEnum, AppsGetInstanceFieldsTerritoriesEnum, AppsGetInstanceIncludeEnum, AppsInAppPurchasesGetToManyRelatedFieldsAppsEnum, AppsInAppPurchasesGetToManyRelatedFieldsInAppPurchasesEnum, AppsInAppPurchasesGetToManyRelatedFilterInAppPurchaseTypeEnum, AppsInAppPurchasesGetToManyRelatedIncludeEnum, AppsInAppPurchasesGetToManyRelatedSortEnum, AppsInAppPurchasesV2GetToManyRelatedFieldsInAppPurchaseAppStoreReviewScreenshotsEnum, AppsInAppPurchasesV2GetToManyRelatedFieldsInAppPurchaseContentsEnum, AppsInAppPurchasesV2GetToManyRelatedFieldsInAppPurchaseLocalizationsEnum, AppsInAppPurchasesV2GetToManyRelatedFieldsInAppPurchasePricePointsEnum, AppsInAppPurchasesV2GetToManyRelatedFieldsInAppPurchasePriceSchedulesEnum, AppsInAppPurchasesV2GetToManyRelatedFieldsInAppPurchasesEnum, AppsInAppPurchasesV2GetToManyRelatedFieldsPromotedPurchasesEnum, AppsInAppPurchasesV2GetToManyRelatedFilterInAppPurchaseTypeEnum, AppsInAppPurchasesV2GetToManyRelatedFilterStateEnum, AppsInAppPurchasesV2GetToManyRelatedIncludeEnum, AppsInAppPurchasesV2GetToManyRelatedSortEnum, AppsPerfPowerMetricsGetToManyRelatedFilterMetricTypeEnum, AppsPerfPowerMetricsGetToManyRelatedFilterPlatformEnum, AppsPreOrderGetToOneRelatedFieldsAppPreOrdersEnum, AppsPreReleaseVersionsGetToManyRelatedFieldsPreReleaseVersionsEnum, AppsPricePointsGetToManyRelatedFieldsAppPricePointsEnum, AppsPricePointsGetToManyRelatedFieldsAppPriceTiersEnum, AppsPricePointsGetToManyRelatedFieldsAppsEnum, AppsPricePointsGetToManyRelatedFieldsTerritoriesEnum, AppsPricePointsGetToManyRelatedIncludeEnum, AppsPricesGetToManyRelatedFieldsAppPriceTiersEnum, AppsPricesGetToManyRelatedFieldsAppPricesEnum, AppsPricesGetToManyRelatedFieldsAppsEnum, AppsPricesGetToManyRelatedIncludeEnum, AppsPromotedPurchasesGetToManyRelatedFieldsInAppPurchasesEnum, AppsPromotedPurchasesGetToManyRelatedFieldsPromotedPurchaseImagesEnum, AppsPromotedPurchasesGetToManyRelatedFieldsPromotedPurchasesEnum, AppsPromotedPurchasesGetToManyRelatedFieldsSubscriptionsEnum, AppsPromotedPurchasesGetToManyRelatedIncludeEnum, AppsResponseFromJSON, AppsResponseFromJSONTyped, AppsResponseIncludedInnerFromJSON, AppsResponseIncludedInnerFromJSONTyped, AppsResponseIncludedInnerToJSON, AppsResponseToJSON, AppsReviewSubmissionsGetToManyRelatedFieldsAppStoreVersionsEnum, AppsReviewSubmissionsGetToManyRelatedFieldsAppsEnum, AppsReviewSubmissionsGetToManyRelatedFieldsReviewSubmissionItemsEnum, AppsReviewSubmissionsGetToManyRelatedFieldsReviewSubmissionsEnum, AppsReviewSubmissionsGetToManyRelatedFilterPlatformEnum, AppsReviewSubmissionsGetToManyRelatedFilterStateEnum, AppsReviewSubmissionsGetToManyRelatedIncludeEnum, AppsSubscriptionGracePeriodGetToOneRelatedFieldsSubscriptionGracePeriodsEnum, AppsSubscriptionGroupsGetToManyRelatedFieldsSubscriptionGroupLocalizationsEnum, AppsSubscriptionGroupsGetToManyRelatedFieldsSubscriptionGroupsEnum, AppsSubscriptionGroupsGetToManyRelatedFieldsSubscriptionsEnum, AppsSubscriptionGroupsGetToManyRelatedFilterSubscriptionsStateEnum, AppsSubscriptionGroupsGetToManyRelatedIncludeEnum, AppsSubscriptionGroupsGetToManyRelatedSortEnum, BASE_PATH, BaseAPI, BetaAppClipInvocationAttributesFromJSON, BetaAppClipInvocationAttributesFromJSONTyped, BetaAppClipInvocationAttributesToJSON, BetaAppClipInvocationCreateRequestDataAttributesFromJSON, BetaAppClipInvocationCreateRequestDataAttributesFromJSONTyped, BetaAppClipInvocationCreateRequestDataAttributesToJSON, BetaAppClipInvocationCreateRequestDataFromJSON, BetaAppClipInvocationCreateRequestDataFromJSONTyped, BetaAppClipInvocationCreateRequestDataRelationshipsBetaAppClipInvocationLocalizationsFromJSON, BetaAppClipInvocationCreateRequestDataRelationshipsBetaAppClipInvocationLocalizationsFromJSONTyped, BetaAppClipInvocationCreateRequestDataRelationshipsBetaAppClipInvocationLocalizationsToJSON, BetaAppClipInvocationCreateRequestDataRelationshipsBuildBundleDataFromJSON, BetaAppClipInvocationCreateRequestDataRelationshipsBuildBundleDataFromJSONTyped, BetaAppClipInvocationCreateRequestDataRelationshipsBuildBundleDataToJSON, BetaAppClipInvocationCreateRequestDataRelationshipsBuildBundleDataTypeEnum, BetaAppClipInvocationCreateRequestDataRelationshipsBuildBundleFromJSON, BetaAppClipInvocationCreateRequestDataRelationshipsBuildBundleFromJSONTyped, BetaAppClipInvocationCreateRequestDataRelationshipsBuildBundleToJSON, BetaAppClipInvocationCreateRequestDataRelationshipsFromJSON, BetaAppClipInvocationCreateRequestDataRelationshipsFromJSONTyped, BetaAppClipInvocationCreateRequestDataRelationshipsToJSON, BetaAppClipInvocationCreateRequestDataToJSON, BetaAppClipInvocationCreateRequestDataTypeEnum, BetaAppClipInvocationCreateRequestFromJSON, BetaAppClipInvocationCreateRequestFromJSONTyped, BetaAppClipInvocationCreateRequestToJSON, BetaAppClipInvocationFromJSON, BetaAppClipInvocationFromJSONTyped, BetaAppClipInvocationLocalizationAttributesFromJSON, BetaAppClipInvocationLocalizationAttributesFromJSONTyped, BetaAppClipInvocationLocalizationAttributesToJSON, BetaAppClipInvocationLocalizationCreateRequestDataFromJSON, BetaAppClipInvocationLocalizationCreateRequestDataFromJSONTyped, BetaAppClipInvocationLocalizationCreateRequestDataRelationshipsBetaAppClipInvocationFromJSON, BetaAppClipInvocationLocalizationCreateRequestDataRelationshipsBetaAppClipInvocationFromJSONTyped, BetaAppClipInvocationLocalizationCreateRequestDataRelationshipsBetaAppClipInvocationToJSON, BetaAppClipInvocationLocalizationCreateRequestDataRelationshipsFromJSON, BetaAppClipInvocationLocalizationCreateRequestDataRelationshipsFromJSONTyped, BetaAppClipInvocationLocalizationCreateRequestDataRelationshipsToJSON, BetaAppClipInvocationLocalizationCreateRequestDataToJSON, BetaAppClipInvocationLocalizationCreateRequestDataTypeEnum, BetaAppClipInvocationLocalizationCreateRequestFromJSON, BetaAppClipInvocationLocalizationCreateRequestFromJSONTyped, BetaAppClipInvocationLocalizationCreateRequestToJSON, BetaAppClipInvocationLocalizationFromJSON, BetaAppClipInvocationLocalizationFromJSONTyped, BetaAppClipInvocationLocalizationInlineCreateAttributesFromJSON, BetaAppClipInvocationLocalizationInlineCreateAttributesFromJSONTyped, BetaAppClipInvocationLocalizationInlineCreateAttributesToJSON, BetaAppClipInvocationLocalizationInlineCreateFromJSON, BetaAppClipInvocationLocalizationInlineCreateFromJSONTyped, BetaAppClipInvocationLocalizationInlineCreateRelationshipsBetaAppClipInvocationDataFromJSON, BetaAppClipInvocationLocalizationInlineCreateRelationshipsBetaAppClipInvocationDataFromJSONTyped, BetaAppClipInvocationLocalizationInlineCreateRelationshipsBetaAppClipInvocationDataToJSON, BetaAppClipInvocationLocalizationInlineCreateRelationshipsBetaAppClipInvocationDataTypeEnum, BetaAppClipInvocationLocalizationInlineCreateRelationshipsBetaAppClipInvocationFromJSON, BetaAppClipInvocationLocalizationInlineCreateRelationshipsBetaAppClipInvocationFromJSONTyped, BetaAppClipInvocationLocalizationInlineCreateRelationshipsBetaAppClipInvocationToJSON, BetaAppClipInvocationLocalizationInlineCreateRelationshipsFromJSON, BetaAppClipInvocationLocalizationInlineCreateRelationshipsFromJSONTyped, BetaAppClipInvocationLocalizationInlineCreateRelationshipsToJSON, BetaAppClipInvocationLocalizationInlineCreateToJSON, BetaAppClipInvocationLocalizationInlineCreateTypeEnum, BetaAppClipInvocationLocalizationResponseFromJSON, BetaAppClipInvocationLocalizationResponseFromJSONTyped, BetaAppClipInvocationLocalizationResponseToJSON, BetaAppClipInvocationLocalizationToJSON, BetaAppClipInvocationLocalizationTypeEnum, BetaAppClipInvocationLocalizationUpdateRequestDataAttributesFromJSON, BetaAppClipInvocationLocalizationUpdateRequestDataAttributesFromJSONTyped, BetaAppClipInvocationLocalizationUpdateRequestDataAttributesToJSON, BetaAppClipInvocationLocalizationUpdateRequestDataFromJSON, BetaAppClipInvocationLocalizationUpdateRequestDataFromJSONTyped, BetaAppClipInvocationLocalizationUpdateRequestDataToJSON, BetaAppClipInvocationLocalizationUpdateRequestDataTypeEnum, BetaAppClipInvocationLocalizationUpdateRequestFromJSON, BetaAppClipInvocationLocalizationUpdateRequestFromJSONTyped, BetaAppClipInvocationLocalizationUpdateRequestToJSON, BetaAppClipInvocationLocalizationsApi, BetaAppClipInvocationRelationshipsBetaAppClipInvocationLocalizationsDataInnerFromJSON, BetaAppClipInvocationRelationshipsBetaAppClipInvocationLocalizationsDataInnerFromJSONTyped, BetaAppClipInvocationRelationshipsBetaAppClipInvocationLocalizationsDataInnerToJSON, BetaAppClipInvocationRelationshipsBetaAppClipInvocationLocalizationsDataInnerTypeEnum, BetaAppClipInvocationRelationshipsBetaAppClipInvocationLocalizationsFromJSON, BetaAppClipInvocationRelationshipsBetaAppClipInvocationLocalizationsFromJSONTyped, BetaAppClipInvocationRelationshipsBetaAppClipInvocationLocalizationsToJSON, BetaAppClipInvocationRelationshipsFromJSON, BetaAppClipInvocationRelationshipsFromJSONTyped, BetaAppClipInvocationRelationshipsToJSON, BetaAppClipInvocationResponseFromJSON, BetaAppClipInvocationResponseFromJSONTyped, BetaAppClipInvocationResponseToJSON, BetaAppClipInvocationToJSON, BetaAppClipInvocationTypeEnum, BetaAppClipInvocationUpdateRequestDataFromJSON, BetaAppClipInvocationUpdateRequestDataFromJSONTyped, BetaAppClipInvocationUpdateRequestDataToJSON, BetaAppClipInvocationUpdateRequestDataTypeEnum, BetaAppClipInvocationUpdateRequestFromJSON, BetaAppClipInvocationUpdateRequestFromJSONTyped, BetaAppClipInvocationUpdateRequestToJSON, BetaAppClipInvocationsApi, BetaAppClipInvocationsGetInstanceFieldsBetaAppClipInvocationsEnum, BetaAppClipInvocationsGetInstanceIncludeEnum, BetaAppClipInvocationsResponseFromJSON, BetaAppClipInvocationsResponseFromJSONTyped, BetaAppClipInvocationsResponseToJSON, BetaAppLocalizationAttributesFromJSON, BetaAppLocalizationAttributesFromJSONTyped, BetaAppLocalizationAttributesToJSON, BetaAppLocalizationCreateRequestDataAttributesFromJSON, BetaAppLocalizationCreateRequestDataAttributesFromJSONTyped, BetaAppLocalizationCreateRequestDataAttributesToJSON, BetaAppLocalizationCreateRequestDataFromJSON, BetaAppLocalizationCreateRequestDataFromJSONTyped, BetaAppLocalizationCreateRequestDataToJSON, BetaAppLocalizationCreateRequestDataTypeEnum, BetaAppLocalizationCreateRequestFromJSON, BetaAppLocalizationCreateRequestFromJSONTyped, BetaAppLocalizationCreateRequestToJSON, BetaAppLocalizationFromJSON, BetaAppLocalizationFromJSONTyped, BetaAppLocalizationResponseFromJSON, BetaAppLocalizationResponseFromJSONTyped, BetaAppLocalizationResponseToJSON, BetaAppLocalizationToJSON, BetaAppLocalizationTypeEnum, BetaAppLocalizationUpdateRequestDataAttributesFromJSON, BetaAppLocalizationUpdateRequestDataAttributesFromJSONTyped, BetaAppLocalizationUpdateRequestDataAttributesToJSON, BetaAppLocalizationUpdateRequestDataFromJSON, BetaAppLocalizationUpdateRequestDataFromJSONTyped, BetaAppLocalizationUpdateRequestDataToJSON, BetaAppLocalizationUpdateRequestDataTypeEnum, BetaAppLocalizationUpdateRequestFromJSON, BetaAppLocalizationUpdateRequestFromJSONTyped, BetaAppLocalizationUpdateRequestToJSON, BetaAppLocalizationsApi, BetaAppLocalizationsAppGetToOneRelatedFieldsAppsEnum, BetaAppLocalizationsGetCollectionFieldsAppsEnum, BetaAppLocalizationsGetCollectionFieldsBetaAppLocalizationsEnum, BetaAppLocalizationsGetCollectionIncludeEnum, BetaAppLocalizationsGetInstanceFieldsAppsEnum, BetaAppLocalizationsGetInstanceFieldsBetaAppLocalizationsEnum, BetaAppLocalizationsGetInstanceIncludeEnum, BetaAppLocalizationsResponseFromJSON, BetaAppLocalizationsResponseFromJSONTyped, BetaAppLocalizationsResponseToJSON, BetaAppReviewDetailFromJSON, BetaAppReviewDetailFromJSONTyped, BetaAppReviewDetailResponseFromJSON, BetaAppReviewDetailResponseFromJSONTyped, BetaAppReviewDetailResponseToJSON, BetaAppReviewDetailToJSON, BetaAppReviewDetailTypeEnum, BetaAppReviewDetailUpdateRequestDataFromJSON, BetaAppReviewDetailUpdateRequestDataFromJSONTyped, BetaAppReviewDetailUpdateRequestDataToJSON, BetaAppReviewDetailUpdateRequestDataTypeEnum, BetaAppReviewDetailUpdateRequestFromJSON, BetaAppReviewDetailUpdateRequestFromJSONTyped, BetaAppReviewDetailUpdateRequestToJSON, BetaAppReviewDetailsApi, BetaAppReviewDetailsAppGetToOneRelatedFieldsAppsEnum, BetaAppReviewDetailsGetCollectionFieldsAppsEnum, BetaAppReviewDetailsGetCollectionFieldsBetaAppReviewDetailsEnum, BetaAppReviewDetailsGetCollectionIncludeEnum, BetaAppReviewDetailsGetInstanceFieldsAppsEnum, BetaAppReviewDetailsGetInstanceFieldsBetaAppReviewDetailsEnum, BetaAppReviewDetailsGetInstanceIncludeEnum, BetaAppReviewDetailsResponseFromJSON, BetaAppReviewDetailsResponseFromJSONTyped, BetaAppReviewDetailsResponseToJSON, BetaAppReviewSubmissionAttributesFromJSON, BetaAppReviewSubmissionAttributesFromJSONTyped, BetaAppReviewSubmissionAttributesToJSON, BetaAppReviewSubmissionCreateRequestDataFromJSON, BetaAppReviewSubmissionCreateRequestDataFromJSONTyped, BetaAppReviewSubmissionCreateRequestDataRelationshipsBuildFromJSON, BetaAppReviewSubmissionCreateRequestDataRelationshipsBuildFromJSONTyped, BetaAppReviewSubmissionCreateRequestDataRelationshipsBuildToJSON, BetaAppReviewSubmissionCreateRequestDataRelationshipsFromJSON, BetaAppReviewSubmissionCreateRequestDataRelationshipsFromJSONTyped, BetaAppReviewSubmissionCreateRequestDataRelationshipsToJSON, BetaAppReviewSubmissionCreateRequestDataToJSON, BetaAppReviewSubmissionCreateRequestDataTypeEnum, BetaAppReviewSubmissionCreateRequestFromJSON, BetaAppReviewSubmissionCreateRequestFromJSONTyped, BetaAppReviewSubmissionCreateRequestToJSON, BetaAppReviewSubmissionFromJSON, BetaAppReviewSubmissionFromJSONTyped, BetaAppReviewSubmissionRelationshipsFromJSON, BetaAppReviewSubmissionRelationshipsFromJSONTyped, BetaAppReviewSubmissionRelationshipsToJSON, BetaAppReviewSubmissionResponseFromJSON, BetaAppReviewSubmissionResponseFromJSONTyped, BetaAppReviewSubmissionResponseToJSON, BetaAppReviewSubmissionToJSON, BetaAppReviewSubmissionTypeEnum, BetaAppReviewSubmissionsApi, BetaAppReviewSubmissionsBuildGetToOneRelatedFieldsBuildsEnum, BetaAppReviewSubmissionsGetCollectionFieldsBetaAppReviewSubmissionsEnum, BetaAppReviewSubmissionsGetCollectionFieldsBuildsEnum, BetaAppReviewSubmissionsGetCollectionFilterBetaReviewStateEnum, BetaAppReviewSubmissionsGetCollectionIncludeEnum, BetaAppReviewSubmissionsGetInstanceFieldsBetaAppReviewSubmissionsEnum, BetaAppReviewSubmissionsGetInstanceFieldsBuildsEnum, BetaAppReviewSubmissionsGetInstanceIncludeEnum, BetaAppReviewSubmissionsResponseFromJSON, BetaAppReviewSubmissionsResponseFromJSONTyped, BetaAppReviewSubmissionsResponseToJSON, BetaBuildLocalizationAttributesFromJSON, BetaBuildLocalizationAttributesFromJSONTyped, BetaBuildLocalizationAttributesToJSON, BetaBuildLocalizationCreateRequestDataAttributesFromJSON, BetaBuildLocalizationCreateRequestDataAttributesFromJSONTyped, BetaBuildLocalizationCreateRequestDataAttributesToJSON, BetaBuildLocalizationCreateRequestDataFromJSON, BetaBuildLocalizationCreateRequestDataFromJSONTyped, BetaBuildLocalizationCreateRequestDataToJSON, BetaBuildLocalizationCreateRequestDataTypeEnum, BetaBuildLocalizationCreateRequestFromJSON, BetaBuildLocalizationCreateRequestFromJSONTyped, BetaBuildLocalizationCreateRequestToJSON, BetaBuildLocalizationFromJSON, BetaBuildLocalizationFromJSONTyped, BetaBuildLocalizationResponseFromJSON, BetaBuildLocalizationResponseFromJSONTyped, BetaBuildLocalizationResponseToJSON, BetaBuildLocalizationToJSON, BetaBuildLocalizationTypeEnum, BetaBuildLocalizationUpdateRequestDataAttributesFromJSON, BetaBuildLocalizationUpdateRequestDataAttributesFromJSONTyped, BetaBuildLocalizationUpdateRequestDataAttributesToJSON, BetaBuildLocalizationUpdateRequestDataFromJSON, BetaBuildLocalizationUpdateRequestDataFromJSONTyped, BetaBuildLocalizationUpdateRequestDataToJSON, BetaBuildLocalizationUpdateRequestDataTypeEnum, BetaBuildLocalizationUpdateRequestFromJSON, BetaBuildLocalizationUpdateRequestFromJSONTyped, BetaBuildLocalizationUpdateRequestToJSON, BetaBuildLocalizationsApi, BetaBuildLocalizationsBuildGetToOneRelatedFieldsBuildsEnum, BetaBuildLocalizationsGetCollectionFieldsBetaBuildLocalizationsEnum, BetaBuildLocalizationsGetCollectionFieldsBuildsEnum, BetaBuildLocalizationsGetCollectionIncludeEnum, BetaBuildLocalizationsGetInstanceFieldsBetaBuildLocalizationsEnum, BetaBuildLocalizationsGetInstanceFieldsBuildsEnum, BetaBuildLocalizationsGetInstanceIncludeEnum, BetaBuildLocalizationsResponseFromJSON, BetaBuildLocalizationsResponseFromJSONTyped, BetaBuildLocalizationsResponseToJSON, BetaGroupAttributesFromJSON, BetaGroupAttributesFromJSONTyped, BetaGroupAttributesToJSON, BetaGroupBetaTestersLinkagesRequestFromJSON, BetaGroupBetaTestersLinkagesRequestFromJSONTyped, BetaGroupBetaTestersLinkagesRequestToJSON, BetaGroupBetaTestersLinkagesResponseFromJSON, BetaGroupBetaTestersLinkagesResponseFromJSONTyped, BetaGroupBetaTestersLinkagesResponseToJSON, BetaGroupBuildsLinkagesRequestFromJSON, BetaGroupBuildsLinkagesRequestFromJSONTyped, BetaGroupBuildsLinkagesRequestToJSON, BetaGroupBuildsLinkagesResponseFromJSON, BetaGroupBuildsLinkagesResponseFromJSONTyped, BetaGroupBuildsLinkagesResponseToJSON, BetaGroupCreateRequestDataAttributesFromJSON, BetaGroupCreateRequestDataAttributesFromJSONTyped, BetaGroupCreateRequestDataAttributesToJSON, BetaGroupCreateRequestDataFromJSON, BetaGroupCreateRequestDataFromJSONTyped, BetaGroupCreateRequestDataRelationshipsBetaTestersFromJSON, BetaGroupCreateRequestDataRelationshipsBetaTestersFromJSONTyped, BetaGroupCreateRequestDataRelationshipsBetaTestersToJSON, BetaGroupCreateRequestDataRelationshipsBuildsFromJSON, BetaGroupCreateRequestDataRelationshipsBuildsFromJSONTyped, BetaGroupCreateRequestDataRelationshipsBuildsToJSON, BetaGroupCreateRequestDataRelationshipsFromJSON, BetaGroupCreateRequestDataRelationshipsFromJSONTyped, BetaGroupCreateRequestDataRelationshipsToJSON, BetaGroupCreateRequestDataToJSON, BetaGroupCreateRequestDataTypeEnum, BetaGroupCreateRequestFromJSON, BetaGroupCreateRequestFromJSONTyped, BetaGroupCreateRequestToJSON, BetaGroupFromJSON, BetaGroupFromJSONTyped, BetaGroupRelationshipsBetaTestersDataInnerFromJSON, BetaGroupRelationshipsBetaTestersDataInnerFromJSONTyped, BetaGroupRelationshipsBetaTestersDataInnerToJSON, BetaGroupRelationshipsBetaTestersDataInnerTypeEnum, BetaGroupRelationshipsBetaTestersFromJSON, BetaGroupRelationshipsBetaTestersFromJSONTyped, BetaGroupRelationshipsBetaTestersToJSON, BetaGroupRelationshipsFromJSON, BetaGroupRelationshipsFromJSONTyped, BetaGroupRelationshipsToJSON, BetaGroupResponseFromJSON, BetaGroupResponseFromJSONTyped, BetaGroupResponseToJSON, BetaGroupToJSON, BetaGroupTypeEnum, BetaGroupUpdateRequestDataAttributesFromJSON, BetaGroupUpdateRequestDataAttributesFromJSONTyped, BetaGroupUpdateRequestDataAttributesToJSON, BetaGroupUpdateRequestDataFromJSON, BetaGroupUpdateRequestDataFromJSONTyped, BetaGroupUpdateRequestDataToJSON, BetaGroupUpdateRequestDataTypeEnum, BetaGroupUpdateRequestFromJSON, BetaGroupUpdateRequestFromJSONTyped, BetaGroupUpdateRequestToJSON, BetaGroupsApi, BetaGroupsAppGetToOneRelatedFieldsAppsEnum, BetaGroupsBetaTestersGetToManyRelatedFieldsBetaTestersEnum, BetaGroupsBuildsGetToManyRelatedFieldsBuildsEnum, BetaGroupsGetCollectionFieldsAppsEnum, BetaGroupsGetCollectionFieldsBetaGroupsEnum, BetaGroupsGetCollectionFieldsBetaTestersEnum, BetaGroupsGetCollectionFieldsBuildsEnum, BetaGroupsGetCollectionIncludeEnum, BetaGroupsGetCollectionSortEnum, BetaGroupsGetInstanceFieldsAppsEnum, BetaGroupsGetInstanceFieldsBetaGroupsEnum, BetaGroupsGetInstanceFieldsBetaTestersEnum, BetaGroupsGetInstanceFieldsBuildsEnum, BetaGroupsGetInstanceIncludeEnum, BetaGroupsResponseFromJSON, BetaGroupsResponseFromJSONTyped, BetaGroupsResponseIncludedInnerFromJSON, BetaGroupsResponseIncludedInnerFromJSONTyped, BetaGroupsResponseIncludedInnerToJSON, BetaGroupsResponseToJSON, BetaInviteType, BetaInviteTypeFromJSON, BetaInviteTypeFromJSONTyped, BetaInviteTypeToJSON, BetaLicenseAgreementAttributesFromJSON, BetaLicenseAgreementAttributesFromJSONTyped, BetaLicenseAgreementAttributesToJSON, BetaLicenseAgreementFromJSON, BetaLicenseAgreementFromJSONTyped, BetaLicenseAgreementResponseFromJSON, BetaLicenseAgreementResponseFromJSONTyped, BetaLicenseAgreementResponseToJSON, BetaLicenseAgreementToJSON, BetaLicenseAgreementTypeEnum, BetaLicenseAgreementUpdateRequestDataFromJSON, BetaLicenseAgreementUpdateRequestDataFromJSONTyped, BetaLicenseAgreementUpdateRequestDataToJSON, BetaLicenseAgreementUpdateRequestDataTypeEnum, BetaLicenseAgreementUpdateRequestFromJSON, BetaLicenseAgreementUpdateRequestFromJSONTyped, BetaLicenseAgreementUpdateRequestToJSON, BetaLicenseAgreementsApi, BetaLicenseAgreementsAppGetToOneRelatedFieldsAppsEnum, BetaLicenseAgreementsGetCollectionFieldsAppsEnum, BetaLicenseAgreementsGetCollectionFieldsBetaLicenseAgreementsEnum, BetaLicenseAgreementsGetCollectionIncludeEnum, BetaLicenseAgreementsGetInstanceFieldsAppsEnum, BetaLicenseAgreementsGetInstanceFieldsBetaLicenseAgreementsEnum, BetaLicenseAgreementsGetInstanceIncludeEnum, BetaLicenseAgreementsResponseFromJSON, BetaLicenseAgreementsResponseFromJSONTyped, BetaLicenseAgreementsResponseToJSON, BetaReviewState, BetaReviewStateFromJSON, BetaReviewStateFromJSONTyped, BetaReviewStateToJSON, BetaTesterAppsLinkagesRequestFromJSON, BetaTesterAppsLinkagesRequestFromJSONTyped, BetaTesterAppsLinkagesRequestToJSON, BetaTesterAppsLinkagesResponseFromJSON, BetaTesterAppsLinkagesResponseFromJSONTyped, BetaTesterAppsLinkagesResponseToJSON, BetaTesterAttributesFromJSON, BetaTesterAttributesFromJSONTyped, BetaTesterAttributesToJSON, BetaTesterBetaGroupsLinkagesRequestFromJSON, BetaTesterBetaGroupsLinkagesRequestFromJSONTyped, BetaTesterBetaGroupsLinkagesRequestToJSON, BetaTesterBetaGroupsLinkagesResponseFromJSON, BetaTesterBetaGroupsLinkagesResponseFromJSONTyped, BetaTesterBetaGroupsLinkagesResponseToJSON, BetaTesterBuildsLinkagesRequestFromJSON, BetaTesterBuildsLinkagesRequestFromJSONTyped, BetaTesterBuildsLinkagesRequestToJSON, BetaTesterBuildsLinkagesResponseFromJSON, BetaTesterBuildsLinkagesResponseFromJSONTyped, BetaTesterBuildsLinkagesResponseToJSON, BetaTesterCreateRequestDataAttributesFromJSON, BetaTesterCreateRequestDataAttributesFromJSONTyped, BetaTesterCreateRequestDataAttributesToJSON, BetaTesterCreateRequestDataFromJSON, BetaTesterCreateRequestDataFromJSONTyped, BetaTesterCreateRequestDataRelationshipsBetaGroupsFromJSON, BetaTesterCreateRequestDataRelationshipsBetaGroupsFromJSONTyped, BetaTesterCreateRequestDataRelationshipsBetaGroupsToJSON, BetaTesterCreateRequestDataRelationshipsFromJSON, BetaTesterCreateRequestDataRelationshipsFromJSONTyped, BetaTesterCreateRequestDataRelationshipsToJSON, BetaTesterCreateRequestDataToJSON, BetaTesterCreateRequestDataTypeEnum, BetaTesterCreateRequestFromJSON, BetaTesterCreateRequestFromJSONTyped, BetaTesterCreateRequestToJSON, BetaTesterFromJSON, BetaTesterFromJSONTyped, BetaTesterInvitationCreateRequestDataFromJSON, BetaTesterInvitationCreateRequestDataFromJSONTyped, BetaTesterInvitationCreateRequestDataRelationshipsBetaTesterFromJSON, BetaTesterInvitationCreateRequestDataRelationshipsBetaTesterFromJSONTyped, BetaTesterInvitationCreateRequestDataRelationshipsBetaTesterToJSON, BetaTesterInvitationCreateRequestDataRelationshipsFromJSON, BetaTesterInvitationCreateRequestDataRelationshipsFromJSONTyped, BetaTesterInvitationCreateRequestDataRelationshipsToJSON, BetaTesterInvitationCreateRequestDataToJSON, BetaTesterInvitationCreateRequestDataTypeEnum, BetaTesterInvitationCreateRequestFromJSON, BetaTesterInvitationCreateRequestFromJSONTyped, BetaTesterInvitationCreateRequestToJSON, BetaTesterInvitationFromJSON, BetaTesterInvitationFromJSONTyped, BetaTesterInvitationResponseFromJSON, BetaTesterInvitationResponseFromJSONTyped, BetaTesterInvitationResponseToJSON, BetaTesterInvitationToJSON, BetaTesterInvitationTypeEnum, BetaTesterInvitationsApi, BetaTesterRelationshipsAppsFromJSON, BetaTesterRelationshipsAppsFromJSONTyped, BetaTesterRelationshipsAppsToJSON, BetaTesterRelationshipsFromJSON, BetaTesterRelationshipsFromJSONTyped, BetaTesterRelationshipsToJSON, BetaTesterResponseFromJSON, BetaTesterResponseFromJSONTyped, BetaTesterResponseToJSON, BetaTesterToJSON, BetaTesterTypeEnum, BetaTestersApi, BetaTestersAppsGetToManyRelatedFieldsAppsEnum, BetaTestersBetaGroupsGetToManyRelatedFieldsBetaGroupsEnum, BetaTestersBuildsGetToManyRelatedFieldsBuildsEnum, BetaTestersGetCollectionFieldsAppsEnum, BetaTestersGetCollectionFieldsBetaGroupsEnum, BetaTestersGetCollectionFieldsBetaTestersEnum, BetaTestersGetCollectionFieldsBuildsEnum, BetaTestersGetCollectionFilterInviteTypeEnum, BetaTestersGetCollectionIncludeEnum, BetaTestersGetCollectionSortEnum, BetaTestersGetInstanceFieldsAppsEnum, BetaTestersGetInstanceFieldsBetaGroupsEnum, BetaTestersGetInstanceFieldsBetaTestersEnum, BetaTestersGetInstanceFieldsBuildsEnum, BetaTestersGetInstanceIncludeEnum, BetaTestersResponseFromJSON, BetaTestersResponseFromJSONTyped, BetaTestersResponseIncludedInnerFromJSON, BetaTestersResponseIncludedInnerFromJSONTyped, BetaTestersResponseIncludedInnerToJSON, BetaTestersResponseToJSON, BlobApiResponse, BrazilAgeRating, BrazilAgeRatingFromJSON, BrazilAgeRatingFromJSONTyped, BrazilAgeRatingToJSON, BuildAppEncryptionDeclarationLinkageRequestFromJSON, BuildAppEncryptionDeclarationLinkageRequestFromJSONTyped, BuildAppEncryptionDeclarationLinkageRequestToJSON, BuildAppEncryptionDeclarationLinkageResponseFromJSON, BuildAppEncryptionDeclarationLinkageResponseFromJSONTyped, BuildAppEncryptionDeclarationLinkageResponseToJSON, BuildAttributesFromJSON, BuildAttributesFromJSONTyped, BuildAttributesProcessingStateEnum, BuildAttributesToJSON, BuildAudienceType, BuildAudienceTypeFromJSON, BuildAudienceTypeFromJSONTyped, BuildAudienceTypeToJSON, BuildBetaDetailAttributesFromJSON, BuildBetaDetailAttributesFromJSONTyped, BuildBetaDetailAttributesToJSON, BuildBetaDetailFromJSON, BuildBetaDetailFromJSONTyped, BuildBetaDetailResponseFromJSON, BuildBetaDetailResponseFromJSONTyped, BuildBetaDetailResponseToJSON, BuildBetaDetailToJSON, BuildBetaDetailTypeEnum, BuildBetaDetailUpdateRequestDataAttributesFromJSON, BuildBetaDetailUpdateRequestDataAttributesFromJSONTyped, BuildBetaDetailUpdateRequestDataAttributesToJSON, BuildBetaDetailUpdateRequestDataFromJSON, BuildBetaDetailUpdateRequestDataFromJSONTyped, BuildBetaDetailUpdateRequestDataToJSON, BuildBetaDetailUpdateRequestDataTypeEnum, BuildBetaDetailUpdateRequestFromJSON, BuildBetaDetailUpdateRequestFromJSONTyped, BuildBetaDetailUpdateRequestToJSON, BuildBetaDetailsApi, BuildBetaDetailsBuildGetToOneRelatedFieldsBuildsEnum, BuildBetaDetailsGetCollectionFieldsBuildBetaDetailsEnum, BuildBetaDetailsGetCollectionFieldsBuildsEnum, BuildBetaDetailsGetCollectionIncludeEnum, BuildBetaDetailsGetInstanceFieldsBuildBetaDetailsEnum, BuildBetaDetailsGetInstanceFieldsBuildsEnum, BuildBetaDetailsGetInstanceIncludeEnum, BuildBetaDetailsResponseFromJSON, BuildBetaDetailsResponseFromJSONTyped, BuildBetaDetailsResponseToJSON, BuildBetaGroupsLinkagesRequestFromJSON, BuildBetaGroupsLinkagesRequestFromJSONTyped, BuildBetaGroupsLinkagesRequestToJSON, BuildBetaNotificationCreateRequestDataFromJSON, BuildBetaNotificationCreateRequestDataFromJSONTyped, BuildBetaNotificationCreateRequestDataToJSON, BuildBetaNotificationCreateRequestDataTypeEnum, BuildBetaNotificationCreateRequestFromJSON, BuildBetaNotificationCreateRequestFromJSONTyped, BuildBetaNotificationCreateRequestToJSON, BuildBetaNotificationFromJSON, BuildBetaNotificationFromJSONTyped, BuildBetaNotificationResponseFromJSON, BuildBetaNotificationResponseFromJSONTyped, BuildBetaNotificationResponseToJSON, BuildBetaNotificationToJSON, BuildBetaNotificationTypeEnum, BuildBetaNotificationsApi, BuildBundleAttributesBundleTypeEnum, BuildBundleAttributesFromJSON, BuildBundleAttributesFromJSONTyped, BuildBundleAttributesToJSON, BuildBundleFileSizeAttributesFromJSON, BuildBundleFileSizeAttributesFromJSONTyped, BuildBundleFileSizeAttributesToJSON, BuildBundleFileSizeFromJSON, BuildBundleFileSizeFromJSONTyped, BuildBundleFileSizeToJSON, BuildBundleFileSizeTypeEnum, BuildBundleFileSizesResponseFromJSON, BuildBundleFileSizesResponseFromJSONTyped, BuildBundleFileSizesResponseToJSON, BuildBundleFromJSON, BuildBundleFromJSONTyped, BuildBundleRelationshipsAppClipDomainCacheStatusDataFromJSON, BuildBundleRelationshipsAppClipDomainCacheStatusDataFromJSONTyped, BuildBundleRelationshipsAppClipDomainCacheStatusDataToJSON, BuildBundleRelationshipsAppClipDomainCacheStatusDataTypeEnum, BuildBundleRelationshipsAppClipDomainCacheStatusFromJSON, BuildBundleRelationshipsAppClipDomainCacheStatusFromJSONTyped, BuildBundleRelationshipsAppClipDomainCacheStatusToJSON, BuildBundleRelationshipsBetaAppClipInvocationsFromJSON, BuildBundleRelationshipsBetaAppClipInvocationsFromJSONTyped, BuildBundleRelationshipsBetaAppClipInvocationsToJSON, BuildBundleRelationshipsBuildBundleFileSizesDataInnerFromJSON, BuildBundleRelationshipsBuildBundleFileSizesDataInnerFromJSONTyped, BuildBundleRelationshipsBuildBundleFileSizesDataInnerToJSON, BuildBundleRelationshipsBuildBundleFileSizesDataInnerTypeEnum, BuildBundleRelationshipsBuildBundleFileSizesFromJSON, BuildBundleRelationshipsBuildBundleFileSizesFromJSONTyped, BuildBundleRelationshipsBuildBundleFileSizesToJSON, BuildBundleRelationshipsFromJSON, BuildBundleRelationshipsFromJSONTyped, BuildBundleRelationshipsToJSON, BuildBundleToJSON, BuildBundleTypeEnum, BuildBundlesApi, BuildBundlesAppClipDomainCacheStatusGetToOneRelatedFieldsAppClipDomainStatusesEnum, BuildBundlesAppClipDomainDebugStatusGetToOneRelatedFieldsAppClipDomainStatusesEnum, BuildBundlesBetaAppClipInvocationsGetToManyRelatedFieldsBetaAppClipInvocationLocalizationsEnum, BuildBundlesBetaAppClipInvocationsGetToManyRelatedFieldsBetaAppClipInvocationsEnum, BuildBundlesBetaAppClipInvocationsGetToManyRelatedIncludeEnum, BuildBundlesBuildBundleFileSizesGetToManyRelatedFieldsBuildBundleFileSizesEnum, BuildFromJSON, BuildFromJSONTyped, BuildIconAttributesFromJSON, BuildIconAttributesFromJSONTyped, BuildIconAttributesToJSON, BuildIconFromJSON, BuildIconFromJSONTyped, BuildIconToJSON, BuildIconTypeEnum, BuildIconsResponseFromJSON, BuildIconsResponseFromJSONTyped, BuildIconsResponseToJSON, BuildIndividualTestersLinkagesRequestFromJSON, BuildIndividualTestersLinkagesRequestFromJSONTyped, BuildIndividualTestersLinkagesRequestToJSON, BuildIndividualTestersLinkagesResponseFromJSON, BuildIndividualTestersLinkagesResponseFromJSONTyped, BuildIndividualTestersLinkagesResponseToJSON, BuildRelationshipsAppEncryptionDeclarationFromJSON, BuildRelationshipsAppEncryptionDeclarationFromJSONTyped, BuildRelationshipsAppEncryptionDeclarationToJSON, BuildRelationshipsBetaAppReviewSubmissionDataFromJSON, BuildRelationshipsBetaAppReviewSubmissionDataFromJSONTyped, BuildRelationshipsBetaAppReviewSubmissionDataToJSON, BuildRelationshipsBetaAppReviewSubmissionDataTypeEnum, BuildRelationshipsBetaAppReviewSubmissionFromJSON, BuildRelationshipsBetaAppReviewSubmissionFromJSONTyped, BuildRelationshipsBetaAppReviewSubmissionToJSON, BuildRelationshipsBetaBuildLocalizationsDataInnerFromJSON, BuildRelationshipsBetaBuildLocalizationsDataInnerFromJSONTyped, BuildRelationshipsBetaBuildLocalizationsDataInnerToJSON, BuildRelationshipsBetaBuildLocalizationsDataInnerTypeEnum, BuildRelationshipsBetaBuildLocalizationsFromJSON, BuildRelationshipsBetaBuildLocalizationsFromJSONTyped, BuildRelationshipsBetaBuildLocalizationsToJSON, BuildRelationshipsBuildBetaDetailDataFromJSON, BuildRelationshipsBuildBetaDetailDataFromJSONTyped, BuildRelationshipsBuildBetaDetailDataToJSON, BuildRelationshipsBuildBetaDetailDataTypeEnum, BuildRelationshipsBuildBetaDetailFromJSON, BuildRelationshipsBuildBetaDetailFromJSONTyped, BuildRelationshipsBuildBetaDetailToJSON, BuildRelationshipsBuildBundlesFromJSON, BuildRelationshipsBuildBundlesFromJSONTyped, BuildRelationshipsBuildBundlesToJSON, BuildRelationshipsFromJSON, BuildRelationshipsFromJSONTyped, BuildRelationshipsIconsDataInnerFromJSON, BuildRelationshipsIconsDataInnerFromJSONTyped, BuildRelationshipsIconsDataInnerToJSON, BuildRelationshipsIconsDataInnerTypeEnum, BuildRelationshipsIconsFromJSON, BuildRelationshipsIconsFromJSONTyped, BuildRelationshipsIconsToJSON, BuildRelationshipsPreReleaseVersionFromJSON, BuildRelationshipsPreReleaseVersionFromJSONTyped, BuildRelationshipsPreReleaseVersionToJSON, BuildRelationshipsToJSON, BuildResponseFromJSON, BuildResponseFromJSONTyped, BuildResponseToJSON, BuildToJSON, BuildTypeEnum, BuildUpdateRequestDataAttributesFromJSON, BuildUpdateRequestDataAttributesFromJSONTyped, BuildUpdateRequestDataAttributesToJSON, BuildUpdateRequestDataFromJSON, BuildUpdateRequestDataFromJSONTyped, BuildUpdateRequestDataRelationshipsAppEncryptionDeclarationFromJSON, BuildUpdateRequestDataRelationshipsAppEncryptionDeclarationFromJSONTyped, BuildUpdateRequestDataRelationshipsAppEncryptionDeclarationToJSON, BuildUpdateRequestDataRelationshipsFromJSON, BuildUpdateRequestDataRelationshipsFromJSONTyped, BuildUpdateRequestDataRelationshipsToJSON, BuildUpdateRequestDataToJSON, BuildUpdateRequestDataTypeEnum, BuildUpdateRequestFromJSON, BuildUpdateRequestFromJSONTyped, BuildUpdateRequestToJSON, BuildsApi, BuildsAppEncryptionDeclarationGetToOneRelatedFieldsAppEncryptionDeclarationsEnum, BuildsAppGetToOneRelatedFieldsAppsEnum, BuildsAppStoreVersionGetToOneRelatedFieldsAgeRatingDeclarationsEnum, BuildsAppStoreVersionGetToOneRelatedFieldsAppClipDefaultExperiencesEnum, BuildsAppStoreVersionGetToOneRelatedFieldsAppStoreReviewDetailsEnum, BuildsAppStoreVersionGetToOneRelatedFieldsAppStoreVersionExperimentsEnum, BuildsAppStoreVersionGetToOneRelatedFieldsAppStoreVersionLocalizationsEnum, BuildsAppStoreVersionGetToOneRelatedFieldsAppStoreVersionPhasedReleasesEnum, BuildsAppStoreVersionGetToOneRelatedFieldsAppStoreVersionSubmissionsEnum, BuildsAppStoreVersionGetToOneRelatedFieldsAppStoreVersionsEnum, BuildsAppStoreVersionGetToOneRelatedFieldsAppsEnum, BuildsAppStoreVersionGetToOneRelatedFieldsBuildsEnum, BuildsAppStoreVersionGetToOneRelatedFieldsRoutingAppCoveragesEnum, BuildsAppStoreVersionGetToOneRelatedIncludeEnum, BuildsBetaAppReviewSubmissionGetToOneRelatedFieldsBetaAppReviewSubmissionsEnum, BuildsBetaBuildLocalizationsGetToManyRelatedFieldsBetaBuildLocalizationsEnum, BuildsBuildBetaDetailGetToOneRelatedFieldsBuildBetaDetailsEnum, BuildsDiagnosticSignaturesGetToManyRelatedFieldsDiagnosticSignaturesEnum, BuildsDiagnosticSignaturesGetToManyRelatedFilterDiagnosticTypeEnum, BuildsGetCollectionFieldsAppEncryptionDeclarationsEnum, BuildsGetCollectionFieldsAppStoreVersionsEnum, BuildsGetCollectionFieldsAppsEnum, BuildsGetCollectionFieldsBetaAppReviewSubmissionsEnum, BuildsGetCollectionFieldsBetaBuildLocalizationsEnum, BuildsGetCollectionFieldsBetaTestersEnum, BuildsGetCollectionFieldsBuildBetaDetailsEnum, BuildsGetCollectionFieldsBuildIconsEnum, BuildsGetCollectionFieldsBuildsEnum, BuildsGetCollectionFieldsDiagnosticSignaturesEnum, BuildsGetCollectionFieldsPerfPowerMetricsEnum, BuildsGetCollectionFieldsPreReleaseVersionsEnum, BuildsGetCollectionFilterBetaAppReviewSubmissionBetaReviewStateEnum, BuildsGetCollectionFilterBuildAudienceTypeEnum, BuildsGetCollectionFilterPreReleaseVersionPlatformEnum, BuildsGetCollectionFilterProcessingStateEnum, BuildsGetCollectionIncludeEnum, BuildsGetCollectionSortEnum, BuildsGetInstanceFieldsAppEncryptionDeclarationsEnum, BuildsGetInstanceFieldsAppStoreVersionsEnum, BuildsGetInstanceFieldsAppsEnum, BuildsGetInstanceFieldsBetaAppReviewSubmissionsEnum, BuildsGetInstanceFieldsBetaBuildLocalizationsEnum, BuildsGetInstanceFieldsBetaTestersEnum, BuildsGetInstanceFieldsBuildBetaDetailsEnum, BuildsGetInstanceFieldsBuildIconsEnum, BuildsGetInstanceFieldsBuildsEnum, BuildsGetInstanceFieldsDiagnosticSignaturesEnum, BuildsGetInstanceFieldsPerfPowerMetricsEnum, BuildsGetInstanceFieldsPreReleaseVersionsEnum, BuildsGetInstanceIncludeEnum, BuildsIconsGetToManyRelatedFieldsBuildIconsEnum, BuildsIndividualTestersGetToManyRelatedFieldsBetaTestersEnum, BuildsPerfPowerMetricsGetToManyRelatedFilterMetricTypeEnum, BuildsPerfPowerMetricsGetToManyRelatedFilterPlatformEnum, BuildsPreReleaseVersionGetToOneRelatedFieldsPreReleaseVersionsEnum, BuildsResponseFromJSON, BuildsResponseFromJSONTyped, BuildsResponseIncludedInnerFromJSON, BuildsResponseIncludedInnerFromJSONTyped, BuildsResponseIncludedInnerToJSON, BuildsResponseToJSON, BundleIdAttributesFromJSON, BundleIdAttributesFromJSONTyped, BundleIdAttributesToJSON, BundleIdCapabilitiesApi, BundleIdCapabilitiesResponseFromJSON, BundleIdCapabilitiesResponseFromJSONTyped, BundleIdCapabilitiesResponseToJSON, BundleIdCapabilityAttributesFromJSON, BundleIdCapabilityAttributesFromJSONTyped, BundleIdCapabilityAttributesToJSON, BundleIdCapabilityCreateRequestDataAttributesFromJSON, BundleIdCapabilityCreateRequestDataAttributesFromJSONTyped, BundleIdCapabilityCreateRequestDataAttributesToJSON, BundleIdCapabilityCreateRequestDataFromJSON, BundleIdCapabilityCreateRequestDataFromJSONTyped, BundleIdCapabilityCreateRequestDataRelationshipsBundleIdDataFromJSON, BundleIdCapabilityCreateRequestDataRelationshipsBundleIdDataFromJSONTyped, BundleIdCapabilityCreateRequestDataRelationshipsBundleIdDataToJSON, BundleIdCapabilityCreateRequestDataRelationshipsBundleIdDataTypeEnum, BundleIdCapabilityCreateRequestDataRelationshipsBundleIdFromJSON, BundleIdCapabilityCreateRequestDataRelationshipsBundleIdFromJSONTyped, BundleIdCapabilityCreateRequestDataRelationshipsBundleIdToJSON, BundleIdCapabilityCreateRequestDataRelationshipsFromJSON, BundleIdCapabilityCreateRequestDataRelationshipsFromJSONTyped, BundleIdCapabilityCreateRequestDataRelationshipsToJSON, BundleIdCapabilityCreateRequestDataToJSON, BundleIdCapabilityCreateRequestDataTypeEnum, BundleIdCapabilityCreateRequestFromJSON, BundleIdCapabilityCreateRequestFromJSONTyped, BundleIdCapabilityCreateRequestToJSON, BundleIdCapabilityFromJSON, BundleIdCapabilityFromJSONTyped, BundleIdCapabilityResponseFromJSON, BundleIdCapabilityResponseFromJSONTyped, BundleIdCapabilityResponseToJSON, BundleIdCapabilityToJSON, BundleIdCapabilityTypeEnum, BundleIdCapabilityUpdateRequestDataFromJSON, BundleIdCapabilityUpdateRequestDataFromJSONTyped, BundleIdCapabilityUpdateRequestDataToJSON, BundleIdCapabilityUpdateRequestDataTypeEnum, BundleIdCapabilityUpdateRequestFromJSON, BundleIdCapabilityUpdateRequestFromJSONTyped, BundleIdCapabilityUpdateRequestToJSON, BundleIdCreateRequestDataAttributesFromJSON, BundleIdCreateRequestDataAttributesFromJSONTyped, BundleIdCreateRequestDataAttributesToJSON, BundleIdCreateRequestDataFromJSON, BundleIdCreateRequestDataFromJSONTyped, BundleIdCreateRequestDataToJSON, BundleIdCreateRequestDataTypeEnum, BundleIdCreateRequestFromJSON, BundleIdCreateRequestFromJSONTyped, BundleIdCreateRequestToJSON, BundleIdFromJSON, BundleIdFromJSONTyped, BundleIdPlatform, BundleIdPlatformFromJSON, BundleIdPlatformFromJSONTyped, BundleIdPlatformToJSON, BundleIdRelationshipsBundleIdCapabilitiesDataInnerFromJSON, BundleIdRelationshipsBundleIdCapabilitiesDataInnerFromJSONTyped, BundleIdRelationshipsBundleIdCapabilitiesDataInnerToJSON, BundleIdRelationshipsBundleIdCapabilitiesDataInnerTypeEnum, BundleIdRelationshipsBundleIdCapabilitiesFromJSON, BundleIdRelationshipsBundleIdCapabilitiesFromJSONTyped, BundleIdRelationshipsBundleIdCapabilitiesToJSON, BundleIdRelationshipsFromJSON, BundleIdRelationshipsFromJSONTyped, BundleIdRelationshipsProfilesDataInnerFromJSON, BundleIdRelationshipsProfilesDataInnerFromJSONTyped, BundleIdRelationshipsProfilesDataInnerToJSON, BundleIdRelationshipsProfilesDataInnerTypeEnum, BundleIdRelationshipsProfilesFromJSON, BundleIdRelationshipsProfilesFromJSONTyped, BundleIdRelationshipsProfilesToJSON, BundleIdRelationshipsToJSON, BundleIdResponseFromJSON, BundleIdResponseFromJSONTyped, BundleIdResponseToJSON, BundleIdToJSON, BundleIdTypeEnum, BundleIdUpdateRequestDataAttributesFromJSON, BundleIdUpdateRequestDataAttributesFromJSONTyped, BundleIdUpdateRequestDataAttributesToJSON, BundleIdUpdateRequestDataFromJSON, BundleIdUpdateRequestDataFromJSONTyped, BundleIdUpdateRequestDataToJSON, BundleIdUpdateRequestDataTypeEnum, BundleIdUpdateRequestFromJSON, BundleIdUpdateRequestFromJSONTyped, BundleIdUpdateRequestToJSON, BundleIdsApi, BundleIdsAppGetToOneRelatedFieldsAppsEnum, BundleIdsBundleIdCapabilitiesGetToManyRelatedFieldsBundleIdCapabilitiesEnum, BundleIdsGetCollectionFieldsAppsEnum, BundleIdsGetCollectionFieldsBundleIdCapabilitiesEnum, BundleIdsGetCollectionFieldsBundleIdsEnum, BundleIdsGetCollectionFieldsProfilesEnum, BundleIdsGetCollectionFilterPlatformEnum, BundleIdsGetCollectionIncludeEnum, BundleIdsGetCollectionSortEnum, BundleIdsGetInstanceFieldsAppsEnum, BundleIdsGetInstanceFieldsBundleIdCapabilitiesEnum, BundleIdsGetInstanceFieldsBundleIdsEnum, BundleIdsGetInstanceFieldsProfilesEnum, BundleIdsGetInstanceIncludeEnum, BundleIdsProfilesGetToManyRelatedFieldsProfilesEnum, BundleIdsResponseFromJSON, BundleIdsResponseFromJSONTyped, BundleIdsResponseIncludedInnerFromJSON, BundleIdsResponseIncludedInnerFromJSONTyped, BundleIdsResponseIncludedInnerToJSON, BundleIdsResponseToJSON, COLLECTION_FORMATS, CapabilityOptionFromJSON, CapabilityOptionFromJSONTyped, CapabilityOptionKeyEnum, CapabilityOptionToJSON, CapabilitySettingAllowedInstancesEnum, CapabilitySettingFromJSON, CapabilitySettingFromJSONTyped, CapabilitySettingKeyEnum, CapabilitySettingToJSON, CapabilityType, CapabilityTypeFromJSON, CapabilityTypeFromJSONTyped, CapabilityTypeToJSON, CertificateAttributesFromJSON, CertificateAttributesFromJSONTyped, CertificateAttributesToJSON, CertificateCreateRequestDataAttributesFromJSON, CertificateCreateRequestDataAttributesFromJSONTyped, CertificateCreateRequestDataAttributesToJSON, CertificateCreateRequestDataFromJSON, CertificateCreateRequestDataFromJSONTyped, CertificateCreateRequestDataToJSON, CertificateCreateRequestDataTypeEnum, CertificateCreateRequestFromJSON, CertificateCreateRequestFromJSONTyped, CertificateCreateRequestToJSON, CertificateFromJSON, CertificateFromJSONTyped, CertificateResponseFromJSON, CertificateResponseFromJSONTyped, CertificateResponseToJSON, CertificateToJSON, CertificateType, CertificateTypeEnum, CertificateTypeFromJSON, CertificateTypeFromJSONTyped, CertificateTypeToJSON, CertificatesApi, CertificatesGetCollectionFieldsCertificatesEnum, CertificatesGetCollectionFilterCertificateTypeEnum, CertificatesGetCollectionSortEnum, CertificatesGetInstanceFieldsCertificatesEnum, CertificatesResponseFromJSON, CertificatesResponseFromJSONTyped, CertificatesResponseToJSON, CiActionDestinationEnum, CiActionFromJSON, CiActionFromJSONTyped, CiActionPlatformEnum, CiActionTestConfigurationFromJSON, CiActionTestConfigurationFromJSONTyped, CiActionTestConfigurationKindEnum, CiActionTestConfigurationToJSON, CiActionToJSON, CiActionType, CiActionTypeFromJSON, CiActionTypeFromJSONTyped, CiActionTypeToJSON, CiArtifactAttributesFileTypeEnum, CiArtifactAttributesFromJSON, CiArtifactAttributesFromJSONTyped, CiArtifactAttributesToJSON, CiArtifactFromJSON, CiArtifactFromJSONTyped, CiArtifactResponseFromJSON, CiArtifactResponseFromJSONTyped, CiArtifactResponseToJSON, CiArtifactToJSON, CiArtifactTypeEnum, CiArtifactsApi, CiArtifactsGetInstanceFieldsCiArtifactsEnum, CiArtifactsResponseFromJSON, CiArtifactsResponseFromJSONTyped, CiArtifactsResponseToJSON, CiBranchPatternsFromJSON, CiBranchPatternsFromJSONTyped, CiBranchPatternsPatternsInnerFromJSON, CiBranchPatternsPatternsInnerFromJSONTyped, CiBranchPatternsPatternsInnerToJSON, CiBranchPatternsToJSON, CiBranchStartConditionFromJSON, CiBranchStartConditionFromJSONTyped, CiBranchStartConditionToJSON, CiBuildActionAttributesFromJSON, CiBuildActionAttributesFromJSONTyped, CiBuildActionAttributesToJSON, CiBuildActionFromJSON, CiBuildActionFromJSONTyped, CiBuildActionRelationshipsBuildRunDataFromJSON, CiBuildActionRelationshipsBuildRunDataFromJSONTyped, CiBuildActionRelationshipsBuildRunDataToJSON, CiBuildActionRelationshipsBuildRunDataTypeEnum, CiBuildActionRelationshipsBuildRunFromJSON, CiBuildActionRelationshipsBuildRunFromJSONTyped, CiBuildActionRelationshipsBuildRunToJSON, CiBuildActionRelationshipsFromJSON, CiBuildActionRelationshipsFromJSONTyped, CiBuildActionRelationshipsToJSON, CiBuildActionResponseFromJSON, CiBuildActionResponseFromJSONTyped, CiBuildActionResponseToJSON, CiBuildActionToJSON, CiBuildActionTypeEnum, CiBuildActionsApi, CiBuildActionsArtifactsGetToManyRelatedFieldsCiArtifactsEnum, CiBuildActionsBuildRunGetToOneRelatedFieldsBuildsEnum, CiBuildActionsBuildRunGetToOneRelatedFieldsCiBuildRunsEnum, CiBuildActionsBuildRunGetToOneRelatedFieldsCiProductsEnum, CiBuildActionsBuildRunGetToOneRelatedFieldsCiWorkflowsEnum, CiBuildActionsBuildRunGetToOneRelatedFieldsScmGitReferencesEnum, CiBuildActionsBuildRunGetToOneRelatedFieldsScmPullRequestsEnum, CiBuildActionsBuildRunGetToOneRelatedIncludeEnum, CiBuildActionsGetInstanceFieldsCiArtifactsEnum, CiBuildActionsGetInstanceFieldsCiBuildActionsEnum, CiBuildActionsGetInstanceFieldsCiBuildRunsEnum, CiBuildActionsGetInstanceFieldsCiIssuesEnum, CiBuildActionsGetInstanceFieldsCiTestResultsEnum, CiBuildActionsGetInstanceIncludeEnum, CiBuildActionsIssuesGetToManyRelatedFieldsCiIssuesEnum, CiBuildActionsResponseFromJSON, CiBuildActionsResponseFromJSONTyped, CiBuildActionsResponseToJSON, CiBuildActionsTestResultsGetToManyRelatedFieldsCiTestResultsEnum, CiBuildRunAttributesCancelReasonEnum, CiBuildRunAttributesFromJSON, CiBuildRunAttributesFromJSONTyped, CiBuildRunAttributesSourceCommitFromJSON, CiBuildRunAttributesSourceCommitFromJSONTyped, CiBuildRunAttributesSourceCommitToJSON, CiBuildRunAttributesStartReasonEnum, CiBuildRunAttributesToJSON, CiBuildRunCreateRequestDataAttributesFromJSON, CiBuildRunCreateRequestDataAttributesFromJSONTyped, CiBuildRunCreateRequestDataAttributesToJSON, CiBuildRunCreateRequestDataFromJSON, CiBuildRunCreateRequestDataFromJSONTyped, CiBuildRunCreateRequestDataRelationshipsBuildRunFromJSON, CiBuildRunCreateRequestDataRelationshipsBuildRunFromJSONTyped, CiBuildRunCreateRequestDataRelationshipsBuildRunToJSON, CiBuildRunCreateRequestDataRelationshipsFromJSON, CiBuildRunCreateRequestDataRelationshipsFromJSONTyped, CiBuildRunCreateRequestDataRelationshipsPullRequestFromJSON, CiBuildRunCreateRequestDataRelationshipsPullRequestFromJSONTyped, CiBuildRunCreateRequestDataRelationshipsPullRequestToJSON, CiBuildRunCreateRequestDataRelationshipsSourceBranchOrTagFromJSON, CiBuildRunCreateRequestDataRelationshipsSourceBranchOrTagFromJSONTyped, CiBuildRunCreateRequestDataRelationshipsSourceBranchOrTagToJSON, CiBuildRunCreateRequestDataRelationshipsToJSON, CiBuildRunCreateRequestDataRelationshipsWorkflowFromJSON, CiBuildRunCreateRequestDataRelationshipsWorkflowFromJSONTyped, CiBuildRunCreateRequestDataRelationshipsWorkflowToJSON, CiBuildRunCreateRequestDataToJSON, CiBuildRunCreateRequestFromJSON, CiBuildRunCreateRequestFromJSONTyped, CiBuildRunCreateRequestToJSON, CiBuildRunFromJSON, CiBuildRunFromJSONTyped, CiBuildRunRelationshipsFromJSON, CiBuildRunRelationshipsFromJSONTyped, CiBuildRunRelationshipsPullRequestDataFromJSON, CiBuildRunRelationshipsPullRequestDataFromJSONTyped, CiBuildRunRelationshipsPullRequestDataToJSON, CiBuildRunRelationshipsPullRequestDataTypeEnum, CiBuildRunRelationshipsPullRequestFromJSON, CiBuildRunRelationshipsPullRequestFromJSONTyped, CiBuildRunRelationshipsPullRequestToJSON, CiBuildRunRelationshipsSourceBranchOrTagDataFromJSON, CiBuildRunRelationshipsSourceBranchOrTagDataFromJSONTyped, CiBuildRunRelationshipsSourceBranchOrTagDataToJSON, CiBuildRunRelationshipsSourceBranchOrTagFromJSON, CiBuildRunRelationshipsSourceBranchOrTagFromJSONTyped, CiBuildRunRelationshipsSourceBranchOrTagToJSON, CiBuildRunRelationshipsToJSON, CiBuildRunRelationshipsWorkflowDataFromJSON, CiBuildRunRelationshipsWorkflowDataFromJSONTyped, CiBuildRunRelationshipsWorkflowDataToJSON, CiBuildRunRelationshipsWorkflowFromJSON, CiBuildRunRelationshipsWorkflowFromJSONTyped, CiBuildRunRelationshipsWorkflowToJSON, CiBuildRunResponseFromJSON, CiBuildRunResponseFromJSONTyped, CiBuildRunResponseToJSON, CiBuildRunToJSON, CiBuildRunTypeEnum, CiBuildRunsActionsGetToManyRelatedFieldsCiBuildActionsEnum, CiBuildRunsActionsGetToManyRelatedFieldsCiBuildRunsEnum, CiBuildRunsActionsGetToManyRelatedIncludeEnum, CiBuildRunsBuildsGetToManyRelatedFieldsAppEncryptionDeclarationsEnum, CiBuildRunsBuildsGetToManyRelatedFieldsAppStoreVersionsEnum, CiBuildRunsBuildsGetToManyRelatedFieldsAppsEnum, CiBuildRunsBuildsGetToManyRelatedFieldsBetaAppReviewSubmissionsEnum, CiBuildRunsBuildsGetToManyRelatedFieldsBetaBuildLocalizationsEnum, CiBuildRunsBuildsGetToManyRelatedFieldsBetaGroupsEnum, CiBuildRunsBuildsGetToManyRelatedFieldsBetaTestersEnum, CiBuildRunsBuildsGetToManyRelatedFieldsBuildBetaDetailsEnum, CiBuildRunsBuildsGetToManyRelatedFieldsBuildBundlesEnum, CiBuildRunsBuildsGetToManyRelatedFieldsBuildIconsEnum, CiBuildRunsBuildsGetToManyRelatedFieldsBuildsEnum, CiBuildRunsBuildsGetToManyRelatedFieldsPreReleaseVersionsEnum, CiBuildRunsBuildsGetToManyRelatedFilterBetaAppReviewSubmissionBetaReviewStateEnum, CiBuildRunsBuildsGetToManyRelatedFilterBuildAudienceTypeEnum, CiBuildRunsBuildsGetToManyRelatedFilterPreReleaseVersionPlatformEnum, CiBuildRunsBuildsGetToManyRelatedFilterProcessingStateEnum, CiBuildRunsBuildsGetToManyRelatedIncludeEnum, CiBuildRunsBuildsGetToManyRelatedSortEnum, CiBuildRunsGetInstanceFieldsBuildsEnum, CiBuildRunsGetInstanceFieldsCiBuildActionsEnum, CiBuildRunsGetInstanceFieldsCiBuildRunsEnum, CiBuildRunsGetInstanceIncludeEnum, CiBuildRunsResponseFromJSON, CiBuildRunsResponseFromJSONTyped, CiBuildRunsResponseIncludedInnerFromJSON, CiBuildRunsResponseIncludedInnerFromJSONTyped, CiBuildRunsResponseIncludedInnerToJSON, CiBuildRunsResponseToJSON, CiCompletionStatus, CiCompletionStatusFromJSON, CiCompletionStatusFromJSONTyped, CiCompletionStatusToJSON, CiExecutionProgress, CiExecutionProgressFromJSON, CiExecutionProgressFromJSONTyped, CiExecutionProgressToJSON, CiFilesAndFoldersRuleFromJSON, CiFilesAndFoldersRuleFromJSONTyped, CiFilesAndFoldersRuleModeEnum, CiFilesAndFoldersRuleToJSON, CiGitRefKind, CiGitRefKindFromJSON, CiGitRefKindFromJSONTyped, CiGitRefKindToJSON, CiGitUserFromJSON, CiGitUserFromJSONTyped, CiGitUserToJSON, CiIssueAttributesFromJSON, CiIssueAttributesFromJSONTyped, CiIssueAttributesIssueTypeEnum, CiIssueAttributesToJSON, CiIssueCountsFromJSON, CiIssueCountsFromJSONTyped, CiIssueCountsToJSON, CiIssueFromJSON, CiIssueFromJSONTyped, CiIssueResponseFromJSON, CiIssueResponseFromJSONTyped, CiIssueResponseToJSON, CiIssueToJSON, CiIssueTypeEnum, CiIssuesApi, CiIssuesGetInstanceFieldsCiIssuesEnum, CiIssuesResponseFromJSON, CiIssuesResponseFromJSONTyped, CiIssuesResponseToJSON, CiMacOsVersionAttributesFromJSON, CiMacOsVersionAttributesFromJSONTyped, CiMacOsVersionAttributesToJSON, CiMacOsVersionFromJSON, CiMacOsVersionFromJSONTyped, CiMacOsVersionRelationshipsFromJSON, CiMacOsVersionRelationshipsFromJSONTyped, CiMacOsVersionRelationshipsToJSON, CiMacOsVersionRelationshipsXcodeVersionsDataInnerFromJSON, CiMacOsVersionRelationshipsXcodeVersionsDataInnerFromJSONTyped, CiMacOsVersionRelationshipsXcodeVersionsDataInnerToJSON, CiMacOsVersionRelationshipsXcodeVersionsDataInnerTypeEnum, CiMacOsVersionRelationshipsXcodeVersionsFromJSON, CiMacOsVersionRelationshipsXcodeVersionsFromJSONTyped, CiMacOsVersionRelationshipsXcodeVersionsToJSON, CiMacOsVersionResponseFromJSON, CiMacOsVersionResponseFromJSONTyped, CiMacOsVersionResponseToJSON, CiMacOsVersionToJSON, CiMacOsVersionTypeEnum, CiMacOsVersionsApi, CiMacOsVersionsGetCollectionFieldsCiMacOsVersionsEnum, CiMacOsVersionsGetCollectionFieldsCiXcodeVersionsEnum, CiMacOsVersionsGetCollectionIncludeEnum, CiMacOsVersionsGetInstanceFieldsCiMacOsVersionsEnum, CiMacOsVersionsGetInstanceFieldsCiXcodeVersionsEnum, CiMacOsVersionsGetInstanceIncludeEnum, CiMacOsVersionsResponseFromJSON, CiMacOsVersionsResponseFromJSONTyped, CiMacOsVersionsResponseToJSON, CiMacOsVersionsXcodeVersionsGetToManyRelatedFieldsCiMacOsVersionsEnum, CiMacOsVersionsXcodeVersionsGetToManyRelatedFieldsCiXcodeVersionsEnum, CiMacOsVersionsXcodeVersionsGetToManyRelatedIncludeEnum, CiProductAttributesFromJSON, CiProductAttributesFromJSONTyped, CiProductAttributesProductTypeEnum, CiProductAttributesToJSON, CiProductFromJSON, CiProductFromJSONTyped, CiProductRelationshipsBundleIdFromJSON, CiProductRelationshipsBundleIdFromJSONTyped, CiProductRelationshipsBundleIdToJSON, CiProductRelationshipsFromJSON, CiProductRelationshipsFromJSONTyped, CiProductRelationshipsPrimaryRepositoriesDataInnerFromJSON, CiProductRelationshipsPrimaryRepositoriesDataInnerFromJSONTyped, CiProductRelationshipsPrimaryRepositoriesDataInnerToJSON, CiProductRelationshipsPrimaryRepositoriesDataInnerTypeEnum, CiProductRelationshipsPrimaryRepositoriesFromJSON, CiProductRelationshipsPrimaryRepositoriesFromJSONTyped, CiProductRelationshipsPrimaryRepositoriesToJSON, CiProductRelationshipsToJSON, CiProductResponseFromJSON, CiProductResponseFromJSONTyped, CiProductResponseToJSON, CiProductToJSON, CiProductTypeEnum, CiProductsAdditionalRepositoriesGetToManyRelatedFieldsScmGitReferencesEnum, CiProductsAdditionalRepositoriesGetToManyRelatedFieldsScmProvidersEnum, CiProductsAdditionalRepositoriesGetToManyRelatedFieldsScmRepositoriesEnum, CiProductsAdditionalRepositoriesGetToManyRelatedIncludeEnum, CiProductsAppGetToOneRelatedFieldsAppClipsEnum, CiProductsAppGetToOneRelatedFieldsAppCustomProductPagesEnum, CiProductsAppGetToOneRelatedFieldsAppEventsEnum, CiProductsAppGetToOneRelatedFieldsAppInfosEnum, CiProductsAppGetToOneRelatedFieldsAppPreOrdersEnum, CiProductsAppGetToOneRelatedFieldsAppPricesEnum, CiProductsAppGetToOneRelatedFieldsAppStoreVersionsEnum, CiProductsAppGetToOneRelatedFieldsAppsEnum, CiProductsAppGetToOneRelatedFieldsBetaAppLocalizationsEnum, CiProductsAppGetToOneRelatedFieldsBetaAppReviewDetailsEnum, CiProductsAppGetToOneRelatedFieldsBetaGroupsEnum, CiProductsAppGetToOneRelatedFieldsBetaLicenseAgreementsEnum, CiProductsAppGetToOneRelatedFieldsBuildsEnum, CiProductsAppGetToOneRelatedFieldsCiProductsEnum, CiProductsAppGetToOneRelatedFieldsEndUserLicenseAgreementsEnum, CiProductsAppGetToOneRelatedFieldsGameCenterEnabledVersionsEnum, CiProductsAppGetToOneRelatedFieldsInAppPurchasesEnumMap, CiProductsAppGetToOneRelatedFieldsPreReleaseVersionsEnum, CiProductsAppGetToOneRelatedFieldsPromotedPurchasesEnum, CiProductsAppGetToOneRelatedFieldsReviewSubmissionsEnum, CiProductsAppGetToOneRelatedFieldsSubscriptionGracePeriodsEnum, CiProductsAppGetToOneRelatedFieldsSubscriptionGroupsEnum, CiProductsAppGetToOneRelatedFieldsTerritoriesEnum, CiProductsAppGetToOneRelatedIncludeEnum, CiProductsBuildRunsGetToManyRelatedFieldsBuildsEnum, CiProductsBuildRunsGetToManyRelatedFieldsCiBuildRunsEnum, CiProductsBuildRunsGetToManyRelatedFieldsCiProductsEnum, CiProductsBuildRunsGetToManyRelatedFieldsCiWorkflowsEnum, CiProductsBuildRunsGetToManyRelatedFieldsScmGitReferencesEnum, CiProductsBuildRunsGetToManyRelatedFieldsScmPullRequestsEnum, CiProductsBuildRunsGetToManyRelatedIncludeEnum, CiProductsGetCollectionFieldsAppsEnum, CiProductsGetCollectionFieldsCiBuildRunsEnum, CiProductsGetCollectionFieldsCiProductsEnum, CiProductsGetCollectionFieldsCiWorkflowsEnum, CiProductsGetCollectionFieldsScmRepositoriesEnum, CiProductsGetInstanceFieldsAppsEnum, CiProductsGetInstanceFieldsCiBuildRunsEnum, CiProductsGetInstanceFieldsCiProductsEnum, CiProductsGetInstanceFieldsCiWorkflowsEnum, CiProductsGetInstanceFieldsScmRepositoriesEnum, CiProductsGetInstanceIncludeEnum, CiProductsPrimaryRepositoriesGetToManyRelatedFieldsScmGitReferencesEnum, CiProductsPrimaryRepositoriesGetToManyRelatedFieldsScmProvidersEnum, CiProductsPrimaryRepositoriesGetToManyRelatedFieldsScmRepositoriesEnum, CiProductsPrimaryRepositoriesGetToManyRelatedIncludeEnum, CiProductsResponseFromJSON, CiProductsResponseFromJSONTyped, CiProductsResponseIncludedInnerFromJSON, CiProductsResponseIncludedInnerFromJSONTyped, CiProductsResponseIncludedInnerToJSON, CiProductsResponseToJSON, CiProductsWorkflowsGetToManyRelatedFieldsCiMacOsVersionsEnum, CiProductsWorkflowsGetToManyRelatedFieldsCiProductsEnum, CiProductsWorkflowsGetToManyRelatedFieldsCiWorkflowsEnum, CiProductsWorkflowsGetToManyRelatedFieldsCiXcodeVersionsEnum, CiProductsWorkflowsGetToManyRelatedFieldsScmRepositoriesEnum, CiPullRequestStartConditionFromJSON, CiPullRequestStartConditionFromJSONTyped, CiPullRequestStartConditionToJSON, CiScheduledStartConditionFromJSON, CiScheduledStartConditionFromJSONTyped, CiScheduledStartConditionScheduleDaysEnum, CiScheduledStartConditionScheduleFrequencyEnum, CiScheduledStartConditionScheduleFromJSON, CiScheduledStartConditionScheduleFromJSONTyped, CiScheduledStartConditionScheduleToJSON, CiScheduledStartConditionToJSON, CiStartConditionFileMatcherFromJSON, CiStartConditionFileMatcherFromJSONTyped, CiStartConditionFileMatcherToJSON, CiTagPatternsFromJSON, CiTagPatternsFromJSONTyped, CiTagPatternsToJSON, CiTagStartConditionFromJSON, CiTagStartConditionFromJSONTyped, CiTagStartConditionToJSON, CiTestDestinationFromJSON, CiTestDestinationFromJSONTyped, CiTestDestinationKind, CiTestDestinationKindFromJSON, CiTestDestinationKindFromJSONTyped, CiTestDestinationKindToJSON, CiTestDestinationToJSON, CiTestResultAttributesDestinationTestResultsInnerFromJSON, CiTestResultAttributesDestinationTestResultsInnerFromJSONTyped, CiTestResultAttributesDestinationTestResultsInnerToJSON, CiTestResultAttributesFromJSON, CiTestResultAttributesFromJSONTyped, CiTestResultAttributesToJSON, CiTestResultFromJSON, CiTestResultFromJSONTyped, CiTestResultResponseFromJSON, CiTestResultResponseFromJSONTyped, CiTestResultResponseToJSON, CiTestResultToJSON, CiTestResultTypeEnum, CiTestResultsApi, CiTestResultsGetInstanceFieldsCiTestResultsEnum, CiTestResultsResponseFromJSON, CiTestResultsResponseFromJSONTyped, CiTestResultsResponseToJSON, CiTestStatus, CiTestStatusFromJSON, CiTestStatusFromJSONTyped, CiTestStatusToJSON, CiWorkflowAttributesFromJSON, CiWorkflowAttributesFromJSONTyped, CiWorkflowAttributesToJSON, CiWorkflowCreateRequestDataAttributesFromJSON, CiWorkflowCreateRequestDataAttributesFromJSONTyped, CiWorkflowCreateRequestDataAttributesToJSON, CiWorkflowCreateRequestDataFromJSON, CiWorkflowCreateRequestDataFromJSONTyped, CiWorkflowCreateRequestDataRelationshipsFromJSON, CiWorkflowCreateRequestDataRelationshipsFromJSONTyped, CiWorkflowCreateRequestDataRelationshipsMacOsVersionFromJSON, CiWorkflowCreateRequestDataRelationshipsMacOsVersionFromJSONTyped, CiWorkflowCreateRequestDataRelationshipsMacOsVersionToJSON, CiWorkflowCreateRequestDataRelationshipsProductFromJSON, CiWorkflowCreateRequestDataRelationshipsProductFromJSONTyped, CiWorkflowCreateRequestDataRelationshipsProductToJSON, CiWorkflowCreateRequestDataRelationshipsRepositoryFromJSON, CiWorkflowCreateRequestDataRelationshipsRepositoryFromJSONTyped, CiWorkflowCreateRequestDataRelationshipsRepositoryToJSON, CiWorkflowCreateRequestDataRelationshipsToJSON, CiWorkflowCreateRequestDataRelationshipsXcodeVersionFromJSON, CiWorkflowCreateRequestDataRelationshipsXcodeVersionFromJSONTyped, CiWorkflowCreateRequestDataRelationshipsXcodeVersionToJSON, CiWorkflowCreateRequestDataToJSON, CiWorkflowCreateRequestDataTypeEnum, CiWorkflowCreateRequestFromJSON, CiWorkflowCreateRequestFromJSONTyped, CiWorkflowCreateRequestToJSON, CiWorkflowFromJSON, CiWorkflowFromJSONTyped, CiWorkflowRelationshipsFromJSON, CiWorkflowRelationshipsFromJSONTyped, CiWorkflowRelationshipsMacOsVersionDataFromJSON, CiWorkflowRelationshipsMacOsVersionDataFromJSONTyped, CiWorkflowRelationshipsMacOsVersionDataToJSON, CiWorkflowRelationshipsMacOsVersionDataTypeEnum, CiWorkflowRelationshipsMacOsVersionFromJSON, CiWorkflowRelationshipsMacOsVersionFromJSONTyped, CiWorkflowRelationshipsMacOsVersionToJSON, CiWorkflowRelationshipsRepositoryFromJSON, CiWorkflowRelationshipsRepositoryFromJSONTyped, CiWorkflowRelationshipsRepositoryToJSON, CiWorkflowRelationshipsToJSON, CiWorkflowRelationshipsXcodeVersionFromJSON, CiWorkflowRelationshipsXcodeVersionFromJSONTyped, CiWorkflowRelationshipsXcodeVersionToJSON, CiWorkflowResponseFromJSON, CiWorkflowResponseFromJSONTyped, CiWorkflowResponseToJSON, CiWorkflowToJSON, CiWorkflowTypeEnum, CiWorkflowUpdateRequestDataAttributesFromJSON, CiWorkflowUpdateRequestDataAttributesFromJSONTyped, CiWorkflowUpdateRequestDataAttributesToJSON, CiWorkflowUpdateRequestDataFromJSON, CiWorkflowUpdateRequestDataFromJSONTyped, CiWorkflowUpdateRequestDataRelationshipsFromJSON, CiWorkflowUpdateRequestDataRelationshipsFromJSONTyped, CiWorkflowUpdateRequestDataRelationshipsMacOsVersionFromJSON, CiWorkflowUpdateRequestDataRelationshipsMacOsVersionFromJSONTyped, CiWorkflowUpdateRequestDataRelationshipsMacOsVersionToJSON, CiWorkflowUpdateRequestDataRelationshipsToJSON, CiWorkflowUpdateRequestDataRelationshipsXcodeVersionFromJSON, CiWorkflowUpdateRequestDataRelationshipsXcodeVersionFromJSONTyped, CiWorkflowUpdateRequestDataRelationshipsXcodeVersionToJSON, CiWorkflowUpdateRequestDataToJSON, CiWorkflowUpdateRequestDataTypeEnum, CiWorkflowUpdateRequestFromJSON, CiWorkflowUpdateRequestFromJSONTyped, CiWorkflowUpdateRequestToJSON, CiWorkflowsApi, CiWorkflowsBuildRunsGetToManyRelatedFieldsBuildsEnum, CiWorkflowsBuildRunsGetToManyRelatedFieldsCiBuildRunsEnum, CiWorkflowsBuildRunsGetToManyRelatedFieldsCiProductsEnum, CiWorkflowsBuildRunsGetToManyRelatedFieldsCiWorkflowsEnum, CiWorkflowsBuildRunsGetToManyRelatedFieldsScmGitReferencesEnum, CiWorkflowsBuildRunsGetToManyRelatedFieldsScmPullRequestsEnum, CiWorkflowsBuildRunsGetToManyRelatedIncludeEnum, CiWorkflowsGetInstanceFieldsCiBuildRunsEnum, CiWorkflowsGetInstanceFieldsCiWorkflowsEnum, CiWorkflowsGetInstanceFieldsScmRepositoriesEnum, CiWorkflowsGetInstanceIncludeEnum, CiWorkflowsRepositoryGetToOneRelatedFieldsScmGitReferencesEnum, CiWorkflowsRepositoryGetToOneRelatedFieldsScmProvidersEnum, CiWorkflowsRepositoryGetToOneRelatedFieldsScmRepositoriesEnum, CiWorkflowsRepositoryGetToOneRelatedIncludeEnum, CiWorkflowsResponseFromJSON, CiWorkflowsResponseFromJSONTyped, CiWorkflowsResponseIncludedInnerFromJSON, CiWorkflowsResponseIncludedInnerFromJSONTyped, CiWorkflowsResponseIncludedInnerToJSON, CiWorkflowsResponseToJSON, CiXcodeVersionAttributesFromJSON, CiXcodeVersionAttributesFromJSONTyped, CiXcodeVersionAttributesTestDestinationsInnerAvailableRuntimesInnerFromJSON, CiXcodeVersionAttributesTestDestinationsInnerAvailableRuntimesInnerFromJSONTyped, CiXcodeVersionAttributesTestDestinationsInnerAvailableRuntimesInnerToJSON, CiXcodeVersionAttributesTestDestinationsInnerFromJSON, CiXcodeVersionAttributesTestDestinationsInnerFromJSONTyped, CiXcodeVersionAttributesTestDestinationsInnerToJSON, CiXcodeVersionAttributesToJSON, CiXcodeVersionFromJSON, CiXcodeVersionFromJSONTyped, CiXcodeVersionRelationshipsFromJSON, CiXcodeVersionRelationshipsFromJSONTyped, CiXcodeVersionRelationshipsMacOsVersionsFromJSON, CiXcodeVersionRelationshipsMacOsVersionsFromJSONTyped, CiXcodeVersionRelationshipsMacOsVersionsToJSON, CiXcodeVersionRelationshipsToJSON, CiXcodeVersionResponseFromJSON, CiXcodeVersionResponseFromJSONTyped, CiXcodeVersionResponseToJSON, CiXcodeVersionToJSON, CiXcodeVersionTypeEnum, CiXcodeVersionsApi, CiXcodeVersionsGetCollectionFieldsCiMacOsVersionsEnum, CiXcodeVersionsGetCollectionFieldsCiXcodeVersionsEnum, CiXcodeVersionsGetCollectionIncludeEnum, CiXcodeVersionsGetInstanceFieldsCiMacOsVersionsEnum, CiXcodeVersionsGetInstanceFieldsCiXcodeVersionsEnum, CiXcodeVersionsGetInstanceIncludeEnum, CiXcodeVersionsMacOsVersionsGetToManyRelatedFieldsCiMacOsVersionsEnum, CiXcodeVersionsMacOsVersionsGetToManyRelatedFieldsCiXcodeVersionsEnum, CiXcodeVersionsMacOsVersionsGetToManyRelatedIncludeEnum, CiXcodeVersionsResponseFromJSON, CiXcodeVersionsResponseFromJSONTyped, CiXcodeVersionsResponseToJSON, Configuration, CustomerReviewAttributesFromJSON, CustomerReviewAttributesFromJSONTyped, CustomerReviewAttributesToJSON, CustomerReviewFromJSON, CustomerReviewFromJSONTyped, CustomerReviewRelationshipsFromJSON, CustomerReviewRelationshipsFromJSONTyped, CustomerReviewRelationshipsResponseDataFromJSON, CustomerReviewRelationshipsResponseDataFromJSONTyped, CustomerReviewRelationshipsResponseDataToJSON, CustomerReviewRelationshipsResponseDataTypeEnum, CustomerReviewRelationshipsResponseFromJSON, CustomerReviewRelationshipsResponseFromJSONTyped, CustomerReviewRelationshipsResponseToJSON, CustomerReviewRelationshipsToJSON, CustomerReviewResponseFromJSON, CustomerReviewResponseFromJSONTyped, CustomerReviewResponseToJSON, CustomerReviewResponseV1AttributesFromJSON, CustomerReviewResponseV1AttributesFromJSONTyped, CustomerReviewResponseV1AttributesStateEnum, CustomerReviewResponseV1AttributesToJSON, CustomerReviewResponseV1CreateRequestDataAttributesFromJSON, CustomerReviewResponseV1CreateRequestDataAttributesFromJSONTyped, CustomerReviewResponseV1CreateRequestDataAttributesToJSON, CustomerReviewResponseV1CreateRequestDataFromJSON, CustomerReviewResponseV1CreateRequestDataFromJSONTyped, CustomerReviewResponseV1CreateRequestDataRelationshipsFromJSON, CustomerReviewResponseV1CreateRequestDataRelationshipsFromJSONTyped, CustomerReviewResponseV1CreateRequestDataRelationshipsReviewFromJSON, CustomerReviewResponseV1CreateRequestDataRelationshipsReviewFromJSONTyped, CustomerReviewResponseV1CreateRequestDataRelationshipsReviewToJSON, CustomerReviewResponseV1CreateRequestDataRelationshipsToJSON, CustomerReviewResponseV1CreateRequestDataToJSON, CustomerReviewResponseV1CreateRequestDataTypeEnum, CustomerReviewResponseV1CreateRequestFromJSON, CustomerReviewResponseV1CreateRequestFromJSONTyped, CustomerReviewResponseV1CreateRequestToJSON, CustomerReviewResponseV1FromJSON, CustomerReviewResponseV1FromJSONTyped, CustomerReviewResponseV1RelationshipsFromJSON, CustomerReviewResponseV1RelationshipsFromJSONTyped, CustomerReviewResponseV1RelationshipsReviewDataFromJSON, CustomerReviewResponseV1RelationshipsReviewDataFromJSONTyped, CustomerReviewResponseV1RelationshipsReviewDataToJSON, CustomerReviewResponseV1RelationshipsReviewDataTypeEnum, CustomerReviewResponseV1RelationshipsReviewFromJSON, CustomerReviewResponseV1RelationshipsReviewFromJSONTyped, CustomerReviewResponseV1RelationshipsReviewToJSON, CustomerReviewResponseV1RelationshipsToJSON, CustomerReviewResponseV1ResponseFromJSON, CustomerReviewResponseV1ResponseFromJSONTyped, CustomerReviewResponseV1ResponseToJSON, CustomerReviewResponseV1ToJSON, CustomerReviewResponseV1TypeEnum, CustomerReviewResponsesApi, CustomerReviewResponsesGetInstanceFieldsCustomerReviewResponsesEnum, CustomerReviewResponsesGetInstanceIncludeEnum, CustomerReviewToJSON, CustomerReviewTypeEnum, CustomerReviewsApi, CustomerReviewsGetInstanceFieldsCustomerReviewResponsesEnum, CustomerReviewsGetInstanceFieldsCustomerReviewsEnum, CustomerReviewsGetInstanceIncludeEnum, CustomerReviewsResponseFromJSON, CustomerReviewsResponseFromJSONTyped, CustomerReviewsResponseGetToOneRelatedFieldsCustomerReviewResponsesEnum, CustomerReviewsResponseGetToOneRelatedFieldsCustomerReviewsEnum, CustomerReviewsResponseGetToOneRelatedIncludeEnum, CustomerReviewsResponseToJSON, DefaultConfig, DeviceAttributesDeviceClassEnum, DeviceAttributesFromJSON, DeviceAttributesFromJSONTyped, DeviceAttributesStatusEnum, DeviceAttributesToJSON, DeviceCreateRequestDataAttributesFromJSON, DeviceCreateRequestDataAttributesFromJSONTyped, DeviceCreateRequestDataAttributesToJSON, DeviceCreateRequestDataFromJSON, DeviceCreateRequestDataFromJSONTyped, DeviceCreateRequestDataToJSON, DeviceCreateRequestDataTypeEnum, DeviceCreateRequestFromJSON, DeviceCreateRequestFromJSONTyped, DeviceCreateRequestToJSON, DeviceFromJSON, DeviceFromJSONTyped, DeviceResponseFromJSON, DeviceResponseFromJSONTyped, DeviceResponseToJSON, DeviceToJSON, DeviceTypeEnum, DeviceUpdateRequestDataAttributesFromJSON, DeviceUpdateRequestDataAttributesFromJSONTyped, DeviceUpdateRequestDataAttributesStatusEnum, DeviceUpdateRequestDataAttributesToJSON, DeviceUpdateRequestDataFromJSON, DeviceUpdateRequestDataFromJSONTyped, DeviceUpdateRequestDataToJSON, DeviceUpdateRequestDataTypeEnum, DeviceUpdateRequestFromJSON, DeviceUpdateRequestFromJSONTyped, DeviceUpdateRequestToJSON, DevicesApi, DevicesGetCollectionFieldsDevicesEnum, DevicesGetCollectionFilterPlatformEnum, DevicesGetCollectionFilterStatusEnum, DevicesGetCollectionSortEnum, DevicesGetInstanceFieldsDevicesEnum, DevicesResponseFromJSON, DevicesResponseFromJSONTyped, DevicesResponseToJSON, DiagnosticLogCallStackNodeFromJSON, DiagnosticLogCallStackNodeFromJSONTyped, DiagnosticLogCallStackNodeToJSON, DiagnosticLogFromJSON, DiagnosticLogFromJSONTyped, DiagnosticLogToJSON, DiagnosticLogTypeEnum, DiagnosticLogsFromJSON, DiagnosticLogsFromJSONTyped, DiagnosticLogsProductDataInnerDiagnosticInsightsInnerFromJSON, DiagnosticLogsProductDataInnerDiagnosticInsightsInnerFromJSONTyped, DiagnosticLogsProductDataInnerDiagnosticInsightsInnerToJSON, DiagnosticLogsProductDataInnerDiagnosticLogsInnerCallStackTreeInnerCallStacksInnerFromJSON, DiagnosticLogsProductDataInnerDiagnosticLogsInnerCallStackTreeInnerCallStacksInnerFromJSONTyped, DiagnosticLogsProductDataInnerDiagnosticLogsInnerCallStackTreeInnerCallStacksInnerToJSON, DiagnosticLogsProductDataInnerDiagnosticLogsInnerCallStackTreeInnerFromJSON, DiagnosticLogsProductDataInnerDiagnosticLogsInnerCallStackTreeInnerFromJSONTyped, DiagnosticLogsProductDataInnerDiagnosticLogsInnerCallStackTreeInnerToJSON, DiagnosticLogsProductDataInnerDiagnosticLogsInnerDiagnosticMetaDataFromJSON, DiagnosticLogsProductDataInnerDiagnosticLogsInnerDiagnosticMetaDataFromJSONTyped, DiagnosticLogsProductDataInnerDiagnosticLogsInnerDiagnosticMetaDataToJSON, DiagnosticLogsProductDataInnerDiagnosticLogsInnerFromJSON, DiagnosticLogsProductDataInnerDiagnosticLogsInnerFromJSONTyped, DiagnosticLogsProductDataInnerDiagnosticLogsInnerToJSON, DiagnosticLogsProductDataInnerFromJSON, DiagnosticLogsProductDataInnerFromJSONTyped, DiagnosticLogsProductDataInnerToJSON, DiagnosticLogsToJSON, DiagnosticSignatureAttributesDiagnosticTypeEnum, DiagnosticSignatureAttributesFromJSON, DiagnosticSignatureAttributesFromJSONTyped, DiagnosticSignatureAttributesToJSON, DiagnosticSignatureFromJSON, DiagnosticSignatureFromJSONTyped, DiagnosticSignatureToJSON, DiagnosticSignatureTypeEnum, DiagnosticSignaturesApi, DiagnosticSignaturesResponseFromJSON, DiagnosticSignaturesResponseFromJSONTyped, DiagnosticSignaturesResponseToJSON, DocumentLinksFromJSON, DocumentLinksFromJSONTyped, DocumentLinksToJSON, EndUserLicenseAgreementCreateRequestDataAttributesFromJSON, EndUserLicenseAgreementCreateRequestDataAttributesFromJSONTyped, EndUserLicenseAgreementCreateRequestDataAttributesToJSON, EndUserLicenseAgreementCreateRequestDataFromJSON, EndUserLicenseAgreementCreateRequestDataFromJSONTyped, EndUserLicenseAgreementCreateRequestDataRelationshipsFromJSON, EndUserLicenseAgreementCreateRequestDataRelationshipsFromJSONTyped, EndUserLicenseAgreementCreateRequestDataRelationshipsTerritoriesFromJSON, EndUserLicenseAgreementCreateRequestDataRelationshipsTerritoriesFromJSONTyped, EndUserLicenseAgreementCreateRequestDataRelationshipsTerritoriesToJSON, EndUserLicenseAgreementCreateRequestDataRelationshipsToJSON, EndUserLicenseAgreementCreateRequestDataToJSON, EndUserLicenseAgreementCreateRequestDataTypeEnum, EndUserLicenseAgreementCreateRequestFromJSON, EndUserLicenseAgreementCreateRequestFromJSONTyped, EndUserLicenseAgreementCreateRequestToJSON, EndUserLicenseAgreementFromJSON, EndUserLicenseAgreementFromJSONTyped, EndUserLicenseAgreementRelationshipsFromJSON, EndUserLicenseAgreementRelationshipsFromJSONTyped, EndUserLicenseAgreementRelationshipsToJSON, EndUserLicenseAgreementResponseFromJSON, EndUserLicenseAgreementResponseFromJSONTyped, EndUserLicenseAgreementResponseIncludedInnerFromJSON, EndUserLicenseAgreementResponseIncludedInnerFromJSONTyped, EndUserLicenseAgreementResponseIncludedInnerToJSON, EndUserLicenseAgreementResponseToJSON, EndUserLicenseAgreementToJSON, EndUserLicenseAgreementTypeEnum, EndUserLicenseAgreementUpdateRequestDataFromJSON, EndUserLicenseAgreementUpdateRequestDataFromJSONTyped, EndUserLicenseAgreementUpdateRequestDataRelationshipsFromJSON, EndUserLicenseAgreementUpdateRequestDataRelationshipsFromJSONTyped, EndUserLicenseAgreementUpdateRequestDataRelationshipsToJSON, EndUserLicenseAgreementUpdateRequestDataToJSON, EndUserLicenseAgreementUpdateRequestDataTypeEnum, EndUserLicenseAgreementUpdateRequestFromJSON, EndUserLicenseAgreementUpdateRequestFromJSONTyped, EndUserLicenseAgreementUpdateRequestToJSON, EndUserLicenseAgreementsApi, EndUserLicenseAgreementsGetInstanceFieldsEndUserLicenseAgreementsEnum, EndUserLicenseAgreementsGetInstanceFieldsTerritoriesEnum, EndUserLicenseAgreementsGetInstanceIncludeEnum, EndUserLicenseAgreementsTerritoriesGetToManyRelatedFieldsTerritoriesEnum, ErrorResponseErrorsInnerFromJSON, ErrorResponseErrorsInnerFromJSONTyped, ErrorResponseErrorsInnerSourceFromJSON, ErrorResponseErrorsInnerSourceFromJSONTyped, ErrorResponseErrorsInnerSourceToJSON, ErrorResponseErrorsInnerToJSON, ErrorResponseFromJSON, ErrorResponseFromJSONTyped, ErrorResponseToJSON, ErrorSourceParameterFromJSON, ErrorSourceParameterFromJSONTyped, ErrorSourceParameterToJSON, ErrorSourcePointerFromJSON, ErrorSourcePointerFromJSONTyped, ErrorSourcePointerToJSON, ExternalBetaState, ExternalBetaStateFromJSON, ExternalBetaStateFromJSONTyped, ExternalBetaStateToJSON, FetchError, FileLocationFromJSON, FileLocationFromJSONTyped, FileLocationToJSON, FinanceReportsApi, FinanceReportsGetCollectionFilterReportTypeEnum, GameCenterEnabledVersionAttributesFromJSON, GameCenterEnabledVersionAttributesFromJSONTyped, GameCenterEnabledVersionAttributesToJSON, GameCenterEnabledVersionCompatibleVersionsLinkagesRequestFromJSON, GameCenterEnabledVersionCompatibleVersionsLinkagesRequestFromJSONTyped, GameCenterEnabledVersionCompatibleVersionsLinkagesRequestToJSON, GameCenterEnabledVersionCompatibleVersionsLinkagesResponseFromJSON, GameCenterEnabledVersionCompatibleVersionsLinkagesResponseFromJSONTyped, GameCenterEnabledVersionCompatibleVersionsLinkagesResponseToJSON, GameCenterEnabledVersionFromJSON, GameCenterEnabledVersionFromJSONTyped, GameCenterEnabledVersionRelationshipsFromJSON, GameCenterEnabledVersionRelationshipsFromJSONTyped, GameCenterEnabledVersionRelationshipsToJSON, GameCenterEnabledVersionToJSON, GameCenterEnabledVersionTypeEnum, GameCenterEnabledVersionsApi, GameCenterEnabledVersionsCompatibleVersionsGetToManyRelatedFieldsAppsEnum, GameCenterEnabledVersionsCompatibleVersionsGetToManyRelatedFieldsGameCenterEnabledVersionsEnum, GameCenterEnabledVersionsCompatibleVersionsGetToManyRelatedFilterPlatformEnum, GameCenterEnabledVersionsCompatibleVersionsGetToManyRelatedIncludeEnum, GameCenterEnabledVersionsCompatibleVersionsGetToManyRelatedSortEnum, GameCenterEnabledVersionsResponseFromJSON, GameCenterEnabledVersionsResponseFromJSONTyped, GameCenterEnabledVersionsResponseIncludedInnerFromJSON, GameCenterEnabledVersionsResponseIncludedInnerFromJSONTyped, GameCenterEnabledVersionsResponseIncludedInnerToJSON, GameCenterEnabledVersionsResponseToJSON, HttpHeaderFromJSON, HttpHeaderFromJSONTyped, HttpHeaderToJSON, IconAssetType, IconAssetTypeFromJSON, IconAssetTypeFromJSONTyped, IconAssetTypeToJSON, ImageAssetFromJSON, ImageAssetFromJSONTyped, ImageAssetToJSON, InAppPurchaseAppStoreReviewScreenshotCreateRequestDataFromJSON, InAppPurchaseAppStoreReviewScreenshotCreateRequestDataFromJSONTyped, InAppPurchaseAppStoreReviewScreenshotCreateRequestDataRelationshipsFromJSON, InAppPurchaseAppStoreReviewScreenshotCreateRequestDataRelationshipsFromJSONTyped, InAppPurchaseAppStoreReviewScreenshotCreateRequestDataRelationshipsInAppPurchaseV2FromJSON, InAppPurchaseAppStoreReviewScreenshotCreateRequestDataRelationshipsInAppPurchaseV2FromJSONTyped, InAppPurchaseAppStoreReviewScreenshotCreateRequestDataRelationshipsInAppPurchaseV2ToJSON, InAppPurchaseAppStoreReviewScreenshotCreateRequestDataRelationshipsToJSON, InAppPurchaseAppStoreReviewScreenshotCreateRequestDataToJSON, InAppPurchaseAppStoreReviewScreenshotCreateRequestDataTypeEnum, InAppPurchaseAppStoreReviewScreenshotCreateRequestFromJSON, InAppPurchaseAppStoreReviewScreenshotCreateRequestFromJSONTyped, InAppPurchaseAppStoreReviewScreenshotCreateRequestToJSON, InAppPurchaseAppStoreReviewScreenshotFromJSON, InAppPurchaseAppStoreReviewScreenshotFromJSONTyped, InAppPurchaseAppStoreReviewScreenshotRelationshipsFromJSON, InAppPurchaseAppStoreReviewScreenshotRelationshipsFromJSONTyped, InAppPurchaseAppStoreReviewScreenshotRelationshipsInAppPurchaseV2FromJSON, InAppPurchaseAppStoreReviewScreenshotRelationshipsInAppPurchaseV2FromJSONTyped, InAppPurchaseAppStoreReviewScreenshotRelationshipsInAppPurchaseV2ToJSON, InAppPurchaseAppStoreReviewScreenshotRelationshipsToJSON, InAppPurchaseAppStoreReviewScreenshotResponseFromJSON, InAppPurchaseAppStoreReviewScreenshotResponseFromJSONTyped, InAppPurchaseAppStoreReviewScreenshotResponseToJSON, InAppPurchaseAppStoreReviewScreenshotToJSON, InAppPurchaseAppStoreReviewScreenshotTypeEnum, InAppPurchaseAppStoreReviewScreenshotUpdateRequestDataFromJSON, InAppPurchaseAppStoreReviewScreenshotUpdateRequestDataFromJSONTyped, InAppPurchaseAppStoreReviewScreenshotUpdateRequestDataToJSON, InAppPurchaseAppStoreReviewScreenshotUpdateRequestDataTypeEnum, InAppPurchaseAppStoreReviewScreenshotUpdateRequestFromJSON, InAppPurchaseAppStoreReviewScreenshotUpdateRequestFromJSONTyped, InAppPurchaseAppStoreReviewScreenshotUpdateRequestToJSON, InAppPurchaseAppStoreReviewScreenshotsApi, InAppPurchaseAppStoreReviewScreenshotsGetInstanceFieldsInAppPurchaseAppStoreReviewScreenshotsEnum, InAppPurchaseAppStoreReviewScreenshotsGetInstanceIncludeEnum, InAppPurchaseAttributesFromJSON, InAppPurchaseAttributesFromJSONTyped, InAppPurchaseAttributesInAppPurchaseTypeEnum, InAppPurchaseAttributesStateEnum, InAppPurchaseAttributesToJSON, InAppPurchaseContentAttributesFromJSON, InAppPurchaseContentAttributesFromJSONTyped, InAppPurchaseContentAttributesToJSON, InAppPurchaseContentFromJSON, InAppPurchaseContentFromJSONTyped, InAppPurchaseContentResponseFromJSON, InAppPurchaseContentResponseFromJSONTyped, InAppPurchaseContentResponseToJSON, InAppPurchaseContentToJSON, InAppPurchaseContentTypeEnum, InAppPurchaseContentsApi, InAppPurchaseContentsGetInstanceFieldsInAppPurchaseContentsEnum, InAppPurchaseContentsGetInstanceIncludeEnum, InAppPurchaseFromJSON, InAppPurchaseFromJSONTyped, InAppPurchaseLocalizationAttributesFromJSON, InAppPurchaseLocalizationAttributesFromJSONTyped, InAppPurchaseLocalizationAttributesStateEnum, InAppPurchaseLocalizationAttributesToJSON, InAppPurchaseLocalizationCreateRequestDataAttributesFromJSON, InAppPurchaseLocalizationCreateRequestDataAttributesFromJSONTyped, InAppPurchaseLocalizationCreateRequestDataAttributesToJSON, InAppPurchaseLocalizationCreateRequestDataFromJSON, InAppPurchaseLocalizationCreateRequestDataFromJSONTyped, InAppPurchaseLocalizationCreateRequestDataToJSON, InAppPurchaseLocalizationCreateRequestDataTypeEnum, InAppPurchaseLocalizationCreateRequestFromJSON, InAppPurchaseLocalizationCreateRequestFromJSONTyped, InAppPurchaseLocalizationCreateRequestToJSON, InAppPurchaseLocalizationFromJSON, InAppPurchaseLocalizationFromJSONTyped, InAppPurchaseLocalizationResponseFromJSON, InAppPurchaseLocalizationResponseFromJSONTyped, InAppPurchaseLocalizationResponseToJSON, InAppPurchaseLocalizationToJSON, InAppPurchaseLocalizationTypeEnum, InAppPurchaseLocalizationUpdateRequestDataAttributesFromJSON, InAppPurchaseLocalizationUpdateRequestDataAttributesFromJSONTyped, InAppPurchaseLocalizationUpdateRequestDataAttributesToJSON, InAppPurchaseLocalizationUpdateRequestDataFromJSON, InAppPurchaseLocalizationUpdateRequestDataFromJSONTyped, InAppPurchaseLocalizationUpdateRequestDataToJSON, InAppPurchaseLocalizationUpdateRequestDataTypeEnum, InAppPurchaseLocalizationUpdateRequestFromJSON, InAppPurchaseLocalizationUpdateRequestFromJSONTyped, InAppPurchaseLocalizationUpdateRequestToJSON, InAppPurchaseLocalizationsApi, InAppPurchaseLocalizationsGetInstanceFieldsInAppPurchaseLocalizationsEnum, InAppPurchaseLocalizationsGetInstanceIncludeEnum, InAppPurchaseLocalizationsResponseFromJSON, InAppPurchaseLocalizationsResponseFromJSONTyped, InAppPurchaseLocalizationsResponseToJSON, InAppPurchasePriceAttributesFromJSON, InAppPurchasePriceAttributesFromJSONTyped, InAppPurchasePriceAttributesToJSON, InAppPurchasePriceFromJSON, InAppPurchasePriceFromJSONTyped, InAppPurchasePriceInlineCreateFromJSON, InAppPurchasePriceInlineCreateFromJSONTyped, InAppPurchasePriceInlineCreateRelationshipsFromJSON, InAppPurchasePriceInlineCreateRelationshipsFromJSONTyped, InAppPurchasePriceInlineCreateRelationshipsInAppPurchasePricePointFromJSON, InAppPurchasePriceInlineCreateRelationshipsInAppPurchasePricePointFromJSONTyped, InAppPurchasePriceInlineCreateRelationshipsInAppPurchasePricePointToJSON, InAppPurchasePriceInlineCreateRelationshipsInAppPurchaseV2FromJSON, InAppPurchasePriceInlineCreateRelationshipsInAppPurchaseV2FromJSONTyped, InAppPurchasePriceInlineCreateRelationshipsInAppPurchaseV2ToJSON, InAppPurchasePriceInlineCreateRelationshipsToJSON, InAppPurchasePriceInlineCreateToJSON, InAppPurchasePriceInlineCreateTypeEnum, InAppPurchasePricePointAttributesFromJSON, InAppPurchasePricePointAttributesFromJSONTyped, InAppPurchasePricePointAttributesToJSON, InAppPurchasePricePointFromJSON, InAppPurchasePricePointFromJSONTyped, InAppPurchasePricePointRelationshipsFromJSON, InAppPurchasePricePointRelationshipsFromJSONTyped, InAppPurchasePricePointRelationshipsToJSON, InAppPurchasePricePointToJSON, InAppPurchasePricePointTypeEnum, InAppPurchasePricePointsResponseFromJSON, InAppPurchasePricePointsResponseFromJSONTyped, InAppPurchasePricePointsResponseToJSON, InAppPurchasePriceRelationshipsFromJSON, InAppPurchasePriceRelationshipsFromJSONTyped, InAppPurchasePriceRelationshipsInAppPurchasePricePointDataFromJSON, InAppPurchasePriceRelationshipsInAppPurchasePricePointDataFromJSONTyped, InAppPurchasePriceRelationshipsInAppPurchasePricePointDataToJSON, InAppPurchasePriceRelationshipsInAppPurchasePricePointDataTypeEnum, InAppPurchasePriceRelationshipsInAppPurchasePricePointFromJSON, InAppPurchasePriceRelationshipsInAppPurchasePricePointFromJSONTyped, InAppPurchasePriceRelationshipsInAppPurchasePricePointToJSON, InAppPurchasePriceRelationshipsToJSON, InAppPurchasePriceScheduleCreateRequestDataFromJSON, InAppPurchasePriceScheduleCreateRequestDataFromJSONTyped, InAppPurchasePriceScheduleCreateRequestDataRelationshipsFromJSON, InAppPurchasePriceScheduleCreateRequestDataRelationshipsFromJSONTyped, InAppPurchasePriceScheduleCreateRequestDataRelationshipsManualPricesFromJSON, InAppPurchasePriceScheduleCreateRequestDataRelationshipsManualPricesFromJSONTyped, InAppPurchasePriceScheduleCreateRequestDataRelationshipsManualPricesToJSON, InAppPurchasePriceScheduleCreateRequestDataRelationshipsToJSON, InAppPurchasePriceScheduleCreateRequestDataToJSON, InAppPurchasePriceScheduleCreateRequestDataTypeEnum, InAppPurchasePriceScheduleCreateRequestFromJSON, InAppPurchasePriceScheduleCreateRequestFromJSONTyped, InAppPurchasePriceScheduleCreateRequestToJSON, InAppPurchasePriceScheduleFromJSON, InAppPurchasePriceScheduleFromJSONTyped, InAppPurchasePriceScheduleRelationshipsFromJSON, InAppPurchasePriceScheduleRelationshipsFromJSONTyped, InAppPurchasePriceScheduleRelationshipsManualPricesDataInnerFromJSON, InAppPurchasePriceScheduleRelationshipsManualPricesDataInnerFromJSONTyped, InAppPurchasePriceScheduleRelationshipsManualPricesDataInnerToJSON, InAppPurchasePriceScheduleRelationshipsManualPricesDataInnerTypeEnum, InAppPurchasePriceScheduleRelationshipsManualPricesFromJSON, InAppPurchasePriceScheduleRelationshipsManualPricesFromJSONTyped, InAppPurchasePriceScheduleRelationshipsManualPricesToJSON, InAppPurchasePriceScheduleRelationshipsToJSON, InAppPurchasePriceScheduleResponseFromJSON, InAppPurchasePriceScheduleResponseFromJSONTyped, InAppPurchasePriceScheduleResponseIncludedInnerFromJSON, InAppPurchasePriceScheduleResponseIncludedInnerFromJSONTyped, InAppPurchasePriceScheduleResponseIncludedInnerToJSON, InAppPurchasePriceScheduleResponseToJSON, InAppPurchasePriceScheduleToJSON, InAppPurchasePriceScheduleTypeEnum, InAppPurchasePriceSchedulesApi, InAppPurchasePriceSchedulesGetInstanceFieldsInAppPurchasePriceSchedulesEnum, InAppPurchasePriceSchedulesGetInstanceFieldsInAppPurchasePricesEnum, InAppPurchasePriceSchedulesGetInstanceIncludeEnum, InAppPurchasePriceSchedulesManualPricesGetToManyRelatedFieldsInAppPurchasePricePointsEnum, InAppPurchasePriceSchedulesManualPricesGetToManyRelatedFieldsInAppPurchasePricesEnum, InAppPurchasePriceSchedulesManualPricesGetToManyRelatedFieldsTerritoriesEnum, InAppPurchasePriceSchedulesManualPricesGetToManyRelatedIncludeEnum, InAppPurchasePriceToJSON, InAppPurchasePriceTypeEnum, InAppPurchasePricesResponseFromJSON, InAppPurchasePricesResponseFromJSONTyped, InAppPurchasePricesResponseIncludedInnerFromJSON, InAppPurchasePricesResponseIncludedInnerFromJSONTyped, InAppPurchasePricesResponseIncludedInnerToJSON, InAppPurchasePricesResponseToJSON, InAppPurchaseRelationshipsFromJSON, InAppPurchaseRelationshipsFromJSONTyped, InAppPurchaseRelationshipsToJSON, InAppPurchaseResponseFromJSON, InAppPurchaseResponseFromJSONTyped, InAppPurchaseResponseToJSON, InAppPurchaseState, InAppPurchaseStateFromJSON, InAppPurchaseStateFromJSONTyped, InAppPurchaseStateToJSON, InAppPurchaseSubmissionCreateRequestDataFromJSON, InAppPurchaseSubmissionCreateRequestDataFromJSONTyped, InAppPurchaseSubmissionCreateRequestDataToJSON, InAppPurchaseSubmissionCreateRequestDataTypeEnum, InAppPurchaseSubmissionCreateRequestFromJSON, InAppPurchaseSubmissionCreateRequestFromJSONTyped, InAppPurchaseSubmissionCreateRequestToJSON, InAppPurchaseSubmissionFromJSON, InAppPurchaseSubmissionFromJSONTyped, InAppPurchaseSubmissionResponseFromJSON, InAppPurchaseSubmissionResponseFromJSONTyped, InAppPurchaseSubmissionResponseToJSON, InAppPurchaseSubmissionToJSON, InAppPurchaseSubmissionTypeEnum, InAppPurchaseSubmissionsApi, InAppPurchaseToJSON, InAppPurchaseType, InAppPurchaseTypeEnum, InAppPurchaseTypeFromJSON, InAppPurchaseTypeFromJSONTyped, InAppPurchaseTypeToJSON, InAppPurchaseV2AttributesFromJSON, InAppPurchaseV2AttributesFromJSONTyped, InAppPurchaseV2AttributesToJSON, InAppPurchaseV2CreateRequestDataAttributesFromJSON, InAppPurchaseV2CreateRequestDataAttributesFromJSONTyped, InAppPurchaseV2CreateRequestDataAttributesToJSON, InAppPurchaseV2CreateRequestDataFromJSON, InAppPurchaseV2CreateRequestDataFromJSONTyped, InAppPurchaseV2CreateRequestDataToJSON, InAppPurchaseV2CreateRequestDataTypeEnum, InAppPurchaseV2CreateRequestFromJSON, InAppPurchaseV2CreateRequestFromJSONTyped, InAppPurchaseV2CreateRequestToJSON, InAppPurchaseV2FromJSON, InAppPurchaseV2FromJSONTyped, InAppPurchaseV2RelationshipsAppStoreReviewScreenshotDataFromJSON, InAppPurchaseV2RelationshipsAppStoreReviewScreenshotDataFromJSONTyped, InAppPurchaseV2RelationshipsAppStoreReviewScreenshotDataToJSON, InAppPurchaseV2RelationshipsAppStoreReviewScreenshotDataTypeEnum, InAppPurchaseV2RelationshipsAppStoreReviewScreenshotFromJSON, InAppPurchaseV2RelationshipsAppStoreReviewScreenshotFromJSONTyped, InAppPurchaseV2RelationshipsAppStoreReviewScreenshotToJSON, InAppPurchaseV2RelationshipsContentDataFromJSON, InAppPurchaseV2RelationshipsContentDataFromJSONTyped, InAppPurchaseV2RelationshipsContentDataToJSON, InAppPurchaseV2RelationshipsContentDataTypeEnum, InAppPurchaseV2RelationshipsContentFromJSON, InAppPurchaseV2RelationshipsContentFromJSONTyped, InAppPurchaseV2RelationshipsContentToJSON, InAppPurchaseV2RelationshipsFromJSON, InAppPurchaseV2RelationshipsFromJSONTyped, InAppPurchaseV2RelationshipsIapPriceScheduleDataFromJSON, InAppPurchaseV2RelationshipsIapPriceScheduleDataFromJSONTyped, InAppPurchaseV2RelationshipsIapPriceScheduleDataToJSON, InAppPurchaseV2RelationshipsIapPriceScheduleDataTypeEnum, InAppPurchaseV2RelationshipsIapPriceScheduleFromJSON, InAppPurchaseV2RelationshipsIapPriceScheduleFromJSONTyped, InAppPurchaseV2RelationshipsIapPriceScheduleToJSON, InAppPurchaseV2RelationshipsInAppPurchaseLocalizationsDataInnerFromJSON, InAppPurchaseV2RelationshipsInAppPurchaseLocalizationsDataInnerFromJSONTyped, InAppPurchaseV2RelationshipsInAppPurchaseLocalizationsDataInnerToJSON, InAppPurchaseV2RelationshipsInAppPurchaseLocalizationsDataInnerTypeEnum, InAppPurchaseV2RelationshipsInAppPurchaseLocalizationsFromJSON, InAppPurchaseV2RelationshipsInAppPurchaseLocalizationsFromJSONTyped, InAppPurchaseV2RelationshipsInAppPurchaseLocalizationsToJSON, InAppPurchaseV2RelationshipsPricePointsFromJSON, InAppPurchaseV2RelationshipsPricePointsFromJSONTyped, InAppPurchaseV2RelationshipsPricePointsToJSON, InAppPurchaseV2RelationshipsPromotedPurchaseFromJSON, InAppPurchaseV2RelationshipsPromotedPurchaseFromJSONTyped, InAppPurchaseV2RelationshipsPromotedPurchaseToJSON, InAppPurchaseV2RelationshipsToJSON, InAppPurchaseV2ResponseFromJSON, InAppPurchaseV2ResponseFromJSONTyped, InAppPurchaseV2ResponseToJSON, InAppPurchaseV2ToJSON, InAppPurchaseV2TypeEnum, InAppPurchaseV2UpdateRequestDataAttributesFromJSON, InAppPurchaseV2UpdateRequestDataAttributesFromJSONTyped, InAppPurchaseV2UpdateRequestDataAttributesToJSON, InAppPurchaseV2UpdateRequestDataFromJSON, InAppPurchaseV2UpdateRequestDataFromJSONTyped, InAppPurchaseV2UpdateRequestDataToJSON, InAppPurchaseV2UpdateRequestDataTypeEnum, InAppPurchaseV2UpdateRequestFromJSON, InAppPurchaseV2UpdateRequestFromJSONTyped, InAppPurchaseV2UpdateRequestToJSON, InAppPurchasesApi, InAppPurchasesAppStoreReviewScreenshotGetToOneRelatedFieldsInAppPurchaseAppStoreReviewScreenshotsEnum, InAppPurchasesAppStoreReviewScreenshotGetToOneRelatedFieldsInAppPurchasesEnum, InAppPurchasesAppStoreReviewScreenshotGetToOneRelatedIncludeEnum, InAppPurchasesContentGetToOneRelatedFieldsInAppPurchaseContentsEnum, InAppPurchasesContentGetToOneRelatedFieldsInAppPurchasesEnum, InAppPurchasesContentGetToOneRelatedIncludeEnum, InAppPurchasesGetInstance0FieldsInAppPurchaseAppStoreReviewScreenshotsEnum, InAppPurchasesGetInstance0FieldsInAppPurchaseContentsEnum, InAppPurchasesGetInstance0FieldsInAppPurchaseLocalizationsEnum, InAppPurchasesGetInstance0FieldsInAppPurchasePricePointsEnum, InAppPurchasesGetInstance0FieldsInAppPurchasePriceSchedulesEnum, InAppPurchasesGetInstance0FieldsInAppPurchasesEnum, InAppPurchasesGetInstance0FieldsPromotedPurchasesEnum, InAppPurchasesGetInstance0IncludeEnum, InAppPurchasesGetInstanceFieldsInAppPurchasesEnum, InAppPurchasesGetInstanceIncludeEnum, InAppPurchasesIapPriceScheduleGetToOneRelatedFieldsInAppPurchasePriceSchedulesEnum, InAppPurchasesIapPriceScheduleGetToOneRelatedFieldsInAppPurchasePricesEnum, InAppPurchasesIapPriceScheduleGetToOneRelatedFieldsInAppPurchasesEnum, InAppPurchasesIapPriceScheduleGetToOneRelatedIncludeEnum, InAppPurchasesInAppPurchaseLocalizationsGetToManyRelatedFieldsInAppPurchaseLocalizationsEnum, InAppPurchasesInAppPurchaseLocalizationsGetToManyRelatedFieldsInAppPurchasesEnum, InAppPurchasesInAppPurchaseLocalizationsGetToManyRelatedIncludeEnum, InAppPurchasesPricePointsGetToManyRelatedFieldsInAppPurchasePricePointsEnum, InAppPurchasesPricePointsGetToManyRelatedFieldsTerritoriesEnum, InAppPurchasesPricePointsGetToManyRelatedIncludeEnum, InAppPurchasesPromotedPurchaseGetToOneRelatedFieldsInAppPurchasesEnum, InAppPurchasesPromotedPurchaseGetToOneRelatedFieldsPromotedPurchaseImagesEnum, InAppPurchasesPromotedPurchaseGetToOneRelatedFieldsPromotedPurchasesEnum, InAppPurchasesPromotedPurchaseGetToOneRelatedFieldsSubscriptionsEnum, InAppPurchasesPromotedPurchaseGetToOneRelatedIncludeEnum, InAppPurchasesResponseFromJSON, InAppPurchasesResponseFromJSONTyped, InAppPurchasesResponseToJSON, InAppPurchasesV2ResponseFromJSON, InAppPurchasesV2ResponseFromJSONTyped, InAppPurchasesV2ResponseIncludedInnerFromJSON, InAppPurchasesV2ResponseIncludedInnerFromJSONTyped, InAppPurchasesV2ResponseIncludedInnerToJSON, InAppPurchasesV2ResponseToJSON, InternalBetaState, InternalBetaStateFromJSON, InternalBetaStateFromJSONTyped, InternalBetaStateToJSON, JSONApiResponse, KidsAgeBand, KidsAgeBandFromJSON, KidsAgeBandFromJSONTyped, KidsAgeBandToJSON, MetricCategory, MetricCategoryFromJSON, MetricCategoryFromJSONTyped, MetricCategoryToJSON, MetricsInsightFromJSON, MetricsInsightFromJSONTyped, MetricsInsightPopulationsInnerFromJSON, MetricsInsightPopulationsInnerFromJSONTyped, MetricsInsightPopulationsInnerToJSON, MetricsInsightToJSON, PagedDocumentLinksFromJSON, PagedDocumentLinksFromJSONTyped, PagedDocumentLinksToJSON, PagingInformationFromJSON, PagingInformationFromJSONTyped, PagingInformationPagingFromJSON, PagingInformationPagingFromJSONTyped, PagingInformationPagingToJSON, PagingInformationToJSON, PerfPowerMetricAttributesFromJSON, PerfPowerMetricAttributesFromJSONTyped, PerfPowerMetricAttributesMetricTypeEnum, PerfPowerMetricAttributesPlatformEnum, PerfPowerMetricAttributesToJSON, PerfPowerMetricFromJSON, PerfPowerMetricFromJSONTyped, PerfPowerMetricToJSON, PerfPowerMetricTypeEnum, PhasedReleaseState, PhasedReleaseStateFromJSON, PhasedReleaseStateFromJSONTyped, PhasedReleaseStateToJSON, Platform, PlatformFromJSON, PlatformFromJSONTyped, PlatformToJSON, PreReleaseVersionsApi, PreReleaseVersionsAppGetToOneRelatedFieldsAppsEnum, PreReleaseVersionsBuildsGetToManyRelatedFieldsBuildsEnum, PreReleaseVersionsGetCollectionFieldsAppsEnum, PreReleaseVersionsGetCollectionFieldsBuildsEnum, PreReleaseVersionsGetCollectionFieldsPreReleaseVersionsEnum, PreReleaseVersionsGetCollectionFilterBuildsProcessingStateEnum, PreReleaseVersionsGetCollectionFilterPlatformEnum, PreReleaseVersionsGetCollectionIncludeEnum, PreReleaseVersionsGetCollectionSortEnum, PreReleaseVersionsGetInstanceFieldsAppsEnum, PreReleaseVersionsGetInstanceFieldsBuildsEnum, PreReleaseVersionsGetInstanceFieldsPreReleaseVersionsEnum, PreReleaseVersionsGetInstanceIncludeEnum, PreReleaseVersionsResponseFromJSON, PreReleaseVersionsResponseFromJSONTyped, PreReleaseVersionsResponseIncludedInnerFromJSON, PreReleaseVersionsResponseIncludedInnerFromJSONTyped, PreReleaseVersionsResponseIncludedInnerToJSON, PreReleaseVersionsResponseToJSON, PrereleaseVersionAttributesFromJSON, PrereleaseVersionAttributesFromJSONTyped, PrereleaseVersionAttributesToJSON, PrereleaseVersionFromJSON, PrereleaseVersionFromJSONTyped, PrereleaseVersionRelationshipsFromJSON, PrereleaseVersionRelationshipsFromJSONTyped, PrereleaseVersionRelationshipsToJSON, PrereleaseVersionResponseFromJSON, PrereleaseVersionResponseFromJSONTyped, PrereleaseVersionResponseToJSON, PrereleaseVersionToJSON, PrereleaseVersionTypeEnum, PreviewType, PreviewTypeFromJSON, PreviewTypeFromJSONTyped, PreviewTypeToJSON, ProfileAttributesFromJSON, ProfileAttributesFromJSONTyped, ProfileAttributesProfileStateEnum, ProfileAttributesProfileTypeEnum, ProfileAttributesToJSON, ProfileCreateRequestDataAttributesFromJSON, ProfileCreateRequestDataAttributesFromJSONTyped, ProfileCreateRequestDataAttributesProfileTypeEnum, ProfileCreateRequestDataAttributesToJSON, ProfileCreateRequestDataFromJSON, ProfileCreateRequestDataFromJSONTyped, ProfileCreateRequestDataRelationshipsCertificatesFromJSON, ProfileCreateRequestDataRelationshipsCertificatesFromJSONTyped, ProfileCreateRequestDataRelationshipsCertificatesToJSON, ProfileCreateRequestDataRelationshipsDevicesFromJSON, ProfileCreateRequestDataRelationshipsDevicesFromJSONTyped, ProfileCreateRequestDataRelationshipsDevicesToJSON, ProfileCreateRequestDataRelationshipsFromJSON, ProfileCreateRequestDataRelationshipsFromJSONTyped, ProfileCreateRequestDataRelationshipsToJSON, ProfileCreateRequestDataToJSON, ProfileCreateRequestDataTypeEnum, ProfileCreateRequestFromJSON, ProfileCreateRequestFromJSONTyped, ProfileCreateRequestToJSON, ProfileFromJSON, ProfileFromJSONTyped, ProfileRelationshipsCertificatesDataInnerFromJSON, ProfileRelationshipsCertificatesDataInnerFromJSONTyped, ProfileRelationshipsCertificatesDataInnerToJSON, ProfileRelationshipsCertificatesDataInnerTypeEnum, ProfileRelationshipsCertificatesFromJSON, ProfileRelationshipsCertificatesFromJSONTyped, ProfileRelationshipsCertificatesToJSON, ProfileRelationshipsDevicesDataInnerFromJSON, ProfileRelationshipsDevicesDataInnerFromJSONTyped, ProfileRelationshipsDevicesDataInnerToJSON, ProfileRelationshipsDevicesDataInnerTypeEnum, ProfileRelationshipsDevicesFromJSON, ProfileRelationshipsDevicesFromJSONTyped, ProfileRelationshipsDevicesToJSON, ProfileRelationshipsFromJSON, ProfileRelationshipsFromJSONTyped, ProfileRelationshipsToJSON, ProfileResponseFromJSON, ProfileResponseFromJSONTyped, ProfileResponseToJSON, ProfileToJSON, ProfileTypeEnum, ProfilesApi, ProfilesBundleIdGetToOneRelatedFieldsBundleIdsEnum, ProfilesCertificatesGetToManyRelatedFieldsCertificatesEnum, ProfilesDevicesGetToManyRelatedFieldsDevicesEnum, ProfilesGetCollectionFieldsBundleIdsEnum, ProfilesGetCollectionFieldsCertificatesEnum, ProfilesGetCollectionFieldsDevicesEnum, ProfilesGetCollectionFieldsProfilesEnum, ProfilesGetCollectionFilterProfileStateEnum, ProfilesGetCollectionFilterProfileTypeEnum, ProfilesGetCollectionIncludeEnum, ProfilesGetCollectionSortEnum, ProfilesGetInstanceFieldsBundleIdsEnum, ProfilesGetInstanceFieldsCertificatesEnum, ProfilesGetInstanceFieldsDevicesEnum, ProfilesGetInstanceFieldsProfilesEnum, ProfilesGetInstanceIncludeEnum, ProfilesResponseFromJSON, ProfilesResponseFromJSONTyped, ProfilesResponseIncludedInnerFromJSON, ProfilesResponseIncludedInnerFromJSONTyped, ProfilesResponseIncludedInnerToJSON, ProfilesResponseToJSON, PromotedPurchaseAttributesFromJSON, PromotedPurchaseAttributesFromJSONTyped, PromotedPurchaseAttributesStateEnum, PromotedPurchaseAttributesToJSON, PromotedPurchaseCreateRequestDataAttributesFromJSON, PromotedPurchaseCreateRequestDataAttributesFromJSONTyped, PromotedPurchaseCreateRequestDataAttributesToJSON, PromotedPurchaseCreateRequestDataFromJSON, PromotedPurchaseCreateRequestDataFromJSONTyped, PromotedPurchaseCreateRequestDataRelationshipsFromJSON, PromotedPurchaseCreateRequestDataRelationshipsFromJSONTyped, PromotedPurchaseCreateRequestDataRelationshipsSubscriptionFromJSON, PromotedPurchaseCreateRequestDataRelationshipsSubscriptionFromJSONTyped, PromotedPurchaseCreateRequestDataRelationshipsSubscriptionToJSON, PromotedPurchaseCreateRequestDataRelationshipsToJSON, PromotedPurchaseCreateRequestDataToJSON, PromotedPurchaseCreateRequestDataTypeEnum, PromotedPurchaseCreateRequestFromJSON, PromotedPurchaseCreateRequestFromJSONTyped, PromotedPurchaseCreateRequestToJSON, PromotedPurchaseFromJSON, PromotedPurchaseFromJSONTyped, PromotedPurchaseImageAttributesFromJSON, PromotedPurchaseImageAttributesFromJSONTyped, PromotedPurchaseImageAttributesStateEnum, PromotedPurchaseImageAttributesToJSON, PromotedPurchaseImageCreateRequestDataFromJSON, PromotedPurchaseImageCreateRequestDataFromJSONTyped, PromotedPurchaseImageCreateRequestDataRelationshipsFromJSON, PromotedPurchaseImageCreateRequestDataRelationshipsFromJSONTyped, PromotedPurchaseImageCreateRequestDataRelationshipsPromotedPurchaseFromJSON, PromotedPurchaseImageCreateRequestDataRelationshipsPromotedPurchaseFromJSONTyped, PromotedPurchaseImageCreateRequestDataRelationshipsPromotedPurchaseToJSON, PromotedPurchaseImageCreateRequestDataRelationshipsToJSON, PromotedPurchaseImageCreateRequestDataToJSON, PromotedPurchaseImageCreateRequestDataTypeEnum, PromotedPurchaseImageCreateRequestFromJSON, PromotedPurchaseImageCreateRequestFromJSONTyped, PromotedPurchaseImageCreateRequestToJSON, PromotedPurchaseImageFromJSON, PromotedPurchaseImageFromJSONTyped, PromotedPurchaseImageRelationshipsFromJSON, PromotedPurchaseImageRelationshipsFromJSONTyped, PromotedPurchaseImageRelationshipsToJSON, PromotedPurchaseImageResponseFromJSON, PromotedPurchaseImageResponseFromJSONTyped, PromotedPurchaseImageResponseToJSON, PromotedPurchaseImageToJSON, PromotedPurchaseImageTypeEnum, PromotedPurchaseImageUpdateRequestDataFromJSON, PromotedPurchaseImageUpdateRequestDataFromJSONTyped, PromotedPurchaseImageUpdateRequestDataToJSON, PromotedPurchaseImageUpdateRequestDataTypeEnum, PromotedPurchaseImageUpdateRequestFromJSON, PromotedPurchaseImageUpdateRequestFromJSONTyped, PromotedPurchaseImageUpdateRequestToJSON, PromotedPurchaseImagesApi, PromotedPurchaseImagesGetInstanceFieldsPromotedPurchaseImagesEnum, PromotedPurchaseImagesGetInstanceIncludeEnum, PromotedPurchaseImagesResponseFromJSON, PromotedPurchaseImagesResponseFromJSONTyped, PromotedPurchaseImagesResponseToJSON, PromotedPurchaseRelationshipsFromJSON, PromotedPurchaseRelationshipsFromJSONTyped, PromotedPurchaseRelationshipsPromotionImagesDataInnerFromJSON, PromotedPurchaseRelationshipsPromotionImagesDataInnerFromJSONTyped, PromotedPurchaseRelationshipsPromotionImagesDataInnerToJSON, PromotedPurchaseRelationshipsPromotionImagesDataInnerTypeEnum, PromotedPurchaseRelationshipsPromotionImagesFromJSON, PromotedPurchaseRelationshipsPromotionImagesFromJSONTyped, PromotedPurchaseRelationshipsPromotionImagesToJSON, PromotedPurchaseRelationshipsSubscriptionDataFromJSON, PromotedPurchaseRelationshipsSubscriptionDataFromJSONTyped, PromotedPurchaseRelationshipsSubscriptionDataToJSON, PromotedPurchaseRelationshipsSubscriptionDataTypeEnum, PromotedPurchaseRelationshipsSubscriptionFromJSON, PromotedPurchaseRelationshipsSubscriptionFromJSONTyped, PromotedPurchaseRelationshipsSubscriptionToJSON, PromotedPurchaseRelationshipsToJSON, PromotedPurchaseResponseFromJSON, PromotedPurchaseResponseFromJSONTyped, PromotedPurchaseResponseToJSON, PromotedPurchaseToJSON, PromotedPurchaseTypeEnum, PromotedPurchaseUpdateRequestDataAttributesFromJSON, PromotedPurchaseUpdateRequestDataAttributesFromJSONTyped, PromotedPurchaseUpdateRequestDataAttributesToJSON, PromotedPurchaseUpdateRequestDataFromJSON, PromotedPurchaseUpdateRequestDataFromJSONTyped, PromotedPurchaseUpdateRequestDataToJSON, PromotedPurchaseUpdateRequestDataTypeEnum, PromotedPurchaseUpdateRequestFromJSON, PromotedPurchaseUpdateRequestFromJSONTyped, PromotedPurchaseUpdateRequestToJSON, PromotedPurchasesApi, PromotedPurchasesGetInstanceFieldsPromotedPurchaseImagesEnum, PromotedPurchasesGetInstanceFieldsPromotedPurchasesEnum, PromotedPurchasesGetInstanceIncludeEnum, PromotedPurchasesPromotionImagesGetToManyRelatedFieldsPromotedPurchaseImagesEnum, PromotedPurchasesPromotionImagesGetToManyRelatedFieldsPromotedPurchasesEnum, PromotedPurchasesPromotionImagesGetToManyRelatedIncludeEnum, PromotedPurchasesResponseFromJSON, PromotedPurchasesResponseFromJSONTyped, PromotedPurchasesResponseIncludedInnerFromJSON, PromotedPurchasesResponseIncludedInnerFromJSONTyped, PromotedPurchasesResponseIncludedInnerToJSON, PromotedPurchasesResponseToJSON, RequiredError, ResourceLinksFromJSON, ResourceLinksFromJSONTyped, ResourceLinksToJSON, ResponseError, ReviewSubmissionAttributesFromJSON, ReviewSubmissionAttributesFromJSONTyped, ReviewSubmissionAttributesStateEnum, ReviewSubmissionAttributesToJSON, ReviewSubmissionCreateRequestDataAttributesFromJSON, ReviewSubmissionCreateRequestDataAttributesFromJSONTyped, ReviewSubmissionCreateRequestDataAttributesToJSON, ReviewSubmissionCreateRequestDataFromJSON, ReviewSubmissionCreateRequestDataFromJSONTyped, ReviewSubmissionCreateRequestDataToJSON, ReviewSubmissionCreateRequestDataTypeEnum, ReviewSubmissionCreateRequestFromJSON, ReviewSubmissionCreateRequestFromJSONTyped, ReviewSubmissionCreateRequestToJSON, ReviewSubmissionFromJSON, ReviewSubmissionFromJSONTyped, ReviewSubmissionItemAttributesFromJSON, ReviewSubmissionItemAttributesFromJSONTyped, ReviewSubmissionItemAttributesStateEnum, ReviewSubmissionItemAttributesToJSON, ReviewSubmissionItemCreateRequestDataFromJSON, ReviewSubmissionItemCreateRequestDataFromJSONTyped, ReviewSubmissionItemCreateRequestDataRelationshipsAppEventFromJSON, ReviewSubmissionItemCreateRequestDataRelationshipsAppEventFromJSONTyped, ReviewSubmissionItemCreateRequestDataRelationshipsAppEventToJSON, ReviewSubmissionItemCreateRequestDataRelationshipsAppStoreVersionExperimentFromJSON, ReviewSubmissionItemCreateRequestDataRelationshipsAppStoreVersionExperimentFromJSONTyped, ReviewSubmissionItemCreateRequestDataRelationshipsAppStoreVersionExperimentToJSON, ReviewSubmissionItemCreateRequestDataRelationshipsFromJSON, ReviewSubmissionItemCreateRequestDataRelationshipsFromJSONTyped, ReviewSubmissionItemCreateRequestDataRelationshipsReviewSubmissionFromJSON, ReviewSubmissionItemCreateRequestDataRelationshipsReviewSubmissionFromJSONTyped, ReviewSubmissionItemCreateRequestDataRelationshipsReviewSubmissionToJSON, ReviewSubmissionItemCreateRequestDataRelationshipsToJSON, ReviewSubmissionItemCreateRequestDataToJSON, ReviewSubmissionItemCreateRequestDataTypeEnum, ReviewSubmissionItemCreateRequestFromJSON, ReviewSubmissionItemCreateRequestFromJSONTyped, ReviewSubmissionItemCreateRequestToJSON, ReviewSubmissionItemFromJSON, ReviewSubmissionItemFromJSONTyped, ReviewSubmissionItemRelationshipsFromJSON, ReviewSubmissionItemRelationshipsFromJSONTyped, ReviewSubmissionItemRelationshipsToJSON, ReviewSubmissionItemResponseFromJSON, ReviewSubmissionItemResponseFromJSONTyped, ReviewSubmissionItemResponseToJSON, ReviewSubmissionItemToJSON, ReviewSubmissionItemTypeEnum, ReviewSubmissionItemUpdateRequestDataAttributesFromJSON, ReviewSubmissionItemUpdateRequestDataAttributesFromJSONTyped, ReviewSubmissionItemUpdateRequestDataAttributesToJSON, ReviewSubmissionItemUpdateRequestDataFromJSON, ReviewSubmissionItemUpdateRequestDataFromJSONTyped, ReviewSubmissionItemUpdateRequestDataToJSON, ReviewSubmissionItemUpdateRequestDataTypeEnum, ReviewSubmissionItemUpdateRequestFromJSON, ReviewSubmissionItemUpdateRequestFromJSONTyped, ReviewSubmissionItemUpdateRequestToJSON, ReviewSubmissionItemsApi, ReviewSubmissionItemsResponseFromJSON, ReviewSubmissionItemsResponseFromJSONTyped, ReviewSubmissionItemsResponseIncludedInnerFromJSON, ReviewSubmissionItemsResponseIncludedInnerFromJSONTyped, ReviewSubmissionItemsResponseIncludedInnerToJSON, ReviewSubmissionItemsResponseToJSON, ReviewSubmissionRelationshipsFromJSON, ReviewSubmissionRelationshipsFromJSONTyped, ReviewSubmissionRelationshipsItemsDataInnerFromJSON, ReviewSubmissionRelationshipsItemsDataInnerFromJSONTyped, ReviewSubmissionRelationshipsItemsDataInnerToJSON, ReviewSubmissionRelationshipsItemsDataInnerTypeEnum, ReviewSubmissionRelationshipsItemsFromJSON, ReviewSubmissionRelationshipsItemsFromJSONTyped, ReviewSubmissionRelationshipsItemsToJSON, ReviewSubmissionRelationshipsToJSON, ReviewSubmissionResponseFromJSON, ReviewSubmissionResponseFromJSONTyped, ReviewSubmissionResponseToJSON, ReviewSubmissionToJSON, ReviewSubmissionTypeEnum, ReviewSubmissionUpdateRequestDataAttributesFromJSON, ReviewSubmissionUpdateRequestDataAttributesFromJSONTyped, ReviewSubmissionUpdateRequestDataAttributesToJSON, ReviewSubmissionUpdateRequestDataFromJSON, ReviewSubmissionUpdateRequestDataFromJSONTyped, ReviewSubmissionUpdateRequestDataToJSON, ReviewSubmissionUpdateRequestDataTypeEnum, ReviewSubmissionUpdateRequestFromJSON, ReviewSubmissionUpdateRequestFromJSONTyped, ReviewSubmissionUpdateRequestToJSON, ReviewSubmissionsApi, ReviewSubmissionsGetCollectionFieldsReviewSubmissionItemsEnum, ReviewSubmissionsGetCollectionFieldsReviewSubmissionsEnum, ReviewSubmissionsGetCollectionFilterPlatformEnum, ReviewSubmissionsGetCollectionFilterStateEnum, ReviewSubmissionsGetCollectionIncludeEnum, ReviewSubmissionsGetInstanceFieldsReviewSubmissionItemsEnum, ReviewSubmissionsGetInstanceFieldsReviewSubmissionsEnum, ReviewSubmissionsGetInstanceIncludeEnum, ReviewSubmissionsItemsGetToManyRelatedFieldsAppCustomProductPageVersionsEnum, ReviewSubmissionsItemsGetToManyRelatedFieldsAppEventsEnum, ReviewSubmissionsItemsGetToManyRelatedFieldsAppStoreVersionExperimentsEnum, ReviewSubmissionsItemsGetToManyRelatedFieldsAppStoreVersionsEnum, ReviewSubmissionsItemsGetToManyRelatedFieldsReviewSubmissionItemsEnum, ReviewSubmissionsItemsGetToManyRelatedIncludeEnum, ReviewSubmissionsResponseFromJSON, ReviewSubmissionsResponseFromJSONTyped, ReviewSubmissionsResponseIncludedInnerFromJSON, ReviewSubmissionsResponseIncludedInnerFromJSONTyped, ReviewSubmissionsResponseIncludedInnerToJSON, ReviewSubmissionsResponseToJSON, RoutingAppCoverageCreateRequestDataFromJSON, RoutingAppCoverageCreateRequestDataFromJSONTyped, RoutingAppCoverageCreateRequestDataToJSON, RoutingAppCoverageCreateRequestDataTypeEnum, RoutingAppCoverageCreateRequestFromJSON, RoutingAppCoverageCreateRequestFromJSONTyped, RoutingAppCoverageCreateRequestToJSON, RoutingAppCoverageFromJSON, RoutingAppCoverageFromJSONTyped, RoutingAppCoverageResponseFromJSON, RoutingAppCoverageResponseFromJSONTyped, RoutingAppCoverageResponseToJSON, RoutingAppCoverageToJSON, RoutingAppCoverageTypeEnum, RoutingAppCoverageUpdateRequestDataFromJSON, RoutingAppCoverageUpdateRequestDataFromJSONTyped, RoutingAppCoverageUpdateRequestDataToJSON, RoutingAppCoverageUpdateRequestDataTypeEnum, RoutingAppCoverageUpdateRequestFromJSON, RoutingAppCoverageUpdateRequestFromJSONTyped, RoutingAppCoverageUpdateRequestToJSON, RoutingAppCoveragesApi, RoutingAppCoveragesGetInstanceFieldsRoutingAppCoveragesEnum, RoutingAppCoveragesGetInstanceIncludeEnum, SalesReportsApi, SalesReportsGetCollectionFilterFrequencyEnum, SalesReportsGetCollectionFilterReportSubTypeEnum, SalesReportsGetCollectionFilterReportTypeEnum, SandboxTesterV2AttributesFromJSON, SandboxTesterV2AttributesFromJSONTyped, SandboxTesterV2AttributesSubscriptionRenewalRateEnum, SandboxTesterV2AttributesToJSON, SandboxTesterV2FromJSON, SandboxTesterV2FromJSONTyped, SandboxTesterV2ResponseFromJSON, SandboxTesterV2ResponseFromJSONTyped, SandboxTesterV2ResponseToJSON, SandboxTesterV2ToJSON, SandboxTesterV2TypeEnum, SandboxTesterV2UpdateRequestDataAttributesFromJSON, SandboxTesterV2UpdateRequestDataAttributesFromJSONTyped, SandboxTesterV2UpdateRequestDataAttributesSubscriptionRenewalRateEnum, SandboxTesterV2UpdateRequestDataAttributesToJSON, SandboxTesterV2UpdateRequestDataFromJSON, SandboxTesterV2UpdateRequestDataFromJSONTyped, SandboxTesterV2UpdateRequestDataToJSON, SandboxTesterV2UpdateRequestDataTypeEnum, SandboxTesterV2UpdateRequestFromJSON, SandboxTesterV2UpdateRequestFromJSONTyped, SandboxTesterV2UpdateRequestToJSON, SandboxTestersApi, SandboxTestersClearPurchaseHistoryRequestApi, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataFromJSON, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataFromJSONTyped, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataRelationshipsFromJSON, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataRelationshipsFromJSONTyped, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataRelationshipsSandboxTestersDataInnerFromJSON, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataRelationshipsSandboxTestersDataInnerFromJSONTyped, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataRelationshipsSandboxTestersDataInnerToJSON, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataRelationshipsSandboxTestersDataInnerTypeEnum, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataRelationshipsSandboxTestersFromJSON, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataRelationshipsSandboxTestersFromJSONTyped, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataRelationshipsSandboxTestersToJSON, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataRelationshipsToJSON, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataToJSON, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataTypeEnum, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestFromJSON, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestFromJSONTyped, SandboxTestersClearPurchaseHistoryRequestV2CreateRequestToJSON, SandboxTestersClearPurchaseHistoryRequestV2FromJSON, SandboxTestersClearPurchaseHistoryRequestV2FromJSONTyped, SandboxTestersClearPurchaseHistoryRequestV2ResponseFromJSON, SandboxTestersClearPurchaseHistoryRequestV2ResponseFromJSONTyped, SandboxTestersClearPurchaseHistoryRequestV2ResponseToJSON, SandboxTestersClearPurchaseHistoryRequestV2ToJSON, SandboxTestersClearPurchaseHistoryRequestV2TypeEnum, SandboxTestersGetCollectionFieldsSandboxTestersEnum, SandboxTestersV2ResponseFromJSON, SandboxTestersV2ResponseFromJSONTyped, SandboxTestersV2ResponseToJSON, ScmGitReferenceAttributesFromJSON, ScmGitReferenceAttributesFromJSONTyped, ScmGitReferenceAttributesToJSON, ScmGitReferenceFromJSON, ScmGitReferenceFromJSONTyped, ScmGitReferenceRelationshipsFromJSON, ScmGitReferenceRelationshipsFromJSONTyped, ScmGitReferenceRelationshipsToJSON, ScmGitReferenceResponseFromJSON, ScmGitReferenceResponseFromJSONTyped, ScmGitReferenceResponseToJSON, ScmGitReferenceToJSON, ScmGitReferenceTypeEnum, ScmGitReferencesApi, ScmGitReferencesGetInstanceFieldsScmGitReferencesEnum, ScmGitReferencesGetInstanceIncludeEnum, ScmGitReferencesResponseFromJSON, ScmGitReferencesResponseFromJSONTyped, ScmGitReferencesResponseToJSON, ScmProviderAttributesFromJSON, ScmProviderAttributesFromJSONTyped, ScmProviderAttributesToJSON, ScmProviderFromJSON, ScmProviderFromJSONTyped, ScmProviderResponseFromJSON, ScmProviderResponseFromJSONTyped, ScmProviderResponseToJSON, ScmProviderToJSON, ScmProviderTypeEnum, ScmProviderTypeFromJSON, ScmProviderTypeFromJSONTyped, ScmProviderTypeKindEnum, ScmProviderTypeToJSON, ScmProvidersApi, ScmProvidersGetCollectionFieldsScmProvidersEnum, ScmProvidersGetCollectionFieldsScmRepositoriesEnum, ScmProvidersGetInstanceFieldsScmProvidersEnum, ScmProvidersGetInstanceFieldsScmRepositoriesEnum, ScmProvidersRepositoriesGetToManyRelatedFieldsScmGitReferencesEnum, ScmProvidersRepositoriesGetToManyRelatedFieldsScmProvidersEnum, ScmProvidersRepositoriesGetToManyRelatedFieldsScmRepositoriesEnum, ScmProvidersRepositoriesGetToManyRelatedIncludeEnum, ScmProvidersResponseFromJSON, ScmProvidersResponseFromJSONTyped, ScmProvidersResponseToJSON, ScmPullRequestAttributesFromJSON, ScmPullRequestAttributesFromJSONTyped, ScmPullRequestAttributesToJSON, ScmPullRequestFromJSON, ScmPullRequestFromJSONTyped, ScmPullRequestResponseFromJSON, ScmPullRequestResponseFromJSONTyped, ScmPullRequestResponseToJSON, ScmPullRequestToJSON, ScmPullRequestTypeEnum, ScmPullRequestsApi, ScmPullRequestsGetInstanceFieldsScmPullRequestsEnum, ScmPullRequestsGetInstanceIncludeEnum, ScmPullRequestsResponseFromJSON, ScmPullRequestsResponseFromJSONTyped, ScmPullRequestsResponseToJSON, ScmRepositoriesGetCollectionFieldsScmPullRequestsEnum, ScmRepositoriesGetCollectionFieldsScmRepositoriesEnum, ScmRepositoriesGetCollectionIncludeEnum, ScmRepositoriesGetInstanceFieldsScmGitReferencesEnum, ScmRepositoriesGetInstanceFieldsScmPullRequestsEnum, ScmRepositoriesGetInstanceFieldsScmRepositoriesEnum, ScmRepositoriesGetInstanceIncludeEnum, ScmRepositoriesGitReferencesGetToManyRelatedFieldsScmGitReferencesEnum, ScmRepositoriesGitReferencesGetToManyRelatedFieldsScmRepositoriesEnum, ScmRepositoriesGitReferencesGetToManyRelatedIncludeEnum, ScmRepositoriesPullRequestsGetToManyRelatedFieldsScmPullRequestsEnum, ScmRepositoriesPullRequestsGetToManyRelatedFieldsScmRepositoriesEnum, ScmRepositoriesPullRequestsGetToManyRelatedIncludeEnum, ScmRepositoriesResponseFromJSON, ScmRepositoriesResponseFromJSONTyped, ScmRepositoriesResponseIncludedInnerFromJSON, ScmRepositoriesResponseIncludedInnerFromJSONTyped, ScmRepositoriesResponseIncludedInnerToJSON, ScmRepositoriesResponseToJSON, ScmRepositoryAttributesFromJSON, ScmRepositoryAttributesFromJSONTyped, ScmRepositoryAttributesToJSON, ScmRepositoryFromJSON, ScmRepositoryFromJSONTyped, ScmRepositoryRelationshipsFromJSON, ScmRepositoryRelationshipsFromJSONTyped, ScmRepositoryRelationshipsScmProviderDataFromJSON, ScmRepositoryRelationshipsScmProviderDataFromJSONTyped, ScmRepositoryRelationshipsScmProviderDataToJSON, ScmRepositoryRelationshipsScmProviderDataTypeEnum, ScmRepositoryRelationshipsScmProviderFromJSON, ScmRepositoryRelationshipsScmProviderFromJSONTyped, ScmRepositoryRelationshipsScmProviderToJSON, ScmRepositoryRelationshipsToJSON, ScmRepositoryResponseFromJSON, ScmRepositoryResponseFromJSONTyped, ScmRepositoryResponseToJSON, ScmRepositoryToJSON, ScmRepositoryTypeEnum, ScreenshotDisplayType, ScreenshotDisplayTypeFromJSON, ScreenshotDisplayTypeFromJSONTyped, ScreenshotDisplayTypeToJSON, SubscriptionAppStoreReviewScreenshotCreateRequestDataFromJSON, SubscriptionAppStoreReviewScreenshotCreateRequestDataFromJSONTyped, SubscriptionAppStoreReviewScreenshotCreateRequestDataRelationshipsFromJSON, SubscriptionAppStoreReviewScreenshotCreateRequestDataRelationshipsFromJSONTyped, SubscriptionAppStoreReviewScreenshotCreateRequestDataRelationshipsSubscriptionFromJSON, SubscriptionAppStoreReviewScreenshotCreateRequestDataRelationshipsSubscriptionFromJSONTyped, SubscriptionAppStoreReviewScreenshotCreateRequestDataRelationshipsSubscriptionToJSON, SubscriptionAppStoreReviewScreenshotCreateRequestDataRelationshipsToJSON, SubscriptionAppStoreReviewScreenshotCreateRequestDataToJSON, SubscriptionAppStoreReviewScreenshotCreateRequestDataTypeEnum, SubscriptionAppStoreReviewScreenshotCreateRequestFromJSON, SubscriptionAppStoreReviewScreenshotCreateRequestFromJSONTyped, SubscriptionAppStoreReviewScreenshotCreateRequestToJSON, SubscriptionAppStoreReviewScreenshotFromJSON, SubscriptionAppStoreReviewScreenshotFromJSONTyped, SubscriptionAppStoreReviewScreenshotRelationshipsFromJSON, SubscriptionAppStoreReviewScreenshotRelationshipsFromJSONTyped, SubscriptionAppStoreReviewScreenshotRelationshipsToJSON, SubscriptionAppStoreReviewScreenshotResponseFromJSON, SubscriptionAppStoreReviewScreenshotResponseFromJSONTyped, SubscriptionAppStoreReviewScreenshotResponseToJSON, SubscriptionAppStoreReviewScreenshotToJSON, SubscriptionAppStoreReviewScreenshotTypeEnum, SubscriptionAppStoreReviewScreenshotUpdateRequestDataFromJSON, SubscriptionAppStoreReviewScreenshotUpdateRequestDataFromJSONTyped, SubscriptionAppStoreReviewScreenshotUpdateRequestDataToJSON, SubscriptionAppStoreReviewScreenshotUpdateRequestDataTypeEnum, SubscriptionAppStoreReviewScreenshotUpdateRequestFromJSON, SubscriptionAppStoreReviewScreenshotUpdateRequestFromJSONTyped, SubscriptionAppStoreReviewScreenshotUpdateRequestToJSON, SubscriptionAppStoreReviewScreenshotsApi, SubscriptionAppStoreReviewScreenshotsGetInstanceFieldsSubscriptionAppStoreReviewScreenshotsEnum, SubscriptionAppStoreReviewScreenshotsGetInstanceIncludeEnum, SubscriptionAttributesFromJSON, SubscriptionAttributesFromJSONTyped, SubscriptionAttributesStateEnum, SubscriptionAttributesSubscriptionPeriodEnum, SubscriptionAttributesToJSON, SubscriptionCreateRequestDataAttributesFromJSON, SubscriptionCreateRequestDataAttributesFromJSONTyped, SubscriptionCreateRequestDataAttributesSubscriptionPeriodEnum, SubscriptionCreateRequestDataAttributesToJSON, SubscriptionCreateRequestDataFromJSON, SubscriptionCreateRequestDataFromJSONTyped, SubscriptionCreateRequestDataRelationshipsFromJSON, SubscriptionCreateRequestDataRelationshipsFromJSONTyped, SubscriptionCreateRequestDataRelationshipsToJSON, SubscriptionCreateRequestDataToJSON, SubscriptionCreateRequestDataTypeEnum, SubscriptionCreateRequestFromJSON, SubscriptionCreateRequestFromJSONTyped, SubscriptionCreateRequestToJSON, SubscriptionCustomerEligibility, SubscriptionCustomerEligibilityFromJSON, SubscriptionCustomerEligibilityFromJSONTyped, SubscriptionCustomerEligibilityToJSON, SubscriptionFromJSON, SubscriptionFromJSONTyped, SubscriptionGracePeriodAttributesFromJSON, SubscriptionGracePeriodAttributesFromJSONTyped, SubscriptionGracePeriodAttributesRenewalTypeEnum, SubscriptionGracePeriodAttributesToJSON, SubscriptionGracePeriodDuration, SubscriptionGracePeriodDurationFromJSON, SubscriptionGracePeriodDurationFromJSONTyped, SubscriptionGracePeriodDurationToJSON, SubscriptionGracePeriodFromJSON, SubscriptionGracePeriodFromJSONTyped, SubscriptionGracePeriodResponseFromJSON, SubscriptionGracePeriodResponseFromJSONTyped, SubscriptionGracePeriodResponseToJSON, SubscriptionGracePeriodToJSON, SubscriptionGracePeriodTypeEnum, SubscriptionGracePeriodUpdateRequestDataFromJSON, SubscriptionGracePeriodUpdateRequestDataFromJSONTyped, SubscriptionGracePeriodUpdateRequestDataToJSON, SubscriptionGracePeriodUpdateRequestDataTypeEnum, SubscriptionGracePeriodUpdateRequestFromJSON, SubscriptionGracePeriodUpdateRequestFromJSONTyped, SubscriptionGracePeriodUpdateRequestToJSON, SubscriptionGracePeriodsApi, SubscriptionGracePeriodsGetInstanceFieldsSubscriptionGracePeriodsEnum, SubscriptionGroupAttributesFromJSON, SubscriptionGroupAttributesFromJSONTyped, SubscriptionGroupAttributesToJSON, SubscriptionGroupCreateRequestDataAttributesFromJSON, SubscriptionGroupCreateRequestDataAttributesFromJSONTyped, SubscriptionGroupCreateRequestDataAttributesToJSON, SubscriptionGroupCreateRequestDataFromJSON, SubscriptionGroupCreateRequestDataFromJSONTyped, SubscriptionGroupCreateRequestDataToJSON, SubscriptionGroupCreateRequestDataTypeEnum, SubscriptionGroupCreateRequestFromJSON, SubscriptionGroupCreateRequestFromJSONTyped, SubscriptionGroupCreateRequestToJSON, SubscriptionGroupFromJSON, SubscriptionGroupFromJSONTyped, SubscriptionGroupLocalizationAttributesFromJSON, SubscriptionGroupLocalizationAttributesFromJSONTyped, SubscriptionGroupLocalizationAttributesStateEnum, SubscriptionGroupLocalizationAttributesToJSON, SubscriptionGroupLocalizationCreateRequestDataAttributesFromJSON, SubscriptionGroupLocalizationCreateRequestDataAttributesFromJSONTyped, SubscriptionGroupLocalizationCreateRequestDataAttributesToJSON, SubscriptionGroupLocalizationCreateRequestDataFromJSON, SubscriptionGroupLocalizationCreateRequestDataFromJSONTyped, SubscriptionGroupLocalizationCreateRequestDataRelationshipsFromJSON, SubscriptionGroupLocalizationCreateRequestDataRelationshipsFromJSONTyped, SubscriptionGroupLocalizationCreateRequestDataRelationshipsSubscriptionGroupFromJSON, SubscriptionGroupLocalizationCreateRequestDataRelationshipsSubscriptionGroupFromJSONTyped, SubscriptionGroupLocalizationCreateRequestDataRelationshipsSubscriptionGroupToJSON, SubscriptionGroupLocalizationCreateRequestDataRelationshipsToJSON, SubscriptionGroupLocalizationCreateRequestDataToJSON, SubscriptionGroupLocalizationCreateRequestDataTypeEnum, SubscriptionGroupLocalizationCreateRequestFromJSON, SubscriptionGroupLocalizationCreateRequestFromJSONTyped, SubscriptionGroupLocalizationCreateRequestToJSON, SubscriptionGroupLocalizationFromJSON, SubscriptionGroupLocalizationFromJSONTyped, SubscriptionGroupLocalizationRelationshipsFromJSON, SubscriptionGroupLocalizationRelationshipsFromJSONTyped, SubscriptionGroupLocalizationRelationshipsSubscriptionGroupFromJSON, SubscriptionGroupLocalizationRelationshipsSubscriptionGroupFromJSONTyped, SubscriptionGroupLocalizationRelationshipsSubscriptionGroupToJSON, SubscriptionGroupLocalizationRelationshipsToJSON, SubscriptionGroupLocalizationResponseFromJSON, SubscriptionGroupLocalizationResponseFromJSONTyped, SubscriptionGroupLocalizationResponseToJSON, SubscriptionGroupLocalizationToJSON, SubscriptionGroupLocalizationTypeEnum, SubscriptionGroupLocalizationUpdateRequestDataAttributesFromJSON, SubscriptionGroupLocalizationUpdateRequestDataAttributesFromJSONTyped, SubscriptionGroupLocalizationUpdateRequestDataAttributesToJSON, SubscriptionGroupLocalizationUpdateRequestDataFromJSON, SubscriptionGroupLocalizationUpdateRequestDataFromJSONTyped, SubscriptionGroupLocalizationUpdateRequestDataToJSON, SubscriptionGroupLocalizationUpdateRequestDataTypeEnum, SubscriptionGroupLocalizationUpdateRequestFromJSON, SubscriptionGroupLocalizationUpdateRequestFromJSONTyped, SubscriptionGroupLocalizationUpdateRequestToJSON, SubscriptionGroupLocalizationsApi, SubscriptionGroupLocalizationsGetInstanceFieldsSubscriptionGroupLocalizationsEnum, SubscriptionGroupLocalizationsGetInstanceIncludeEnum, SubscriptionGroupLocalizationsResponseFromJSON, SubscriptionGroupLocalizationsResponseFromJSONTyped, SubscriptionGroupLocalizationsResponseToJSON, SubscriptionGroupRelationshipsFromJSON, SubscriptionGroupRelationshipsFromJSONTyped, SubscriptionGroupRelationshipsSubscriptionGroupLocalizationsDataInnerFromJSON, SubscriptionGroupRelationshipsSubscriptionGroupLocalizationsDataInnerFromJSONTyped, SubscriptionGroupRelationshipsSubscriptionGroupLocalizationsDataInnerToJSON, SubscriptionGroupRelationshipsSubscriptionGroupLocalizationsDataInnerTypeEnum, SubscriptionGroupRelationshipsSubscriptionGroupLocalizationsFromJSON, SubscriptionGroupRelationshipsSubscriptionGroupLocalizationsFromJSONTyped, SubscriptionGroupRelationshipsSubscriptionGroupLocalizationsToJSON, SubscriptionGroupRelationshipsSubscriptionsFromJSON, SubscriptionGroupRelationshipsSubscriptionsFromJSONTyped, SubscriptionGroupRelationshipsSubscriptionsToJSON, SubscriptionGroupRelationshipsToJSON, SubscriptionGroupResponseFromJSON, SubscriptionGroupResponseFromJSONTyped, SubscriptionGroupResponseToJSON, SubscriptionGroupSubmissionCreateRequestDataFromJSON, SubscriptionGroupSubmissionCreateRequestDataFromJSONTyped, SubscriptionGroupSubmissionCreateRequestDataToJSON, SubscriptionGroupSubmissionCreateRequestDataTypeEnum, SubscriptionGroupSubmissionCreateRequestFromJSON, SubscriptionGroupSubmissionCreateRequestFromJSONTyped, SubscriptionGroupSubmissionCreateRequestToJSON, SubscriptionGroupSubmissionFromJSON, SubscriptionGroupSubmissionFromJSONTyped, SubscriptionGroupSubmissionResponseFromJSON, SubscriptionGroupSubmissionResponseFromJSONTyped, SubscriptionGroupSubmissionResponseToJSON, SubscriptionGroupSubmissionToJSON, SubscriptionGroupSubmissionTypeEnum, SubscriptionGroupSubmissionsApi, SubscriptionGroupToJSON, SubscriptionGroupTypeEnum, SubscriptionGroupUpdateRequestDataFromJSON, SubscriptionGroupUpdateRequestDataFromJSONTyped, SubscriptionGroupUpdateRequestDataToJSON, SubscriptionGroupUpdateRequestDataTypeEnum, SubscriptionGroupUpdateRequestFromJSON, SubscriptionGroupUpdateRequestFromJSONTyped, SubscriptionGroupUpdateRequestToJSON, SubscriptionGroupsApi, SubscriptionGroupsGetInstanceFieldsSubscriptionGroupLocalizationsEnum, SubscriptionGroupsGetInstanceFieldsSubscriptionGroupsEnum, SubscriptionGroupsGetInstanceFieldsSubscriptionsEnum, SubscriptionGroupsGetInstanceIncludeEnum, SubscriptionGroupsResponseFromJSON, SubscriptionGroupsResponseFromJSONTyped, SubscriptionGroupsResponseIncludedInnerFromJSON, SubscriptionGroupsResponseIncludedInnerFromJSONTyped, SubscriptionGroupsResponseIncludedInnerToJSON, SubscriptionGroupsResponseToJSON, SubscriptionGroupsSubscriptionGroupLocalizationsGetToManyRelatedFieldsSubscriptionGroupLocalizationsEnum, SubscriptionGroupsSubscriptionGroupLocalizationsGetToManyRelatedFieldsSubscriptionGroupsEnum, SubscriptionGroupsSubscriptionGroupLocalizationsGetToManyRelatedIncludeEnum, SubscriptionGroupsSubscriptionsGetToManyRelatedFieldsPromotedPurchasesEnum, SubscriptionGroupsSubscriptionsGetToManyRelatedFieldsSubscriptionAppStoreReviewScreenshotsEnum, SubscriptionGroupsSubscriptionsGetToManyRelatedFieldsSubscriptionGroupsEnum, SubscriptionGroupsSubscriptionsGetToManyRelatedFieldsSubscriptionIntroductoryOffersEnum, SubscriptionGroupsSubscriptionsGetToManyRelatedFieldsSubscriptionLocalizationsEnum, SubscriptionGroupsSubscriptionsGetToManyRelatedFieldsSubscriptionOfferCodesEnum, SubscriptionGroupsSubscriptionsGetToManyRelatedFieldsSubscriptionPricesEnum, SubscriptionGroupsSubscriptionsGetToManyRelatedFieldsSubscriptionPromotionalOffersEnum, SubscriptionGroupsSubscriptionsGetToManyRelatedFieldsSubscriptionsEnum, SubscriptionGroupsSubscriptionsGetToManyRelatedFilterStateEnum, SubscriptionGroupsSubscriptionsGetToManyRelatedIncludeEnum, SubscriptionGroupsSubscriptionsGetToManyRelatedSortEnum, SubscriptionIntroductoryOfferAttributesFromJSON, SubscriptionIntroductoryOfferAttributesFromJSONTyped, SubscriptionIntroductoryOfferAttributesToJSON, SubscriptionIntroductoryOfferCreateRequestDataFromJSON, SubscriptionIntroductoryOfferCreateRequestDataFromJSONTyped, SubscriptionIntroductoryOfferCreateRequestDataRelationshipsFromJSON, SubscriptionIntroductoryOfferCreateRequestDataRelationshipsFromJSONTyped, SubscriptionIntroductoryOfferCreateRequestDataRelationshipsToJSON, SubscriptionIntroductoryOfferCreateRequestDataToJSON, SubscriptionIntroductoryOfferCreateRequestDataTypeEnum, SubscriptionIntroductoryOfferCreateRequestFromJSON, SubscriptionIntroductoryOfferCreateRequestFromJSONTyped, SubscriptionIntroductoryOfferCreateRequestToJSON, SubscriptionIntroductoryOfferFromJSON, SubscriptionIntroductoryOfferFromJSONTyped, SubscriptionIntroductoryOfferInlineCreateAttributesFromJSON, SubscriptionIntroductoryOfferInlineCreateAttributesFromJSONTyped, SubscriptionIntroductoryOfferInlineCreateAttributesToJSON, SubscriptionIntroductoryOfferInlineCreateFromJSON, SubscriptionIntroductoryOfferInlineCreateFromJSONTyped, SubscriptionIntroductoryOfferInlineCreateRelationshipsFromJSON, SubscriptionIntroductoryOfferInlineCreateRelationshipsFromJSONTyped, SubscriptionIntroductoryOfferInlineCreateRelationshipsSubscriptionPricePointFromJSON, SubscriptionIntroductoryOfferInlineCreateRelationshipsSubscriptionPricePointFromJSONTyped, SubscriptionIntroductoryOfferInlineCreateRelationshipsSubscriptionPricePointToJSON, SubscriptionIntroductoryOfferInlineCreateRelationshipsTerritoryFromJSON, SubscriptionIntroductoryOfferInlineCreateRelationshipsTerritoryFromJSONTyped, SubscriptionIntroductoryOfferInlineCreateRelationshipsTerritoryToJSON, SubscriptionIntroductoryOfferInlineCreateRelationshipsToJSON, SubscriptionIntroductoryOfferInlineCreateToJSON, SubscriptionIntroductoryOfferInlineCreateTypeEnum, SubscriptionIntroductoryOfferRelationshipsFromJSON, SubscriptionIntroductoryOfferRelationshipsFromJSONTyped, SubscriptionIntroductoryOfferRelationshipsSubscriptionPricePointDataFromJSON, SubscriptionIntroductoryOfferRelationshipsSubscriptionPricePointDataFromJSONTyped, SubscriptionIntroductoryOfferRelationshipsSubscriptionPricePointDataToJSON, SubscriptionIntroductoryOfferRelationshipsSubscriptionPricePointDataTypeEnum, SubscriptionIntroductoryOfferRelationshipsSubscriptionPricePointFromJSON, SubscriptionIntroductoryOfferRelationshipsSubscriptionPricePointFromJSONTyped, SubscriptionIntroductoryOfferRelationshipsSubscriptionPricePointToJSON, SubscriptionIntroductoryOfferRelationshipsToJSON, SubscriptionIntroductoryOfferResponseFromJSON, SubscriptionIntroductoryOfferResponseFromJSONTyped, SubscriptionIntroductoryOfferResponseToJSON, SubscriptionIntroductoryOfferToJSON, SubscriptionIntroductoryOfferTypeEnum, SubscriptionIntroductoryOfferUpdateRequestDataAttributesFromJSON, SubscriptionIntroductoryOfferUpdateRequestDataAttributesFromJSONTyped, SubscriptionIntroductoryOfferUpdateRequestDataAttributesToJSON, SubscriptionIntroductoryOfferUpdateRequestDataFromJSON, SubscriptionIntroductoryOfferUpdateRequestDataFromJSONTyped, SubscriptionIntroductoryOfferUpdateRequestDataToJSON, SubscriptionIntroductoryOfferUpdateRequestDataTypeEnum, SubscriptionIntroductoryOfferUpdateRequestFromJSON, SubscriptionIntroductoryOfferUpdateRequestFromJSONTyped, SubscriptionIntroductoryOfferUpdateRequestToJSON, SubscriptionIntroductoryOffersApi, SubscriptionIntroductoryOffersLinkagesRequestFromJSON, SubscriptionIntroductoryOffersLinkagesRequestFromJSONTyped, SubscriptionIntroductoryOffersLinkagesRequestToJSON, SubscriptionIntroductoryOffersLinkagesResponseFromJSON, SubscriptionIntroductoryOffersLinkagesResponseFromJSONTyped, SubscriptionIntroductoryOffersLinkagesResponseToJSON, SubscriptionIntroductoryOffersResponseFromJSON, SubscriptionIntroductoryOffersResponseFromJSONTyped, SubscriptionIntroductoryOffersResponseIncludedInnerFromJSON, SubscriptionIntroductoryOffersResponseIncludedInnerFromJSONTyped, SubscriptionIntroductoryOffersResponseIncludedInnerToJSON, SubscriptionIntroductoryOffersResponseToJSON, SubscriptionLocalizationCreateRequestDataFromJSON, SubscriptionLocalizationCreateRequestDataFromJSONTyped, SubscriptionLocalizationCreateRequestDataToJSON, SubscriptionLocalizationCreateRequestDataTypeEnum, SubscriptionLocalizationCreateRequestFromJSON, SubscriptionLocalizationCreateRequestFromJSONTyped, SubscriptionLocalizationCreateRequestToJSON, SubscriptionLocalizationFromJSON, SubscriptionLocalizationFromJSONTyped, SubscriptionLocalizationResponseFromJSON, SubscriptionLocalizationResponseFromJSONTyped, SubscriptionLocalizationResponseToJSON, SubscriptionLocalizationToJSON, SubscriptionLocalizationTypeEnum, SubscriptionLocalizationUpdateRequestDataFromJSON, SubscriptionLocalizationUpdateRequestDataFromJSONTyped, SubscriptionLocalizationUpdateRequestDataToJSON, SubscriptionLocalizationUpdateRequestDataTypeEnum, SubscriptionLocalizationUpdateRequestFromJSON, SubscriptionLocalizationUpdateRequestFromJSONTyped, SubscriptionLocalizationUpdateRequestToJSON, SubscriptionLocalizationsApi, SubscriptionLocalizationsGetInstanceFieldsSubscriptionLocalizationsEnum, SubscriptionLocalizationsGetInstanceIncludeEnum, SubscriptionLocalizationsResponseFromJSON, SubscriptionLocalizationsResponseFromJSONTyped, SubscriptionLocalizationsResponseToJSON, SubscriptionOfferCodeAttributesFromJSON, SubscriptionOfferCodeAttributesFromJSONTyped, SubscriptionOfferCodeAttributesToJSON, SubscriptionOfferCodeCreateRequestDataAttributesFromJSON, SubscriptionOfferCodeCreateRequestDataAttributesFromJSONTyped, SubscriptionOfferCodeCreateRequestDataAttributesToJSON, SubscriptionOfferCodeCreateRequestDataFromJSON, SubscriptionOfferCodeCreateRequestDataFromJSONTyped, SubscriptionOfferCodeCreateRequestDataRelationshipsFromJSON, SubscriptionOfferCodeCreateRequestDataRelationshipsFromJSONTyped, SubscriptionOfferCodeCreateRequestDataRelationshipsPricesFromJSON, SubscriptionOfferCodeCreateRequestDataRelationshipsPricesFromJSONTyped, SubscriptionOfferCodeCreateRequestDataRelationshipsPricesToJSON, SubscriptionOfferCodeCreateRequestDataRelationshipsToJSON, SubscriptionOfferCodeCreateRequestDataToJSON, SubscriptionOfferCodeCreateRequestDataTypeEnum, SubscriptionOfferCodeCreateRequestFromJSON, SubscriptionOfferCodeCreateRequestFromJSONTyped, SubscriptionOfferCodeCreateRequestToJSON, SubscriptionOfferCodeCustomCodeAttributesFromJSON, SubscriptionOfferCodeCustomCodeAttributesFromJSONTyped, SubscriptionOfferCodeCustomCodeAttributesToJSON, SubscriptionOfferCodeCustomCodeCreateRequestDataAttributesFromJSON, SubscriptionOfferCodeCustomCodeCreateRequestDataAttributesFromJSONTyped, SubscriptionOfferCodeCustomCodeCreateRequestDataAttributesToJSON, SubscriptionOfferCodeCustomCodeCreateRequestDataFromJSON, SubscriptionOfferCodeCustomCodeCreateRequestDataFromJSONTyped, SubscriptionOfferCodeCustomCodeCreateRequestDataRelationshipsFromJSON, SubscriptionOfferCodeCustomCodeCreateRequestDataRelationshipsFromJSONTyped, SubscriptionOfferCodeCustomCodeCreateRequestDataRelationshipsOfferCodeFromJSON, SubscriptionOfferCodeCustomCodeCreateRequestDataRelationshipsOfferCodeFromJSONTyped, SubscriptionOfferCodeCustomCodeCreateRequestDataRelationshipsOfferCodeToJSON, SubscriptionOfferCodeCustomCodeCreateRequestDataRelationshipsToJSON, SubscriptionOfferCodeCustomCodeCreateRequestDataToJSON, SubscriptionOfferCodeCustomCodeCreateRequestDataTypeEnum, SubscriptionOfferCodeCustomCodeCreateRequestFromJSON, SubscriptionOfferCodeCustomCodeCreateRequestFromJSONTyped, SubscriptionOfferCodeCustomCodeCreateRequestToJSON, SubscriptionOfferCodeCustomCodeFromJSON, SubscriptionOfferCodeCustomCodeFromJSONTyped, SubscriptionOfferCodeCustomCodeRelationshipsFromJSON, SubscriptionOfferCodeCustomCodeRelationshipsFromJSONTyped, SubscriptionOfferCodeCustomCodeRelationshipsOfferCodeDataFromJSON, SubscriptionOfferCodeCustomCodeRelationshipsOfferCodeDataFromJSONTyped, SubscriptionOfferCodeCustomCodeRelationshipsOfferCodeDataToJSON, SubscriptionOfferCodeCustomCodeRelationshipsOfferCodeDataTypeEnum, SubscriptionOfferCodeCustomCodeRelationshipsOfferCodeFromJSON, SubscriptionOfferCodeCustomCodeRelationshipsOfferCodeFromJSONTyped, SubscriptionOfferCodeCustomCodeRelationshipsOfferCodeToJSON, SubscriptionOfferCodeCustomCodeRelationshipsToJSON, SubscriptionOfferCodeCustomCodeResponseFromJSON, SubscriptionOfferCodeCustomCodeResponseFromJSONTyped, SubscriptionOfferCodeCustomCodeResponseToJSON, SubscriptionOfferCodeCustomCodeToJSON, SubscriptionOfferCodeCustomCodeTypeEnum, SubscriptionOfferCodeCustomCodeUpdateRequestDataAttributesFromJSON, SubscriptionOfferCodeCustomCodeUpdateRequestDataAttributesFromJSONTyped, SubscriptionOfferCodeCustomCodeUpdateRequestDataAttributesToJSON, SubscriptionOfferCodeCustomCodeUpdateRequestDataFromJSON, SubscriptionOfferCodeCustomCodeUpdateRequestDataFromJSONTyped, SubscriptionOfferCodeCustomCodeUpdateRequestDataToJSON, SubscriptionOfferCodeCustomCodeUpdateRequestDataTypeEnum, SubscriptionOfferCodeCustomCodeUpdateRequestFromJSON, SubscriptionOfferCodeCustomCodeUpdateRequestFromJSONTyped, SubscriptionOfferCodeCustomCodeUpdateRequestToJSON, SubscriptionOfferCodeCustomCodesApi, SubscriptionOfferCodeCustomCodesGetInstanceFieldsSubscriptionOfferCodeCustomCodesEnum, SubscriptionOfferCodeCustomCodesGetInstanceIncludeEnum, SubscriptionOfferCodeCustomCodesResponseFromJSON, SubscriptionOfferCodeCustomCodesResponseFromJSONTyped, SubscriptionOfferCodeCustomCodesResponseToJSON, SubscriptionOfferCodeFromJSON, SubscriptionOfferCodeFromJSONTyped, SubscriptionOfferCodeOneTimeUseCodeAttributesFromJSON, SubscriptionOfferCodeOneTimeUseCodeAttributesFromJSONTyped, SubscriptionOfferCodeOneTimeUseCodeAttributesToJSON, SubscriptionOfferCodeOneTimeUseCodeCreateRequestDataAttributesFromJSON, SubscriptionOfferCodeOneTimeUseCodeCreateRequestDataAttributesFromJSONTyped, SubscriptionOfferCodeOneTimeUseCodeCreateRequestDataAttributesToJSON, SubscriptionOfferCodeOneTimeUseCodeCreateRequestDataFromJSON, SubscriptionOfferCodeOneTimeUseCodeCreateRequestDataFromJSONTyped, SubscriptionOfferCodeOneTimeUseCodeCreateRequestDataToJSON, SubscriptionOfferCodeOneTimeUseCodeCreateRequestDataTypeEnum, SubscriptionOfferCodeOneTimeUseCodeCreateRequestFromJSON, SubscriptionOfferCodeOneTimeUseCodeCreateRequestFromJSONTyped, SubscriptionOfferCodeOneTimeUseCodeCreateRequestToJSON, SubscriptionOfferCodeOneTimeUseCodeFromJSON, SubscriptionOfferCodeOneTimeUseCodeFromJSONTyped, SubscriptionOfferCodeOneTimeUseCodeResponseFromJSON, SubscriptionOfferCodeOneTimeUseCodeResponseFromJSONTyped, SubscriptionOfferCodeOneTimeUseCodeResponseToJSON, SubscriptionOfferCodeOneTimeUseCodeToJSON, SubscriptionOfferCodeOneTimeUseCodeTypeEnum, SubscriptionOfferCodeOneTimeUseCodeUpdateRequestDataFromJSON, SubscriptionOfferCodeOneTimeUseCodeUpdateRequestDataFromJSONTyped, SubscriptionOfferCodeOneTimeUseCodeUpdateRequestDataToJSON, SubscriptionOfferCodeOneTimeUseCodeUpdateRequestDataTypeEnum, SubscriptionOfferCodeOneTimeUseCodeUpdateRequestFromJSON, SubscriptionOfferCodeOneTimeUseCodeUpdateRequestFromJSONTyped, SubscriptionOfferCodeOneTimeUseCodeUpdateRequestToJSON, SubscriptionOfferCodeOneTimeUseCodeValueFromJSON, SubscriptionOfferCodeOneTimeUseCodeValueFromJSONTyped, SubscriptionOfferCodeOneTimeUseCodeValueToJSON, SubscriptionOfferCodeOneTimeUseCodeValueTypeEnum, SubscriptionOfferCodeOneTimeUseCodesApi, SubscriptionOfferCodeOneTimeUseCodesGetInstanceFieldsSubscriptionOfferCodeOneTimeUseCodesEnum, SubscriptionOfferCodeOneTimeUseCodesGetInstanceIncludeEnum, SubscriptionOfferCodeOneTimeUseCodesResponseFromJSON, SubscriptionOfferCodeOneTimeUseCodesResponseFromJSONTyped, SubscriptionOfferCodeOneTimeUseCodesResponseToJSON, SubscriptionOfferCodePriceFromJSON, SubscriptionOfferCodePriceFromJSONTyped, SubscriptionOfferCodePriceInlineCreateFromJSON, SubscriptionOfferCodePriceInlineCreateFromJSONTyped, SubscriptionOfferCodePriceInlineCreateRelationshipsFromJSON, SubscriptionOfferCodePriceInlineCreateRelationshipsFromJSONTyped, SubscriptionOfferCodePriceInlineCreateRelationshipsToJSON, SubscriptionOfferCodePriceInlineCreateToJSON, SubscriptionOfferCodePriceInlineCreateTypeEnum, SubscriptionOfferCodePriceRelationshipsFromJSON, SubscriptionOfferCodePriceRelationshipsFromJSONTyped, SubscriptionOfferCodePriceRelationshipsToJSON, SubscriptionOfferCodePriceToJSON, SubscriptionOfferCodePriceTypeEnum, SubscriptionOfferCodePricesResponseFromJSON, SubscriptionOfferCodePricesResponseFromJSONTyped, SubscriptionOfferCodePricesResponseIncludedInnerFromJSON, SubscriptionOfferCodePricesResponseIncludedInnerFromJSONTyped, SubscriptionOfferCodePricesResponseIncludedInnerToJSON, SubscriptionOfferCodePricesResponseToJSON, SubscriptionOfferCodeRelationshipsCustomCodesDataInnerFromJSON, SubscriptionOfferCodeRelationshipsCustomCodesDataInnerFromJSONTyped, SubscriptionOfferCodeRelationshipsCustomCodesDataInnerToJSON, SubscriptionOfferCodeRelationshipsCustomCodesDataInnerTypeEnum, SubscriptionOfferCodeRelationshipsCustomCodesFromJSON, SubscriptionOfferCodeRelationshipsCustomCodesFromJSONTyped, SubscriptionOfferCodeRelationshipsCustomCodesToJSON, SubscriptionOfferCodeRelationshipsFromJSON, SubscriptionOfferCodeRelationshipsFromJSONTyped, SubscriptionOfferCodeRelationshipsOneTimeUseCodesDataInnerFromJSON, SubscriptionOfferCodeRelationshipsOneTimeUseCodesDataInnerFromJSONTyped, SubscriptionOfferCodeRelationshipsOneTimeUseCodesDataInnerToJSON, SubscriptionOfferCodeRelationshipsOneTimeUseCodesDataInnerTypeEnum, SubscriptionOfferCodeRelationshipsOneTimeUseCodesFromJSON, SubscriptionOfferCodeRelationshipsOneTimeUseCodesFromJSONTyped, SubscriptionOfferCodeRelationshipsOneTimeUseCodesToJSON, SubscriptionOfferCodeRelationshipsPricesDataInnerFromJSON, SubscriptionOfferCodeRelationshipsPricesDataInnerFromJSONTyped, SubscriptionOfferCodeRelationshipsPricesDataInnerToJSON, SubscriptionOfferCodeRelationshipsPricesDataInnerTypeEnum, SubscriptionOfferCodeRelationshipsPricesFromJSON, SubscriptionOfferCodeRelationshipsPricesFromJSONTyped, SubscriptionOfferCodeRelationshipsPricesToJSON, SubscriptionOfferCodeRelationshipsToJSON, SubscriptionOfferCodeResponseFromJSON, SubscriptionOfferCodeResponseFromJSONTyped, SubscriptionOfferCodeResponseToJSON, SubscriptionOfferCodeToJSON, SubscriptionOfferCodeTypeEnum, SubscriptionOfferCodeUpdateRequestDataFromJSON, SubscriptionOfferCodeUpdateRequestDataFromJSONTyped, SubscriptionOfferCodeUpdateRequestDataToJSON, SubscriptionOfferCodeUpdateRequestDataTypeEnum, SubscriptionOfferCodeUpdateRequestFromJSON, SubscriptionOfferCodeUpdateRequestFromJSONTyped, SubscriptionOfferCodeUpdateRequestToJSON, SubscriptionOfferCodesApi, SubscriptionOfferCodesCustomCodesGetToManyRelatedFieldsSubscriptionOfferCodeCustomCodesEnum, SubscriptionOfferCodesCustomCodesGetToManyRelatedFieldsSubscriptionOfferCodesEnum, SubscriptionOfferCodesCustomCodesGetToManyRelatedIncludeEnum, SubscriptionOfferCodesGetInstanceFieldsSubscriptionOfferCodeCustomCodesEnum, SubscriptionOfferCodesGetInstanceFieldsSubscriptionOfferCodeOneTimeUseCodesEnum, SubscriptionOfferCodesGetInstanceFieldsSubscriptionOfferCodePricesEnum, SubscriptionOfferCodesGetInstanceFieldsSubscriptionOfferCodesEnum, SubscriptionOfferCodesGetInstanceIncludeEnum, SubscriptionOfferCodesOneTimeUseCodesGetToManyRelatedFieldsSubscriptionOfferCodeOneTimeUseCodesEnum, SubscriptionOfferCodesOneTimeUseCodesGetToManyRelatedFieldsSubscriptionOfferCodesEnum, SubscriptionOfferCodesOneTimeUseCodesGetToManyRelatedIncludeEnum, SubscriptionOfferCodesPricesGetToManyRelatedFieldsSubscriptionOfferCodePricesEnum, SubscriptionOfferCodesPricesGetToManyRelatedFieldsSubscriptionPricePointsEnum, SubscriptionOfferCodesPricesGetToManyRelatedFieldsTerritoriesEnum, SubscriptionOfferCodesPricesGetToManyRelatedIncludeEnum, SubscriptionOfferCodesResponseFromJSON, SubscriptionOfferCodesResponseFromJSONTyped, SubscriptionOfferCodesResponseIncludedInnerFromJSON, SubscriptionOfferCodesResponseIncludedInnerFromJSONTyped, SubscriptionOfferCodesResponseIncludedInnerToJSON, SubscriptionOfferCodesResponseToJSON, SubscriptionOfferDuration, SubscriptionOfferDurationFromJSON, SubscriptionOfferDurationFromJSONTyped, SubscriptionOfferDurationToJSON, SubscriptionOfferEligibility, SubscriptionOfferEligibilityFromJSON, SubscriptionOfferEligibilityFromJSONTyped, SubscriptionOfferEligibilityToJSON, SubscriptionOfferMode, SubscriptionOfferModeFromJSON, SubscriptionOfferModeFromJSONTyped, SubscriptionOfferModeToJSON, SubscriptionPriceAttributesFromJSON, SubscriptionPriceAttributesFromJSONTyped, SubscriptionPriceAttributesToJSON, SubscriptionPriceCreateRequestDataFromJSON, SubscriptionPriceCreateRequestDataFromJSONTyped, SubscriptionPriceCreateRequestDataRelationshipsFromJSON, SubscriptionPriceCreateRequestDataRelationshipsFromJSONTyped, SubscriptionPriceCreateRequestDataRelationshipsSubscriptionPricePointFromJSON, SubscriptionPriceCreateRequestDataRelationshipsSubscriptionPricePointFromJSONTyped, SubscriptionPriceCreateRequestDataRelationshipsSubscriptionPricePointToJSON, SubscriptionPriceCreateRequestDataRelationshipsToJSON, SubscriptionPriceCreateRequestDataToJSON, SubscriptionPriceCreateRequestDataTypeEnum, SubscriptionPriceCreateRequestFromJSON, SubscriptionPriceCreateRequestFromJSONTyped, SubscriptionPriceCreateRequestToJSON, SubscriptionPriceFromJSON, SubscriptionPriceFromJSONTyped, SubscriptionPriceInlineCreateAttributesFromJSON, SubscriptionPriceInlineCreateAttributesFromJSONTyped, SubscriptionPriceInlineCreateAttributesToJSON, SubscriptionPriceInlineCreateFromJSON, SubscriptionPriceInlineCreateFromJSONTyped, SubscriptionPriceInlineCreateToJSON, SubscriptionPriceInlineCreateTypeEnum, SubscriptionPricePointAttributesFromJSON, SubscriptionPricePointAttributesFromJSONTyped, SubscriptionPricePointAttributesToJSON, SubscriptionPricePointFromJSON, SubscriptionPricePointFromJSONTyped, SubscriptionPricePointInlineCreateFromJSON, SubscriptionPricePointInlineCreateFromJSONTyped, SubscriptionPricePointInlineCreateToJSON, SubscriptionPricePointInlineCreateTypeEnum, SubscriptionPricePointResponseFromJSON, SubscriptionPricePointResponseFromJSONTyped, SubscriptionPricePointResponseToJSON, SubscriptionPricePointToJSON, SubscriptionPricePointTypeEnum, SubscriptionPricePointsApi, SubscriptionPricePointsEqualizationsGetToManyRelatedFieldsSubscriptionPricePointsEnum, SubscriptionPricePointsEqualizationsGetToManyRelatedFieldsTerritoriesEnum, SubscriptionPricePointsEqualizationsGetToManyRelatedIncludeEnum, SubscriptionPricePointsGetInstanceFieldsSubscriptionPricePointsEnum, SubscriptionPricePointsGetInstanceIncludeEnum, SubscriptionPricePointsResponseFromJSON, SubscriptionPricePointsResponseFromJSONTyped, SubscriptionPricePointsResponseToJSON, SubscriptionPriceResponseFromJSON, SubscriptionPriceResponseFromJSONTyped, SubscriptionPriceResponseToJSON, SubscriptionPriceToJSON, SubscriptionPriceTypeEnum, SubscriptionPricesApi, SubscriptionPricesLinkagesRequestFromJSON, SubscriptionPricesLinkagesRequestFromJSONTyped, SubscriptionPricesLinkagesRequestToJSON, SubscriptionPricesLinkagesResponseFromJSON, SubscriptionPricesLinkagesResponseFromJSONTyped, SubscriptionPricesLinkagesResponseToJSON, SubscriptionPricesResponseFromJSON, SubscriptionPricesResponseFromJSONTyped, SubscriptionPricesResponseToJSON, SubscriptionPromotionalOfferAttributesFromJSON, SubscriptionPromotionalOfferAttributesFromJSONTyped, SubscriptionPromotionalOfferAttributesToJSON, SubscriptionPromotionalOfferCreateRequestDataFromJSON, SubscriptionPromotionalOfferCreateRequestDataFromJSONTyped, SubscriptionPromotionalOfferCreateRequestDataRelationshipsFromJSON, SubscriptionPromotionalOfferCreateRequestDataRelationshipsFromJSONTyped, SubscriptionPromotionalOfferCreateRequestDataRelationshipsPricesFromJSON, SubscriptionPromotionalOfferCreateRequestDataRelationshipsPricesFromJSONTyped, SubscriptionPromotionalOfferCreateRequestDataRelationshipsPricesToJSON, SubscriptionPromotionalOfferCreateRequestDataRelationshipsToJSON, SubscriptionPromotionalOfferCreateRequestDataToJSON, SubscriptionPromotionalOfferCreateRequestDataTypeEnum, SubscriptionPromotionalOfferCreateRequestFromJSON, SubscriptionPromotionalOfferCreateRequestFromJSONTyped, SubscriptionPromotionalOfferCreateRequestToJSON, SubscriptionPromotionalOfferFromJSON, SubscriptionPromotionalOfferFromJSONTyped, SubscriptionPromotionalOfferInlineCreateAttributesFromJSON, SubscriptionPromotionalOfferInlineCreateAttributesFromJSONTyped, SubscriptionPromotionalOfferInlineCreateAttributesToJSON, SubscriptionPromotionalOfferInlineCreateFromJSON, SubscriptionPromotionalOfferInlineCreateFromJSONTyped, SubscriptionPromotionalOfferInlineCreateRelationshipsFromJSON, SubscriptionPromotionalOfferInlineCreateRelationshipsFromJSONTyped, SubscriptionPromotionalOfferInlineCreateRelationshipsPricesFromJSON, SubscriptionPromotionalOfferInlineCreateRelationshipsPricesFromJSONTyped, SubscriptionPromotionalOfferInlineCreateRelationshipsPricesToJSON, SubscriptionPromotionalOfferInlineCreateRelationshipsToJSON, SubscriptionPromotionalOfferInlineCreateToJSON, SubscriptionPromotionalOfferInlineCreateTypeEnum, SubscriptionPromotionalOfferPriceFromJSON, SubscriptionPromotionalOfferPriceFromJSONTyped, SubscriptionPromotionalOfferPriceInlineCreateFromJSON, SubscriptionPromotionalOfferPriceInlineCreateFromJSONTyped, SubscriptionPromotionalOfferPriceInlineCreateToJSON, SubscriptionPromotionalOfferPriceInlineCreateTypeEnum, SubscriptionPromotionalOfferPriceToJSON, SubscriptionPromotionalOfferPriceTypeEnum, SubscriptionPromotionalOfferPricesResponseFromJSON, SubscriptionPromotionalOfferPricesResponseFromJSONTyped, SubscriptionPromotionalOfferPricesResponseToJSON, SubscriptionPromotionalOfferRelationshipsFromJSON, SubscriptionPromotionalOfferRelationshipsFromJSONTyped, SubscriptionPromotionalOfferRelationshipsPricesDataInnerFromJSON, SubscriptionPromotionalOfferRelationshipsPricesDataInnerFromJSONTyped, SubscriptionPromotionalOfferRelationshipsPricesDataInnerToJSON, SubscriptionPromotionalOfferRelationshipsPricesDataInnerTypeEnum, SubscriptionPromotionalOfferRelationshipsPricesFromJSON, SubscriptionPromotionalOfferRelationshipsPricesFromJSONTyped, SubscriptionPromotionalOfferRelationshipsPricesToJSON, SubscriptionPromotionalOfferRelationshipsToJSON, SubscriptionPromotionalOfferResponseFromJSON, SubscriptionPromotionalOfferResponseFromJSONTyped, SubscriptionPromotionalOfferResponseToJSON, SubscriptionPromotionalOfferToJSON, SubscriptionPromotionalOfferTypeEnum, SubscriptionPromotionalOfferUpdateRequestDataFromJSON, SubscriptionPromotionalOfferUpdateRequestDataFromJSONTyped, SubscriptionPromotionalOfferUpdateRequestDataRelationshipsFromJSON, SubscriptionPromotionalOfferUpdateRequestDataRelationshipsFromJSONTyped, SubscriptionPromotionalOfferUpdateRequestDataRelationshipsToJSON, SubscriptionPromotionalOfferUpdateRequestDataToJSON, SubscriptionPromotionalOfferUpdateRequestDataTypeEnum, SubscriptionPromotionalOfferUpdateRequestFromJSON, SubscriptionPromotionalOfferUpdateRequestFromJSONTyped, SubscriptionPromotionalOfferUpdateRequestToJSON, SubscriptionPromotionalOffersApi, SubscriptionPromotionalOffersGetInstanceFieldsSubscriptionPromotionalOfferPricesEnum, SubscriptionPromotionalOffersGetInstanceFieldsSubscriptionPromotionalOffersEnum, SubscriptionPromotionalOffersGetInstanceIncludeEnum, SubscriptionPromotionalOffersPricesGetToManyRelatedFieldsSubscriptionPricePointsEnum, SubscriptionPromotionalOffersPricesGetToManyRelatedFieldsSubscriptionPromotionalOfferPricesEnum, SubscriptionPromotionalOffersPricesGetToManyRelatedFieldsTerritoriesEnum, SubscriptionPromotionalOffersPricesGetToManyRelatedIncludeEnum, SubscriptionPromotionalOffersResponseFromJSON, SubscriptionPromotionalOffersResponseFromJSONTyped, SubscriptionPromotionalOffersResponseIncludedInnerFromJSON, SubscriptionPromotionalOffersResponseIncludedInnerFromJSONTyped, SubscriptionPromotionalOffersResponseIncludedInnerToJSON, SubscriptionPromotionalOffersResponseToJSON, SubscriptionRelationshipsAppStoreReviewScreenshotDataFromJSON, SubscriptionRelationshipsAppStoreReviewScreenshotDataFromJSONTyped, SubscriptionRelationshipsAppStoreReviewScreenshotDataToJSON, SubscriptionRelationshipsAppStoreReviewScreenshotDataTypeEnum, SubscriptionRelationshipsAppStoreReviewScreenshotFromJSON, SubscriptionRelationshipsAppStoreReviewScreenshotFromJSONTyped, SubscriptionRelationshipsAppStoreReviewScreenshotToJSON, SubscriptionRelationshipsFromJSON, SubscriptionRelationshipsFromJSONTyped, SubscriptionRelationshipsIntroductoryOffersDataInnerFromJSON, SubscriptionRelationshipsIntroductoryOffersDataInnerFromJSONTyped, SubscriptionRelationshipsIntroductoryOffersDataInnerToJSON, SubscriptionRelationshipsIntroductoryOffersDataInnerTypeEnum, SubscriptionRelationshipsIntroductoryOffersFromJSON, SubscriptionRelationshipsIntroductoryOffersFromJSONTyped, SubscriptionRelationshipsIntroductoryOffersToJSON, SubscriptionRelationshipsOfferCodesFromJSON, SubscriptionRelationshipsOfferCodesFromJSONTyped, SubscriptionRelationshipsOfferCodesToJSON, SubscriptionRelationshipsPricesDataInnerFromJSON, SubscriptionRelationshipsPricesDataInnerFromJSONTyped, SubscriptionRelationshipsPricesDataInnerToJSON, SubscriptionRelationshipsPricesDataInnerTypeEnum, SubscriptionRelationshipsPricesFromJSON, SubscriptionRelationshipsPricesFromJSONTyped, SubscriptionRelationshipsPricesToJSON, SubscriptionRelationshipsPromotionalOffersDataInnerFromJSON, SubscriptionRelationshipsPromotionalOffersDataInnerFromJSONTyped, SubscriptionRelationshipsPromotionalOffersDataInnerToJSON, SubscriptionRelationshipsPromotionalOffersDataInnerTypeEnum, SubscriptionRelationshipsPromotionalOffersFromJSON, SubscriptionRelationshipsPromotionalOffersFromJSONTyped, SubscriptionRelationshipsPromotionalOffersToJSON, SubscriptionRelationshipsSubscriptionLocalizationsDataInnerFromJSON, SubscriptionRelationshipsSubscriptionLocalizationsDataInnerFromJSONTyped, SubscriptionRelationshipsSubscriptionLocalizationsDataInnerToJSON, SubscriptionRelationshipsSubscriptionLocalizationsDataInnerTypeEnum, SubscriptionRelationshipsSubscriptionLocalizationsFromJSON, SubscriptionRelationshipsSubscriptionLocalizationsFromJSONTyped, SubscriptionRelationshipsSubscriptionLocalizationsToJSON, SubscriptionRelationshipsToJSON, SubscriptionResponseFromJSON, SubscriptionResponseFromJSONTyped, SubscriptionResponseToJSON, SubscriptionStatusUrlVersion, SubscriptionStatusUrlVersionFromJSON, SubscriptionStatusUrlVersionFromJSONTyped, SubscriptionStatusUrlVersionToJSON, SubscriptionSubmissionCreateRequestDataFromJSON, SubscriptionSubmissionCreateRequestDataFromJSONTyped, SubscriptionSubmissionCreateRequestDataToJSON, SubscriptionSubmissionCreateRequestDataTypeEnum, SubscriptionSubmissionCreateRequestFromJSON, SubscriptionSubmissionCreateRequestFromJSONTyped, SubscriptionSubmissionCreateRequestToJSON, SubscriptionSubmissionFromJSON, SubscriptionSubmissionFromJSONTyped, SubscriptionSubmissionResponseFromJSON, SubscriptionSubmissionResponseFromJSONTyped, SubscriptionSubmissionResponseToJSON, SubscriptionSubmissionToJSON, SubscriptionSubmissionTypeEnum, SubscriptionSubmissionsApi, SubscriptionToJSON, SubscriptionTypeEnum, SubscriptionUpdateRequestDataAttributesFromJSON, SubscriptionUpdateRequestDataAttributesFromJSONTyped, SubscriptionUpdateRequestDataAttributesSubscriptionPeriodEnum, SubscriptionUpdateRequestDataAttributesToJSON, SubscriptionUpdateRequestDataFromJSON, SubscriptionUpdateRequestDataFromJSONTyped, SubscriptionUpdateRequestDataRelationshipsFromJSON, SubscriptionUpdateRequestDataRelationshipsFromJSONTyped, SubscriptionUpdateRequestDataRelationshipsIntroductoryOffersFromJSON, SubscriptionUpdateRequestDataRelationshipsIntroductoryOffersFromJSONTyped, SubscriptionUpdateRequestDataRelationshipsIntroductoryOffersToJSON, SubscriptionUpdateRequestDataRelationshipsPricesFromJSON, SubscriptionUpdateRequestDataRelationshipsPricesFromJSONTyped, SubscriptionUpdateRequestDataRelationshipsPricesToJSON, SubscriptionUpdateRequestDataRelationshipsPromotionalOffersFromJSON, SubscriptionUpdateRequestDataRelationshipsPromotionalOffersFromJSONTyped, SubscriptionUpdateRequestDataRelationshipsPromotionalOffersToJSON, SubscriptionUpdateRequestDataRelationshipsToJSON, SubscriptionUpdateRequestDataToJSON, SubscriptionUpdateRequestDataTypeEnum, SubscriptionUpdateRequestFromJSON, SubscriptionUpdateRequestFromJSONTyped, SubscriptionUpdateRequestIncludedInnerFromJSON, SubscriptionUpdateRequestIncludedInnerFromJSONTyped, SubscriptionUpdateRequestIncludedInnerToJSON, SubscriptionUpdateRequestToJSON, SubscriptionsApi, SubscriptionsAppStoreReviewScreenshotGetToOneRelatedFieldsSubscriptionAppStoreReviewScreenshotsEnum, SubscriptionsAppStoreReviewScreenshotGetToOneRelatedFieldsSubscriptionsEnum, SubscriptionsAppStoreReviewScreenshotGetToOneRelatedIncludeEnum, SubscriptionsGetInstanceFieldsPromotedPurchasesEnum, SubscriptionsGetInstanceFieldsSubscriptionAppStoreReviewScreenshotsEnum, SubscriptionsGetInstanceFieldsSubscriptionIntroductoryOffersEnum, SubscriptionsGetInstanceFieldsSubscriptionLocalizationsEnum, SubscriptionsGetInstanceFieldsSubscriptionOfferCodesEnum, SubscriptionsGetInstanceFieldsSubscriptionPricePointsEnum, SubscriptionsGetInstanceFieldsSubscriptionPricesEnum, SubscriptionsGetInstanceFieldsSubscriptionPromotionalOffersEnum, SubscriptionsGetInstanceFieldsSubscriptionsEnum, SubscriptionsGetInstanceIncludeEnum, SubscriptionsIntroductoryOffersGetToManyRelatedFieldsSubscriptionIntroductoryOffersEnum, SubscriptionsIntroductoryOffersGetToManyRelatedFieldsSubscriptionPricePointsEnum, SubscriptionsIntroductoryOffersGetToManyRelatedFieldsSubscriptionsEnum, SubscriptionsIntroductoryOffersGetToManyRelatedFieldsTerritoriesEnum, SubscriptionsIntroductoryOffersGetToManyRelatedIncludeEnum, SubscriptionsOfferCodesGetToManyRelatedFieldsSubscriptionOfferCodeCustomCodesEnum, SubscriptionsOfferCodesGetToManyRelatedFieldsSubscriptionOfferCodeOneTimeUseCodesEnum, SubscriptionsOfferCodesGetToManyRelatedFieldsSubscriptionOfferCodePricesEnum, SubscriptionsOfferCodesGetToManyRelatedFieldsSubscriptionOfferCodesEnum, SubscriptionsOfferCodesGetToManyRelatedFieldsSubscriptionsEnum, SubscriptionsOfferCodesGetToManyRelatedIncludeEnum, SubscriptionsPricePointsGetToManyRelatedFieldsSubscriptionPricePointsEnum, SubscriptionsPricePointsGetToManyRelatedFieldsTerritoriesEnum, SubscriptionsPricePointsGetToManyRelatedIncludeEnum, SubscriptionsPricesGetToManyRelatedFieldsSubscriptionPricePointsEnum, SubscriptionsPricesGetToManyRelatedFieldsSubscriptionPricesEnum, SubscriptionsPricesGetToManyRelatedFieldsTerritoriesEnum, SubscriptionsPricesGetToManyRelatedIncludeEnum, SubscriptionsPromotedPurchaseGetToOneRelatedFieldsInAppPurchasesEnum, SubscriptionsPromotedPurchaseGetToOneRelatedFieldsPromotedPurchaseImagesEnum, SubscriptionsPromotedPurchaseGetToOneRelatedFieldsPromotedPurchasesEnum, SubscriptionsPromotedPurchaseGetToOneRelatedFieldsSubscriptionsEnum, SubscriptionsPromotedPurchaseGetToOneRelatedIncludeEnum, SubscriptionsPromotionalOffersGetToManyRelatedFieldsSubscriptionPromotionalOfferPricesEnum, SubscriptionsPromotionalOffersGetToManyRelatedFieldsSubscriptionPromotionalOffersEnum, SubscriptionsPromotionalOffersGetToManyRelatedFieldsSubscriptionsEnum, SubscriptionsPromotionalOffersGetToManyRelatedIncludeEnum, SubscriptionsResponseFromJSON, SubscriptionsResponseFromJSONTyped, SubscriptionsResponseIncludedInnerFromJSON, SubscriptionsResponseIncludedInnerFromJSONTyped, SubscriptionsResponseIncludedInnerToJSON, SubscriptionsResponseToJSON, SubscriptionsSubscriptionLocalizationsGetToManyRelatedFieldsSubscriptionLocalizationsEnum, SubscriptionsSubscriptionLocalizationsGetToManyRelatedFieldsSubscriptionsEnum, SubscriptionsSubscriptionLocalizationsGetToManyRelatedIncludeEnum, TerritoriesApi, TerritoriesGetCollectionFieldsTerritoriesEnum, TerritoriesResponseFromJSON, TerritoriesResponseFromJSONTyped, TerritoriesResponseToJSON, TerritoryAttributesFromJSON, TerritoryAttributesFromJSONTyped, TerritoryAttributesToJSON, TerritoryCode, TerritoryCodeFromJSON, TerritoryCodeFromJSONTyped, TerritoryCodeToJSON, TerritoryFromJSON, TerritoryFromJSONTyped, TerritoryResponseFromJSON, TerritoryResponseFromJSONTyped, TerritoryResponseToJSON, TerritoryToJSON, TerritoryTypeEnum, TextApiResponse, UploadOperationFromJSON, UploadOperationFromJSONTyped, UploadOperationToJSON, UserAttributesFromJSON, UserAttributesFromJSONTyped, UserAttributesToJSON, UserFromJSON, UserFromJSONTyped, UserInvitationAttributesFromJSON, UserInvitationAttributesFromJSONTyped, UserInvitationAttributesToJSON, UserInvitationCreateRequestDataAttributesFromJSON, UserInvitationCreateRequestDataAttributesFromJSONTyped, UserInvitationCreateRequestDataAttributesToJSON, UserInvitationCreateRequestDataFromJSON, UserInvitationCreateRequestDataFromJSONTyped, UserInvitationCreateRequestDataRelationshipsFromJSON, UserInvitationCreateRequestDataRelationshipsFromJSONTyped, UserInvitationCreateRequestDataRelationshipsToJSON, UserInvitationCreateRequestDataRelationshipsVisibleAppsFromJSON, UserInvitationCreateRequestDataRelationshipsVisibleAppsFromJSONTyped, UserInvitationCreateRequestDataRelationshipsVisibleAppsToJSON, UserInvitationCreateRequestDataToJSON, UserInvitationCreateRequestDataTypeEnum, UserInvitationCreateRequestFromJSON, UserInvitationCreateRequestFromJSONTyped, UserInvitationCreateRequestToJSON, UserInvitationFromJSON, UserInvitationFromJSONTyped, UserInvitationRelationshipsFromJSON, UserInvitationRelationshipsFromJSONTyped, UserInvitationRelationshipsToJSON, UserInvitationResponseFromJSON, UserInvitationResponseFromJSONTyped, UserInvitationResponseToJSON, UserInvitationToJSON, UserInvitationTypeEnum, UserInvitationsApi, UserInvitationsGetCollectionFieldsAppsEnum, UserInvitationsGetCollectionFieldsUserInvitationsEnum, UserInvitationsGetCollectionFilterRolesEnum, UserInvitationsGetCollectionIncludeEnum, UserInvitationsGetCollectionSortEnum, UserInvitationsGetInstanceFieldsAppsEnum, UserInvitationsGetInstanceFieldsUserInvitationsEnum, UserInvitationsGetInstanceIncludeEnum, UserInvitationsResponseFromJSON, UserInvitationsResponseFromJSONTyped, UserInvitationsResponseToJSON, UserInvitationsVisibleAppsGetToManyRelatedFieldsAppsEnum, UserResponseFromJSON, UserResponseFromJSONTyped, UserResponseToJSON, UserRole, UserRoleFromJSON, UserRoleFromJSONTyped, UserRoleToJSON, UserToJSON, UserTypeEnum, UserUpdateRequestDataAttributesFromJSON, UserUpdateRequestDataAttributesFromJSONTyped, UserUpdateRequestDataAttributesToJSON, UserUpdateRequestDataFromJSON, UserUpdateRequestDataFromJSONTyped, UserUpdateRequestDataToJSON, UserUpdateRequestDataTypeEnum, UserUpdateRequestFromJSON, UserUpdateRequestFromJSONTyped, UserUpdateRequestToJSON, UserVisibleAppsLinkagesRequestFromJSON, UserVisibleAppsLinkagesRequestFromJSONTyped, UserVisibleAppsLinkagesRequestToJSON, UserVisibleAppsLinkagesResponseFromJSON, UserVisibleAppsLinkagesResponseFromJSONTyped, UserVisibleAppsLinkagesResponseToJSON, UsersApi, UsersGetCollectionFieldsAppsEnum, UsersGetCollectionFieldsUsersEnum, UsersGetCollectionFilterRolesEnum, UsersGetCollectionIncludeEnum, UsersGetCollectionSortEnum, UsersGetInstanceFieldsAppsEnum, UsersGetInstanceFieldsUsersEnum, UsersGetInstanceIncludeEnum, UsersResponseFromJSON, UsersResponseFromJSONTyped, UsersResponseToJSON, UsersVisibleAppsGetToManyRelatedFieldsAppsEnum, VoidApiResponse, XcodeMetricsFromJSON, XcodeMetricsFromJSONTyped, XcodeMetricsInsightsFromJSON, XcodeMetricsInsightsFromJSONTyped, XcodeMetricsInsightsToJSON, XcodeMetricsProductDataInnerFromJSON, XcodeMetricsProductDataInnerFromJSONTyped, XcodeMetricsProductDataInnerMetricCategoriesInnerFromJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerFromJSONTyped, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerFilterCriteriaFromJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerFilterCriteriaFromJSONTyped, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerFilterCriteriaToJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerFromJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerFromJSONTyped, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerPointsInnerFromJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerPointsInnerFromJSONTyped, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerPointsInnerPercentageBreakdownFromJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerPointsInnerPercentageBreakdownFromJSONTyped, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerPointsInnerPercentageBreakdownToJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerPointsInnerToJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerToJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerFromJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerFromJSONTyped, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerGoalKeysInnerFromJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerGoalKeysInnerFromJSONTyped, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerGoalKeysInnerToJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerToJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerUnitFromJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerUnitFromJSONTyped, XcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerUnitToJSON, XcodeMetricsProductDataInnerMetricCategoriesInnerToJSON, XcodeMetricsProductDataInnerToJSON, XcodeMetricsToJSON, canConsumeForm, exists, instanceOfAgeRatingDeclaration, instanceOfAgeRatingDeclarationAttributes, instanceOfAgeRatingDeclarationResponse, instanceOfAgeRatingDeclarationUpdateRequest, instanceOfAgeRatingDeclarationUpdateRequestData, instanceOfApp, instanceOfAppAttributes, instanceOfAppBetaTestersLinkagesRequest, instanceOfAppCategoriesResponse, instanceOfAppCategory, instanceOfAppCategoryAttributes, instanceOfAppCategoryRelationships, instanceOfAppCategoryRelationshipsParent, instanceOfAppCategoryRelationshipsSubcategories, instanceOfAppCategoryRelationshipsSubcategoriesDataInner, instanceOfAppCategoryRelationshipsSubcategoriesLinks, instanceOfAppCategoryResponse, instanceOfAppClip, instanceOfAppClipAdvancedExperience, instanceOfAppClipAdvancedExperienceAttributes, instanceOfAppClipAdvancedExperienceAttributesPlace, instanceOfAppClipAdvancedExperienceAttributesPlaceDisplayPoint, instanceOfAppClipAdvancedExperienceAttributesPlaceDisplayPointCoordinates, instanceOfAppClipAdvancedExperienceAttributesPlaceMainAddress, instanceOfAppClipAdvancedExperienceAttributesPlaceMainAddressStructuredAddress, instanceOfAppClipAdvancedExperienceAttributesPlacePhoneNumber, instanceOfAppClipAdvancedExperienceCreateRequest, instanceOfAppClipAdvancedExperienceCreateRequestData, instanceOfAppClipAdvancedExperienceCreateRequestDataAttributes, instanceOfAppClipAdvancedExperienceCreateRequestDataRelationships, instanceOfAppClipAdvancedExperienceCreateRequestDataRelationshipsAppClip, instanceOfAppClipAdvancedExperienceCreateRequestDataRelationshipsHeaderImage, instanceOfAppClipAdvancedExperienceCreateRequestDataRelationshipsLocalizations, instanceOfAppClipAdvancedExperienceImage, instanceOfAppClipAdvancedExperienceImageAttributes, instanceOfAppClipAdvancedExperienceImageCreateRequest, instanceOfAppClipAdvancedExperienceImageCreateRequestData, instanceOfAppClipAdvancedExperienceImageCreateRequestDataAttributes, instanceOfAppClipAdvancedExperienceImageResponse, instanceOfAppClipAdvancedExperienceImageUpdateRequest, instanceOfAppClipAdvancedExperienceImageUpdateRequestData, instanceOfAppClipAdvancedExperienceImageUpdateRequestDataAttributes, instanceOfAppClipAdvancedExperienceLocalization, instanceOfAppClipAdvancedExperienceLocalizationAttributes, instanceOfAppClipAdvancedExperienceLocalizationInlineCreate, instanceOfAppClipAdvancedExperienceRelationships, instanceOfAppClipAdvancedExperienceRelationshipsAppClip, instanceOfAppClipAdvancedExperienceRelationshipsAppClipData, instanceOfAppClipAdvancedExperienceRelationshipsHeaderImage, instanceOfAppClipAdvancedExperienceRelationshipsHeaderImageData, instanceOfAppClipAdvancedExperienceRelationshipsLocalizations, instanceOfAppClipAdvancedExperienceRelationshipsLocalizationsDataInner, instanceOfAppClipAdvancedExperienceResponse, instanceOfAppClipAdvancedExperienceUpdateRequest, instanceOfAppClipAdvancedExperienceUpdateRequestData, instanceOfAppClipAdvancedExperienceUpdateRequestDataAttributes, instanceOfAppClipAdvancedExperienceUpdateRequestDataRelationships, instanceOfAppClipAdvancedExperienceUpdateRequestDataRelationshipsAppClip, instanceOfAppClipAdvancedExperienceUpdateRequestDataRelationshipsHeaderImage, instanceOfAppClipAdvancedExperienceUpdateRequestDataRelationshipsLocalizations, instanceOfAppClipAdvancedExperiencesResponse, instanceOfAppClipAppStoreReviewDetail, instanceOfAppClipAppStoreReviewDetailAttributes, instanceOfAppClipAppStoreReviewDetailCreateRequest, instanceOfAppClipAppStoreReviewDetailCreateRequestData, instanceOfAppClipAppStoreReviewDetailCreateRequestDataRelationships, instanceOfAppClipAppStoreReviewDetailCreateRequestDataRelationshipsAppClipDefaultExperience, instanceOfAppClipAppStoreReviewDetailRelationships, instanceOfAppClipAppStoreReviewDetailRelationshipsAppClipDefaultExperience, instanceOfAppClipAppStoreReviewDetailRelationshipsAppClipDefaultExperienceData, instanceOfAppClipAppStoreReviewDetailResponse, instanceOfAppClipAppStoreReviewDetailUpdateRequest, instanceOfAppClipAppStoreReviewDetailUpdateRequestData, instanceOfAppClipAttributes, instanceOfAppClipDefaultExperience, instanceOfAppClipDefaultExperienceAttributes, instanceOfAppClipDefaultExperienceCreateRequest, instanceOfAppClipDefaultExperienceCreateRequestData, instanceOfAppClipDefaultExperienceCreateRequestDataRelationships, instanceOfAppClipDefaultExperienceCreateRequestDataRelationshipsAppClipDefaultExperienceTemplate, instanceOfAppClipDefaultExperienceCreateRequestDataRelationshipsReleaseWithAppStoreVersion, instanceOfAppClipDefaultExperienceLocalization, instanceOfAppClipDefaultExperienceLocalizationAttributes, instanceOfAppClipDefaultExperienceLocalizationCreateRequest, instanceOfAppClipDefaultExperienceLocalizationCreateRequestData, instanceOfAppClipDefaultExperienceLocalizationCreateRequestDataAttributes, instanceOfAppClipDefaultExperienceLocalizationRelationships, instanceOfAppClipDefaultExperienceLocalizationRelationshipsAppClipHeaderImage, instanceOfAppClipDefaultExperienceLocalizationRelationshipsAppClipHeaderImageData, instanceOfAppClipDefaultExperienceLocalizationResponse, instanceOfAppClipDefaultExperienceLocalizationUpdateRequest, instanceOfAppClipDefaultExperienceLocalizationUpdateRequestData, instanceOfAppClipDefaultExperienceLocalizationUpdateRequestDataAttributes, instanceOfAppClipDefaultExperienceLocalizationsResponse, instanceOfAppClipDefaultExperienceRelationships, instanceOfAppClipDefaultExperienceRelationshipsAppClipAppStoreReviewDetail, instanceOfAppClipDefaultExperienceRelationshipsAppClipAppStoreReviewDetailData, instanceOfAppClipDefaultExperienceRelationshipsAppClipDefaultExperienceLocalizations, instanceOfAppClipDefaultExperienceRelationshipsAppClipDefaultExperienceLocalizationsDataInner, instanceOfAppClipDefaultExperienceRelationshipsReleaseWithAppStoreVersion, instanceOfAppClipDefaultExperienceRelationshipsReleaseWithAppStoreVersionData, instanceOfAppClipDefaultExperienceReleaseWithAppStoreVersionLinkageRequest, instanceOfAppClipDefaultExperienceReleaseWithAppStoreVersionLinkageResponse, instanceOfAppClipDefaultExperienceResponse, instanceOfAppClipDefaultExperienceUpdateRequest, instanceOfAppClipDefaultExperienceUpdateRequestData, instanceOfAppClipDefaultExperienceUpdateRequestDataRelationships, instanceOfAppClipDefaultExperiencesResponse, instanceOfAppClipDomainStatus, instanceOfAppClipDomainStatusAttributes, instanceOfAppClipDomainStatusAttributesDomainsInner, instanceOfAppClipDomainStatusResponse, instanceOfAppClipHeaderImage, instanceOfAppClipHeaderImageCreateRequest, instanceOfAppClipHeaderImageCreateRequestData, instanceOfAppClipHeaderImageCreateRequestDataRelationships, instanceOfAppClipHeaderImageCreateRequestDataRelationshipsAppClipDefaultExperienceLocalization, instanceOfAppClipHeaderImageRelationships, instanceOfAppClipHeaderImageRelationshipsAppClipDefaultExperienceLocalization, instanceOfAppClipHeaderImageResponse, instanceOfAppClipHeaderImageUpdateRequest, instanceOfAppClipHeaderImageUpdateRequestData, instanceOfAppClipRelationships, instanceOfAppClipRelationshipsApp, instanceOfAppClipRelationshipsAppClipDefaultExperiences, instanceOfAppClipRelationshipsAppData, instanceOfAppClipResponse, instanceOfAppClipsResponse, instanceOfAppCustomProductPage, instanceOfAppCustomProductPageAttributes, instanceOfAppCustomProductPageCreateRequest, instanceOfAppCustomProductPageCreateRequestData, instanceOfAppCustomProductPageCreateRequestDataAttributes, instanceOfAppCustomProductPageCreateRequestDataRelationships, instanceOfAppCustomProductPageCreateRequestDataRelationshipsApp, instanceOfAppCustomProductPageCreateRequestDataRelationshipsAppCustomProductPageVersions, instanceOfAppCustomProductPageLocalization, instanceOfAppCustomProductPageLocalizationAttributes, instanceOfAppCustomProductPageLocalizationCreateRequest, instanceOfAppCustomProductPageLocalizationCreateRequestData, instanceOfAppCustomProductPageLocalizationCreateRequestDataRelationships, instanceOfAppCustomProductPageLocalizationCreateRequestDataRelationshipsAppCustomProductPageVersion, instanceOfAppCustomProductPageLocalizationInlineCreate, instanceOfAppCustomProductPageLocalizationInlineCreateAttributes, instanceOfAppCustomProductPageLocalizationInlineCreateRelationships, instanceOfAppCustomProductPageLocalizationInlineCreateRelationshipsAppCustomProductPageVersion, instanceOfAppCustomProductPageLocalizationRelationships, instanceOfAppCustomProductPageLocalizationRelationshipsAppCustomProductPageVersion, instanceOfAppCustomProductPageLocalizationRelationshipsAppCustomProductPageVersionData, instanceOfAppCustomProductPageLocalizationRelationshipsAppPreviewSets, instanceOfAppCustomProductPageLocalizationRelationshipsAppPreviewSetsDataInner, instanceOfAppCustomProductPageLocalizationRelationshipsAppScreenshotSets, instanceOfAppCustomProductPageLocalizationRelationshipsAppScreenshotSetsDataInner, instanceOfAppCustomProductPageLocalizationResponse, instanceOfAppCustomProductPageLocalizationUpdateRequest, instanceOfAppCustomProductPageLocalizationUpdateRequestData, instanceOfAppCustomProductPageLocalizationUpdateRequestDataAttributes, instanceOfAppCustomProductPageLocalizationsResponse, instanceOfAppCustomProductPageRelationships, instanceOfAppCustomProductPageRelationshipsAppCustomProductPageVersions, instanceOfAppCustomProductPageResponse, instanceOfAppCustomProductPageUpdateRequest, instanceOfAppCustomProductPageUpdateRequestData, instanceOfAppCustomProductPageUpdateRequestDataAttributes, instanceOfAppCustomProductPageVersion, instanceOfAppCustomProductPageVersionAttributes, instanceOfAppCustomProductPageVersionCreateRequest, instanceOfAppCustomProductPageVersionCreateRequestData, instanceOfAppCustomProductPageVersionCreateRequestDataRelationships, instanceOfAppCustomProductPageVersionCreateRequestDataRelationshipsAppCustomProductPage, instanceOfAppCustomProductPageVersionInlineCreate, instanceOfAppCustomProductPageVersionInlineCreateRelationships, instanceOfAppCustomProductPageVersionInlineCreateRelationshipsAppCustomProductPage, instanceOfAppCustomProductPageVersionInlineCreateRelationshipsAppCustomProductPageLocalizations, instanceOfAppCustomProductPageVersionRelationships, instanceOfAppCustomProductPageVersionRelationshipsAppCustomProductPage, instanceOfAppCustomProductPageVersionRelationshipsAppCustomProductPageData, instanceOfAppCustomProductPageVersionRelationshipsAppCustomProductPageLocalizations, instanceOfAppCustomProductPageVersionRelationshipsAppCustomProductPageLocalizationsDataInner, instanceOfAppCustomProductPageVersionResponse, instanceOfAppCustomProductPageVersionsResponse, instanceOfAppCustomProductPagesResponse, instanceOfAppEncryptionDeclaration, instanceOfAppEncryptionDeclarationAttributes, instanceOfAppEncryptionDeclarationBuildsLinkagesRequest, instanceOfAppEncryptionDeclarationDocument, instanceOfAppEncryptionDeclarationDocumentAttributes, instanceOfAppEncryptionDeclarationDocumentCreateRequest, instanceOfAppEncryptionDeclarationDocumentCreateRequestData, instanceOfAppEncryptionDeclarationDocumentCreateRequestDataRelationships, instanceOfAppEncryptionDeclarationDocumentCreateRequestDataRelationshipsAppEncryptionDeclaration, instanceOfAppEncryptionDeclarationDocumentCreateRequestDataRelationshipsAppEncryptionDeclarationData, instanceOfAppEncryptionDeclarationDocumentResponse, instanceOfAppEncryptionDeclarationDocumentUpdateRequest, instanceOfAppEncryptionDeclarationDocumentUpdateRequestData, instanceOfAppEncryptionDeclarationRelationships, instanceOfAppEncryptionDeclarationRelationshipsAppEncryptionDeclarationDocument, instanceOfAppEncryptionDeclarationRelationshipsAppEncryptionDeclarationDocumentData, instanceOfAppEncryptionDeclarationRelationshipsBuilds, instanceOfAppEncryptionDeclarationRelationshipsBuildsDataInner, instanceOfAppEncryptionDeclarationResponse, instanceOfAppEncryptionDeclarationsResponse, instanceOfAppEvent, instanceOfAppEventAttributes, instanceOfAppEventAttributesTerritorySchedulesInner, instanceOfAppEventCreateRequest, instanceOfAppEventCreateRequestData, instanceOfAppEventCreateRequestDataAttributes, instanceOfAppEventCreateRequestDataRelationships, instanceOfAppEventLocalization, instanceOfAppEventLocalizationAttributes, instanceOfAppEventLocalizationCreateRequest, instanceOfAppEventLocalizationCreateRequestData, instanceOfAppEventLocalizationCreateRequestDataAttributes, instanceOfAppEventLocalizationCreateRequestDataRelationships, instanceOfAppEventLocalizationCreateRequestDataRelationshipsAppEvent, instanceOfAppEventLocalizationRelationships, instanceOfAppEventLocalizationRelationshipsAppEvent, instanceOfAppEventLocalizationRelationshipsAppEventData, instanceOfAppEventLocalizationRelationshipsAppEventScreenshots, instanceOfAppEventLocalizationRelationshipsAppEventScreenshotsDataInner, instanceOfAppEventLocalizationRelationshipsAppEventVideoClips, instanceOfAppEventLocalizationRelationshipsAppEventVideoClipsDataInner, instanceOfAppEventLocalizationResponse, instanceOfAppEventLocalizationUpdateRequest, instanceOfAppEventLocalizationUpdateRequestData, instanceOfAppEventLocalizationUpdateRequestDataAttributes, instanceOfAppEventLocalizationsResponse, instanceOfAppEventRelationships, instanceOfAppEventRelationshipsLocalizations, instanceOfAppEventResponse, instanceOfAppEventScreenshot, instanceOfAppEventScreenshotAttributes, instanceOfAppEventScreenshotCreateRequest, instanceOfAppEventScreenshotCreateRequestData, instanceOfAppEventScreenshotCreateRequestDataAttributes, instanceOfAppEventScreenshotCreateRequestDataRelationships, instanceOfAppEventScreenshotCreateRequestDataRelationshipsAppEventLocalization, instanceOfAppEventScreenshotRelationships, instanceOfAppEventScreenshotRelationshipsAppEventLocalization, instanceOfAppEventScreenshotRelationshipsAppEventLocalizationData, instanceOfAppEventScreenshotResponse, instanceOfAppEventScreenshotUpdateRequest, instanceOfAppEventScreenshotUpdateRequestData, instanceOfAppEventScreenshotUpdateRequestDataAttributes, instanceOfAppEventScreenshotsResponse, instanceOfAppEventUpdateRequest, instanceOfAppEventUpdateRequestData, instanceOfAppEventUpdateRequestDataAttributes, instanceOfAppEventVideoClip, instanceOfAppEventVideoClipAttributes, instanceOfAppEventVideoClipCreateRequest, instanceOfAppEventVideoClipCreateRequestData, instanceOfAppEventVideoClipCreateRequestDataAttributes, instanceOfAppEventVideoClipResponse, instanceOfAppEventVideoClipUpdateRequest, instanceOfAppEventVideoClipUpdateRequestData, instanceOfAppEventVideoClipUpdateRequestDataAttributes, instanceOfAppEventVideoClipsResponse, instanceOfAppEventsResponse, instanceOfAppInfo, instanceOfAppInfoAttributes, instanceOfAppInfoLocalization, instanceOfAppInfoLocalizationAttributes, instanceOfAppInfoLocalizationCreateRequest, instanceOfAppInfoLocalizationCreateRequestData, instanceOfAppInfoLocalizationCreateRequestDataAttributes, instanceOfAppInfoLocalizationCreateRequestDataRelationships, instanceOfAppInfoLocalizationCreateRequestDataRelationshipsAppInfo, instanceOfAppInfoLocalizationRelationships, instanceOfAppInfoLocalizationRelationshipsAppInfo, instanceOfAppInfoLocalizationRelationshipsAppInfoData, instanceOfAppInfoLocalizationResponse, instanceOfAppInfoLocalizationUpdateRequest, instanceOfAppInfoLocalizationUpdateRequestData, instanceOfAppInfoLocalizationUpdateRequestDataAttributes, instanceOfAppInfoLocalizationsResponse, instanceOfAppInfoRelationships, instanceOfAppInfoRelationshipsAgeRatingDeclaration, instanceOfAppInfoRelationshipsAgeRatingDeclarationData, instanceOfAppInfoRelationshipsAppInfoLocalizations, instanceOfAppInfoRelationshipsAppInfoLocalizationsDataInner, instanceOfAppInfoResponse, instanceOfAppInfoUpdateRequest, instanceOfAppInfoUpdateRequestData, instanceOfAppInfoUpdateRequestDataRelationships, instanceOfAppInfoUpdateRequestDataRelationshipsPrimaryCategory, instanceOfAppInfosResponse, instanceOfAppMediaAssetState, instanceOfAppMediaStateError, instanceOfAppPreOrder, instanceOfAppPreOrderAttributes, instanceOfAppPreOrderCreateRequest, instanceOfAppPreOrderCreateRequestData, instanceOfAppPreOrderCreateRequestDataAttributes, instanceOfAppPreOrderRelationships, instanceOfAppPreOrderResponse, instanceOfAppPreOrderUpdateRequest, instanceOfAppPreOrderUpdateRequestData, instanceOfAppPreview, instanceOfAppPreviewAttributes, instanceOfAppPreviewCreateRequest, instanceOfAppPreviewCreateRequestData, instanceOfAppPreviewCreateRequestDataAttributes, instanceOfAppPreviewCreateRequestDataRelationships, instanceOfAppPreviewCreateRequestDataRelationshipsAppPreviewSet, instanceOfAppPreviewRelationships, instanceOfAppPreviewRelationshipsAppPreviewSet, instanceOfAppPreviewResponse, instanceOfAppPreviewSet, instanceOfAppPreviewSetAppPreviewsLinkagesRequest, instanceOfAppPreviewSetAppPreviewsLinkagesResponse, instanceOfAppPreviewSetAttributes, instanceOfAppPreviewSetCreateRequest, instanceOfAppPreviewSetCreateRequestData, instanceOfAppPreviewSetCreateRequestDataAttributes, instanceOfAppPreviewSetCreateRequestDataRelationships, instanceOfAppPreviewSetCreateRequestDataRelationshipsAppCustomProductPageLocalization, instanceOfAppPreviewSetCreateRequestDataRelationshipsAppStoreVersionExperimentTreatmentLocalization, instanceOfAppPreviewSetCreateRequestDataRelationshipsAppStoreVersionLocalization, instanceOfAppPreviewSetRelationships, instanceOfAppPreviewSetRelationshipsAppCustomProductPageLocalization, instanceOfAppPreviewSetRelationshipsAppPreviews, instanceOfAppPreviewSetRelationshipsAppPreviewsDataInner, instanceOfAppPreviewSetRelationshipsAppStoreVersionExperimentTreatmentLocalization, instanceOfAppPreviewSetRelationshipsAppStoreVersionExperimentTreatmentLocalizationData, instanceOfAppPreviewSetRelationshipsAppStoreVersionLocalization, instanceOfAppPreviewSetRelationshipsAppStoreVersionLocalizationData, instanceOfAppPreviewSetResponse, instanceOfAppPreviewSetsResponse, instanceOfAppPreviewUpdateRequest, instanceOfAppPreviewUpdateRequestData, instanceOfAppPreviewUpdateRequestDataAttributes, instanceOfAppPreviewsResponse, instanceOfAppPrice, instanceOfAppPriceInlineCreate, instanceOfAppPricePoint, instanceOfAppPricePointRelationships, instanceOfAppPricePointResponse, instanceOfAppPricePointV2, instanceOfAppPricePointV2Attributes, instanceOfAppPricePointV2Relationships, instanceOfAppPricePointV2RelationshipsPriceTier, instanceOfAppPricePointV2RelationshipsPriceTierData, instanceOfAppPricePointV2RelationshipsTerritory, instanceOfAppPricePointV2RelationshipsTerritoryData, instanceOfAppPricePointsResponse, instanceOfAppPricePointsV2Response, instanceOfAppPriceRelationships, instanceOfAppPriceResponse, instanceOfAppPriceTier, instanceOfAppPriceTierRelationships, instanceOfAppPriceTierRelationshipsPricePoints, instanceOfAppPriceTierRelationshipsPricePointsDataInner, instanceOfAppPriceTierResponse, instanceOfAppPriceTiersResponse, instanceOfAppPricesResponse, instanceOfAppPromotedPurchasesLinkagesRequest, instanceOfAppPromotedPurchasesLinkagesResponse, instanceOfAppRelationships, instanceOfAppRelationshipsAppClips, instanceOfAppRelationshipsAppCustomProductPages, instanceOfAppRelationshipsAppEvents, instanceOfAppRelationshipsAppInfos, instanceOfAppRelationshipsAppStoreVersions, instanceOfAppRelationshipsAvailableTerritories, instanceOfAppRelationshipsBetaAppLocalizations, instanceOfAppRelationshipsBetaAppLocalizationsDataInner, instanceOfAppRelationshipsBetaAppReviewDetail, instanceOfAppRelationshipsBetaAppReviewDetailData, instanceOfAppRelationshipsBetaGroups, instanceOfAppRelationshipsBetaGroupsDataInner, instanceOfAppRelationshipsBetaLicenseAgreement, instanceOfAppRelationshipsBetaLicenseAgreementData, instanceOfAppRelationshipsCiProduct, instanceOfAppRelationshipsCiProductData, instanceOfAppRelationshipsEndUserLicenseAgreement, instanceOfAppRelationshipsEndUserLicenseAgreementData, instanceOfAppRelationshipsGameCenterEnabledVersions, instanceOfAppRelationshipsGameCenterEnabledVersionsDataInner, instanceOfAppRelationshipsInAppPurchases, instanceOfAppRelationshipsInAppPurchasesDataInner, instanceOfAppRelationshipsInAppPurchasesV2, instanceOfAppRelationshipsPreOrder, instanceOfAppRelationshipsPreOrderData, instanceOfAppRelationshipsPreReleaseVersions, instanceOfAppRelationshipsPreReleaseVersionsDataInner, instanceOfAppRelationshipsPrices, instanceOfAppRelationshipsPricesDataInner, instanceOfAppRelationshipsPromotedPurchases, instanceOfAppRelationshipsPromotedPurchasesDataInner, instanceOfAppRelationshipsReviewSubmissions, instanceOfAppRelationshipsReviewSubmissionsDataInner, instanceOfAppRelationshipsSubscriptionGracePeriod, instanceOfAppRelationshipsSubscriptionGracePeriodData, instanceOfAppRelationshipsSubscriptionGroups, instanceOfAppRelationshipsSubscriptionGroupsDataInner, instanceOfAppResponse, instanceOfAppScreenshot, instanceOfAppScreenshotAttributes, instanceOfAppScreenshotCreateRequest, instanceOfAppScreenshotCreateRequestData, instanceOfAppScreenshotCreateRequestDataRelationships, instanceOfAppScreenshotCreateRequestDataRelationshipsAppScreenshotSet, instanceOfAppScreenshotRelationships, instanceOfAppScreenshotRelationshipsAppScreenshotSet, instanceOfAppScreenshotResponse, instanceOfAppScreenshotSet, instanceOfAppScreenshotSetAppScreenshotsLinkagesRequest, instanceOfAppScreenshotSetAppScreenshotsLinkagesResponse, instanceOfAppScreenshotSetAttributes, instanceOfAppScreenshotSetCreateRequest, instanceOfAppScreenshotSetCreateRequestData, instanceOfAppScreenshotSetCreateRequestDataAttributes, instanceOfAppScreenshotSetRelationships, instanceOfAppScreenshotSetRelationshipsAppScreenshots, instanceOfAppScreenshotSetRelationshipsAppScreenshotsDataInner, instanceOfAppScreenshotSetResponse, instanceOfAppScreenshotSetsResponse, instanceOfAppScreenshotUpdateRequest, instanceOfAppScreenshotUpdateRequestData, instanceOfAppScreenshotsResponse, instanceOfAppStoreReviewAttachment, instanceOfAppStoreReviewAttachmentAttributes, instanceOfAppStoreReviewAttachmentCreateRequest, instanceOfAppStoreReviewAttachmentCreateRequestData, instanceOfAppStoreReviewAttachmentCreateRequestDataRelationships, instanceOfAppStoreReviewAttachmentCreateRequestDataRelationshipsAppStoreReviewDetail, instanceOfAppStoreReviewAttachmentRelationships, instanceOfAppStoreReviewAttachmentRelationshipsAppStoreReviewDetail, instanceOfAppStoreReviewAttachmentRelationshipsAppStoreReviewDetailData, instanceOfAppStoreReviewAttachmentResponse, instanceOfAppStoreReviewAttachmentUpdateRequest, instanceOfAppStoreReviewAttachmentUpdateRequestData, instanceOfAppStoreReviewAttachmentsResponse, instanceOfAppStoreReviewDetail, instanceOfAppStoreReviewDetailAttributes, instanceOfAppStoreReviewDetailCreateRequest, instanceOfAppStoreReviewDetailCreateRequestData, instanceOfAppStoreReviewDetailCreateRequestDataRelationships, instanceOfAppStoreReviewDetailCreateRequestDataRelationshipsAppStoreVersion, instanceOfAppStoreReviewDetailRelationships, instanceOfAppStoreReviewDetailRelationshipsAppStoreReviewAttachments, instanceOfAppStoreReviewDetailRelationshipsAppStoreReviewAttachmentsDataInner, instanceOfAppStoreReviewDetailResponse, instanceOfAppStoreReviewDetailUpdateRequest, instanceOfAppStoreReviewDetailUpdateRequestData, instanceOfAppStoreVersion, instanceOfAppStoreVersionAppClipDefaultExperienceLinkageRequest, instanceOfAppStoreVersionAppClipDefaultExperienceLinkageResponse, instanceOfAppStoreVersionAttributes, instanceOfAppStoreVersionBuildLinkageRequest, instanceOfAppStoreVersionBuildLinkageResponse, instanceOfAppStoreVersionCreateRequest, instanceOfAppStoreVersionCreateRequestData, instanceOfAppStoreVersionCreateRequestDataAttributes, instanceOfAppStoreVersionCreateRequestDataRelationships, instanceOfAppStoreVersionCreateRequestDataRelationshipsAppStoreVersionLocalizations, instanceOfAppStoreVersionCreateRequestDataRelationshipsBuild, instanceOfAppStoreVersionExperiment, instanceOfAppStoreVersionExperimentAttributes, instanceOfAppStoreVersionExperimentCreateRequest, instanceOfAppStoreVersionExperimentCreateRequestData, instanceOfAppStoreVersionExperimentCreateRequestDataAttributes, instanceOfAppStoreVersionExperimentRelationships, instanceOfAppStoreVersionExperimentRelationshipsAppStoreVersionExperimentTreatments, instanceOfAppStoreVersionExperimentResponse, instanceOfAppStoreVersionExperimentTreatment, instanceOfAppStoreVersionExperimentTreatmentAttributes, instanceOfAppStoreVersionExperimentTreatmentCreateRequest, instanceOfAppStoreVersionExperimentTreatmentCreateRequestData, instanceOfAppStoreVersionExperimentTreatmentCreateRequestDataAttributes, instanceOfAppStoreVersionExperimentTreatmentCreateRequestDataRelationships, instanceOfAppStoreVersionExperimentTreatmentCreateRequestDataRelationshipsAppStoreVersionExperiment, instanceOfAppStoreVersionExperimentTreatmentLocalization, instanceOfAppStoreVersionExperimentTreatmentLocalizationAttributes, instanceOfAppStoreVersionExperimentTreatmentLocalizationCreateRequest, instanceOfAppStoreVersionExperimentTreatmentLocalizationCreateRequestData, instanceOfAppStoreVersionExperimentTreatmentLocalizationCreateRequestDataAttributes, instanceOfAppStoreVersionExperimentTreatmentLocalizationCreateRequestDataRelationships, instanceOfAppStoreVersionExperimentTreatmentLocalizationCreateRequestDataRelationshipsAppStoreVersionExperimentTreatment, instanceOfAppStoreVersionExperimentTreatmentLocalizationRelationships, instanceOfAppStoreVersionExperimentTreatmentLocalizationRelationshipsAppStoreVersionExperimentTreatment, instanceOfAppStoreVersionExperimentTreatmentLocalizationRelationshipsAppStoreVersionExperimentTreatmentData, instanceOfAppStoreVersionExperimentTreatmentLocalizationResponse, instanceOfAppStoreVersionExperimentTreatmentLocalizationsResponse, instanceOfAppStoreVersionExperimentTreatmentRelationships, instanceOfAppStoreVersionExperimentTreatmentRelationshipsAppStoreVersionExperiment, instanceOfAppStoreVersionExperimentTreatmentRelationshipsAppStoreVersionExperimentData, instanceOfAppStoreVersionExperimentTreatmentRelationshipsAppStoreVersionExperimentTreatmentLocalizations, instanceOfAppStoreVersionExperimentTreatmentResponse, instanceOfAppStoreVersionExperimentTreatmentUpdateRequest, instanceOfAppStoreVersionExperimentTreatmentUpdateRequestData, instanceOfAppStoreVersionExperimentTreatmentUpdateRequestDataAttributes, instanceOfAppStoreVersionExperimentTreatmentsResponse, instanceOfAppStoreVersionExperimentUpdateRequest, instanceOfAppStoreVersionExperimentUpdateRequestData, instanceOfAppStoreVersionExperimentUpdateRequestDataAttributes, instanceOfAppStoreVersionExperimentsResponse, instanceOfAppStoreVersionLocalization, instanceOfAppStoreVersionLocalizationAttributes, instanceOfAppStoreVersionLocalizationCreateRequest, instanceOfAppStoreVersionLocalizationCreateRequestData, instanceOfAppStoreVersionLocalizationCreateRequestDataAttributes, instanceOfAppStoreVersionLocalizationRelationships, instanceOfAppStoreVersionLocalizationResponse, instanceOfAppStoreVersionLocalizationUpdateRequest, instanceOfAppStoreVersionLocalizationUpdateRequestData, instanceOfAppStoreVersionLocalizationUpdateRequestDataAttributes, instanceOfAppStoreVersionLocalizationsResponse, instanceOfAppStoreVersionPhasedRelease, instanceOfAppStoreVersionPhasedReleaseAttributes, instanceOfAppStoreVersionPhasedReleaseCreateRequest, instanceOfAppStoreVersionPhasedReleaseCreateRequestData, instanceOfAppStoreVersionPhasedReleaseCreateRequestDataAttributes, instanceOfAppStoreVersionPhasedReleaseResponse, instanceOfAppStoreVersionPhasedReleaseUpdateRequest, instanceOfAppStoreVersionPhasedReleaseUpdateRequestData, instanceOfAppStoreVersionPromotion, instanceOfAppStoreVersionPromotionCreateRequest, instanceOfAppStoreVersionPromotionCreateRequestData, instanceOfAppStoreVersionPromotionCreateRequestDataRelationships, instanceOfAppStoreVersionPromotionResponse, instanceOfAppStoreVersionRelationships, instanceOfAppStoreVersionRelationshipsAgeRatingDeclaration, instanceOfAppStoreVersionRelationshipsAppStoreVersionExperiments, instanceOfAppStoreVersionRelationshipsAppStoreVersionLocalizations, instanceOfAppStoreVersionRelationshipsAppStoreVersionPhasedRelease, instanceOfAppStoreVersionRelationshipsAppStoreVersionPhasedReleaseData, instanceOfAppStoreVersionRelationshipsAppStoreVersionSubmission, instanceOfAppStoreVersionRelationshipsAppStoreVersionSubmissionData, instanceOfAppStoreVersionRelationshipsBuild, instanceOfAppStoreVersionRelationshipsRoutingAppCoverage, instanceOfAppStoreVersionRelationshipsRoutingAppCoverageData, instanceOfAppStoreVersionReleaseRequest, instanceOfAppStoreVersionReleaseRequestCreateRequest, instanceOfAppStoreVersionReleaseRequestCreateRequestData, instanceOfAppStoreVersionReleaseRequestResponse, instanceOfAppStoreVersionResponse, instanceOfAppStoreVersionSubmission, instanceOfAppStoreVersionSubmissionCreateRequest, instanceOfAppStoreVersionSubmissionCreateRequestData, instanceOfAppStoreVersionSubmissionRelationships, instanceOfAppStoreVersionSubmissionResponse, instanceOfAppStoreVersionUpdateRequest, instanceOfAppStoreVersionUpdateRequestData, instanceOfAppStoreVersionUpdateRequestDataAttributes, instanceOfAppStoreVersionUpdateRequestDataRelationships, instanceOfAppStoreVersionsResponse, instanceOfAppUpdateRequest, instanceOfAppUpdateRequestData, instanceOfAppUpdateRequestDataAttributes, instanceOfAppUpdateRequestDataRelationships, instanceOfAppUpdateRequestDataRelationshipsAvailableTerritories, instanceOfAppUpdateRequestDataRelationshipsPrices, instanceOfAppsResponse, instanceOfBetaAppClipInvocation, instanceOfBetaAppClipInvocationAttributes, instanceOfBetaAppClipInvocationCreateRequest, instanceOfBetaAppClipInvocationCreateRequestData, instanceOfBetaAppClipInvocationCreateRequestDataAttributes, instanceOfBetaAppClipInvocationCreateRequestDataRelationships, instanceOfBetaAppClipInvocationCreateRequestDataRelationshipsBetaAppClipInvocationLocalizations, instanceOfBetaAppClipInvocationCreateRequestDataRelationshipsBuildBundle, instanceOfBetaAppClipInvocationCreateRequestDataRelationshipsBuildBundleData, instanceOfBetaAppClipInvocationLocalization, instanceOfBetaAppClipInvocationLocalizationAttributes, instanceOfBetaAppClipInvocationLocalizationCreateRequest, instanceOfBetaAppClipInvocationLocalizationCreateRequestData, instanceOfBetaAppClipInvocationLocalizationCreateRequestDataRelationships, instanceOfBetaAppClipInvocationLocalizationCreateRequestDataRelationshipsBetaAppClipInvocation, instanceOfBetaAppClipInvocationLocalizationInlineCreate, instanceOfBetaAppClipInvocationLocalizationInlineCreateAttributes, instanceOfBetaAppClipInvocationLocalizationInlineCreateRelationships, instanceOfBetaAppClipInvocationLocalizationInlineCreateRelationshipsBetaAppClipInvocation, instanceOfBetaAppClipInvocationLocalizationInlineCreateRelationshipsBetaAppClipInvocationData, instanceOfBetaAppClipInvocationLocalizationResponse, instanceOfBetaAppClipInvocationLocalizationUpdateRequest, instanceOfBetaAppClipInvocationLocalizationUpdateRequestData, instanceOfBetaAppClipInvocationLocalizationUpdateRequestDataAttributes, instanceOfBetaAppClipInvocationRelationships, instanceOfBetaAppClipInvocationRelationshipsBetaAppClipInvocationLocalizations, instanceOfBetaAppClipInvocationRelationshipsBetaAppClipInvocationLocalizationsDataInner, instanceOfBetaAppClipInvocationResponse, instanceOfBetaAppClipInvocationUpdateRequest, instanceOfBetaAppClipInvocationUpdateRequestData, instanceOfBetaAppClipInvocationsResponse, instanceOfBetaAppLocalization, instanceOfBetaAppLocalizationAttributes, instanceOfBetaAppLocalizationCreateRequest, instanceOfBetaAppLocalizationCreateRequestData, instanceOfBetaAppLocalizationCreateRequestDataAttributes, instanceOfBetaAppLocalizationResponse, instanceOfBetaAppLocalizationUpdateRequest, instanceOfBetaAppLocalizationUpdateRequestData, instanceOfBetaAppLocalizationUpdateRequestDataAttributes, instanceOfBetaAppLocalizationsResponse, instanceOfBetaAppReviewDetail, instanceOfBetaAppReviewDetailResponse, instanceOfBetaAppReviewDetailUpdateRequest, instanceOfBetaAppReviewDetailUpdateRequestData, instanceOfBetaAppReviewDetailsResponse, instanceOfBetaAppReviewSubmission, instanceOfBetaAppReviewSubmissionAttributes, instanceOfBetaAppReviewSubmissionCreateRequest, instanceOfBetaAppReviewSubmissionCreateRequestData, instanceOfBetaAppReviewSubmissionCreateRequestDataRelationships, instanceOfBetaAppReviewSubmissionCreateRequestDataRelationshipsBuild, instanceOfBetaAppReviewSubmissionRelationships, instanceOfBetaAppReviewSubmissionResponse, instanceOfBetaAppReviewSubmissionsResponse, instanceOfBetaBuildLocalization, instanceOfBetaBuildLocalizationAttributes, instanceOfBetaBuildLocalizationCreateRequest, instanceOfBetaBuildLocalizationCreateRequestData, instanceOfBetaBuildLocalizationCreateRequestDataAttributes, instanceOfBetaBuildLocalizationResponse, instanceOfBetaBuildLocalizationUpdateRequest, instanceOfBetaBuildLocalizationUpdateRequestData, instanceOfBetaBuildLocalizationUpdateRequestDataAttributes, instanceOfBetaBuildLocalizationsResponse, instanceOfBetaGroup, instanceOfBetaGroupAttributes, instanceOfBetaGroupBetaTestersLinkagesRequest, instanceOfBetaGroupBetaTestersLinkagesResponse, instanceOfBetaGroupBuildsLinkagesRequest, instanceOfBetaGroupBuildsLinkagesResponse, instanceOfBetaGroupCreateRequest, instanceOfBetaGroupCreateRequestData, instanceOfBetaGroupCreateRequestDataAttributes, instanceOfBetaGroupCreateRequestDataRelationships, instanceOfBetaGroupCreateRequestDataRelationshipsBetaTesters, instanceOfBetaGroupCreateRequestDataRelationshipsBuilds, instanceOfBetaGroupRelationships, instanceOfBetaGroupRelationshipsBetaTesters, instanceOfBetaGroupRelationshipsBetaTestersDataInner, instanceOfBetaGroupResponse, instanceOfBetaGroupUpdateRequest, instanceOfBetaGroupUpdateRequestData, instanceOfBetaGroupUpdateRequestDataAttributes, instanceOfBetaGroupsResponse, instanceOfBetaLicenseAgreement, instanceOfBetaLicenseAgreementAttributes, instanceOfBetaLicenseAgreementResponse, instanceOfBetaLicenseAgreementUpdateRequest, instanceOfBetaLicenseAgreementUpdateRequestData, instanceOfBetaLicenseAgreementsResponse, instanceOfBetaTester, instanceOfBetaTesterAppsLinkagesRequest, instanceOfBetaTesterAppsLinkagesResponse, instanceOfBetaTesterAttributes, instanceOfBetaTesterBetaGroupsLinkagesRequest, instanceOfBetaTesterBetaGroupsLinkagesResponse, instanceOfBetaTesterBuildsLinkagesRequest, instanceOfBetaTesterBuildsLinkagesResponse, instanceOfBetaTesterCreateRequest, instanceOfBetaTesterCreateRequestData, instanceOfBetaTesterCreateRequestDataAttributes, instanceOfBetaTesterCreateRequestDataRelationships, instanceOfBetaTesterCreateRequestDataRelationshipsBetaGroups, instanceOfBetaTesterInvitation, instanceOfBetaTesterInvitationCreateRequest, instanceOfBetaTesterInvitationCreateRequestData, instanceOfBetaTesterInvitationCreateRequestDataRelationships, instanceOfBetaTesterInvitationCreateRequestDataRelationshipsBetaTester, instanceOfBetaTesterInvitationResponse, instanceOfBetaTesterRelationships, instanceOfBetaTesterRelationshipsApps, instanceOfBetaTesterResponse, instanceOfBetaTestersResponse, instanceOfBuild, instanceOfBuildAppEncryptionDeclarationLinkageRequest, instanceOfBuildAppEncryptionDeclarationLinkageResponse, instanceOfBuildAttributes, instanceOfBuildBetaDetail, instanceOfBuildBetaDetailAttributes, instanceOfBuildBetaDetailResponse, instanceOfBuildBetaDetailUpdateRequest, instanceOfBuildBetaDetailUpdateRequestData, instanceOfBuildBetaDetailUpdateRequestDataAttributes, instanceOfBuildBetaDetailsResponse, instanceOfBuildBetaGroupsLinkagesRequest, instanceOfBuildBetaNotification, instanceOfBuildBetaNotificationCreateRequest, instanceOfBuildBetaNotificationCreateRequestData, instanceOfBuildBetaNotificationResponse, instanceOfBuildBundle, instanceOfBuildBundleAttributes, instanceOfBuildBundleFileSize, instanceOfBuildBundleFileSizeAttributes, instanceOfBuildBundleFileSizesResponse, instanceOfBuildBundleRelationships, instanceOfBuildBundleRelationshipsAppClipDomainCacheStatus, instanceOfBuildBundleRelationshipsAppClipDomainCacheStatusData, instanceOfBuildBundleRelationshipsBetaAppClipInvocations, instanceOfBuildBundleRelationshipsBuildBundleFileSizes, instanceOfBuildBundleRelationshipsBuildBundleFileSizesDataInner, instanceOfBuildIcon, instanceOfBuildIconAttributes, instanceOfBuildIconsResponse, instanceOfBuildIndividualTestersLinkagesRequest, instanceOfBuildIndividualTestersLinkagesResponse, instanceOfBuildRelationships, instanceOfBuildRelationshipsAppEncryptionDeclaration, instanceOfBuildRelationshipsBetaAppReviewSubmission, instanceOfBuildRelationshipsBetaAppReviewSubmissionData, instanceOfBuildRelationshipsBetaBuildLocalizations, instanceOfBuildRelationshipsBetaBuildLocalizationsDataInner, instanceOfBuildRelationshipsBuildBetaDetail, instanceOfBuildRelationshipsBuildBetaDetailData, instanceOfBuildRelationshipsBuildBundles, instanceOfBuildRelationshipsIcons, instanceOfBuildRelationshipsIconsDataInner, instanceOfBuildRelationshipsPreReleaseVersion, instanceOfBuildResponse, instanceOfBuildUpdateRequest, instanceOfBuildUpdateRequestData, instanceOfBuildUpdateRequestDataAttributes, instanceOfBuildUpdateRequestDataRelationships, instanceOfBuildUpdateRequestDataRelationshipsAppEncryptionDeclaration, instanceOfBuildsResponse, instanceOfBundleId, instanceOfBundleIdAttributes, instanceOfBundleIdCapabilitiesResponse, instanceOfBundleIdCapability, instanceOfBundleIdCapabilityAttributes, instanceOfBundleIdCapabilityCreateRequest, instanceOfBundleIdCapabilityCreateRequestData, instanceOfBundleIdCapabilityCreateRequestDataAttributes, instanceOfBundleIdCapabilityCreateRequestDataRelationships, instanceOfBundleIdCapabilityCreateRequestDataRelationshipsBundleId, instanceOfBundleIdCapabilityCreateRequestDataRelationshipsBundleIdData, instanceOfBundleIdCapabilityResponse, instanceOfBundleIdCapabilityUpdateRequest, instanceOfBundleIdCapabilityUpdateRequestData, instanceOfBundleIdCreateRequest, instanceOfBundleIdCreateRequestData, instanceOfBundleIdCreateRequestDataAttributes, instanceOfBundleIdRelationships, instanceOfBundleIdRelationshipsBundleIdCapabilities, instanceOfBundleIdRelationshipsBundleIdCapabilitiesDataInner, instanceOfBundleIdRelationshipsProfiles, instanceOfBundleIdRelationshipsProfilesDataInner, instanceOfBundleIdResponse, instanceOfBundleIdUpdateRequest, instanceOfBundleIdUpdateRequestData, instanceOfBundleIdUpdateRequestDataAttributes, instanceOfBundleIdsResponse, instanceOfCapabilityOption, instanceOfCapabilitySetting, instanceOfCertificate, instanceOfCertificateAttributes, instanceOfCertificateCreateRequest, instanceOfCertificateCreateRequestData, instanceOfCertificateCreateRequestDataAttributes, instanceOfCertificateResponse, instanceOfCertificatesResponse, instanceOfCiAction, instanceOfCiActionTestConfiguration, instanceOfCiArtifact, instanceOfCiArtifactAttributes, instanceOfCiArtifactResponse, instanceOfCiArtifactsResponse, instanceOfCiBranchPatterns, instanceOfCiBranchPatternsPatternsInner, instanceOfCiBranchStartCondition, instanceOfCiBuildAction, instanceOfCiBuildActionAttributes, instanceOfCiBuildActionRelationships, instanceOfCiBuildActionRelationshipsBuildRun, instanceOfCiBuildActionRelationshipsBuildRunData, instanceOfCiBuildActionResponse, instanceOfCiBuildActionsResponse, instanceOfCiBuildRun, instanceOfCiBuildRunAttributes, instanceOfCiBuildRunAttributesSourceCommit, instanceOfCiBuildRunCreateRequest, instanceOfCiBuildRunCreateRequestData, instanceOfCiBuildRunCreateRequestDataAttributes, instanceOfCiBuildRunCreateRequestDataRelationships, instanceOfCiBuildRunCreateRequestDataRelationshipsBuildRun, instanceOfCiBuildRunCreateRequestDataRelationshipsPullRequest, instanceOfCiBuildRunCreateRequestDataRelationshipsSourceBranchOrTag, instanceOfCiBuildRunCreateRequestDataRelationshipsWorkflow, instanceOfCiBuildRunRelationships, instanceOfCiBuildRunRelationshipsPullRequest, instanceOfCiBuildRunRelationshipsPullRequestData, instanceOfCiBuildRunRelationshipsSourceBranchOrTag, instanceOfCiBuildRunRelationshipsSourceBranchOrTagData, instanceOfCiBuildRunRelationshipsWorkflow, instanceOfCiBuildRunRelationshipsWorkflowData, instanceOfCiBuildRunResponse, instanceOfCiBuildRunsResponse, instanceOfCiFilesAndFoldersRule, instanceOfCiGitUser, instanceOfCiIssue, instanceOfCiIssueAttributes, instanceOfCiIssueCounts, instanceOfCiIssueResponse, instanceOfCiIssuesResponse, instanceOfCiMacOsVersion, instanceOfCiMacOsVersionAttributes, instanceOfCiMacOsVersionRelationships, instanceOfCiMacOsVersionRelationshipsXcodeVersions, instanceOfCiMacOsVersionRelationshipsXcodeVersionsDataInner, instanceOfCiMacOsVersionResponse, instanceOfCiMacOsVersionsResponse, instanceOfCiProduct, instanceOfCiProductAttributes, instanceOfCiProductRelationships, instanceOfCiProductRelationshipsBundleId, instanceOfCiProductRelationshipsPrimaryRepositories, instanceOfCiProductRelationshipsPrimaryRepositoriesDataInner, instanceOfCiProductResponse, instanceOfCiProductsResponse, instanceOfCiPullRequestStartCondition, instanceOfCiScheduledStartCondition, instanceOfCiScheduledStartConditionSchedule, instanceOfCiStartConditionFileMatcher, instanceOfCiTagPatterns, instanceOfCiTagStartCondition, instanceOfCiTestDestination, instanceOfCiTestResult, instanceOfCiTestResultAttributes, instanceOfCiTestResultAttributesDestinationTestResultsInner, instanceOfCiTestResultResponse, instanceOfCiTestResultsResponse, instanceOfCiWorkflow, instanceOfCiWorkflowAttributes, instanceOfCiWorkflowCreateRequest, instanceOfCiWorkflowCreateRequestData, instanceOfCiWorkflowCreateRequestDataAttributes, instanceOfCiWorkflowCreateRequestDataRelationships, instanceOfCiWorkflowCreateRequestDataRelationshipsMacOsVersion, instanceOfCiWorkflowCreateRequestDataRelationshipsProduct, instanceOfCiWorkflowCreateRequestDataRelationshipsRepository, instanceOfCiWorkflowCreateRequestDataRelationshipsXcodeVersion, instanceOfCiWorkflowRelationships, instanceOfCiWorkflowRelationshipsMacOsVersion, instanceOfCiWorkflowRelationshipsMacOsVersionData, instanceOfCiWorkflowRelationshipsRepository, instanceOfCiWorkflowRelationshipsXcodeVersion, instanceOfCiWorkflowResponse, instanceOfCiWorkflowUpdateRequest, instanceOfCiWorkflowUpdateRequestData, instanceOfCiWorkflowUpdateRequestDataAttributes, instanceOfCiWorkflowUpdateRequestDataRelationships, instanceOfCiWorkflowUpdateRequestDataRelationshipsMacOsVersion, instanceOfCiWorkflowUpdateRequestDataRelationshipsXcodeVersion, instanceOfCiWorkflowsResponse, instanceOfCiXcodeVersion, instanceOfCiXcodeVersionAttributes, instanceOfCiXcodeVersionAttributesTestDestinationsInner, instanceOfCiXcodeVersionAttributesTestDestinationsInnerAvailableRuntimesInner, instanceOfCiXcodeVersionRelationships, instanceOfCiXcodeVersionRelationshipsMacOsVersions, instanceOfCiXcodeVersionResponse, instanceOfCiXcodeVersionsResponse, instanceOfCustomerReview, instanceOfCustomerReviewAttributes, instanceOfCustomerReviewRelationships, instanceOfCustomerReviewRelationshipsResponse, instanceOfCustomerReviewRelationshipsResponseData, instanceOfCustomerReviewResponse, instanceOfCustomerReviewResponseV1, instanceOfCustomerReviewResponseV1Attributes, instanceOfCustomerReviewResponseV1CreateRequest, instanceOfCustomerReviewResponseV1CreateRequestData, instanceOfCustomerReviewResponseV1CreateRequestDataAttributes, instanceOfCustomerReviewResponseV1CreateRequestDataRelationships, instanceOfCustomerReviewResponseV1CreateRequestDataRelationshipsReview, instanceOfCustomerReviewResponseV1Relationships, instanceOfCustomerReviewResponseV1RelationshipsReview, instanceOfCustomerReviewResponseV1RelationshipsReviewData, instanceOfCustomerReviewResponseV1Response, instanceOfCustomerReviewsResponse, instanceOfDevice, instanceOfDeviceAttributes, instanceOfDeviceCreateRequest, instanceOfDeviceCreateRequestData, instanceOfDeviceCreateRequestDataAttributes, instanceOfDeviceResponse, instanceOfDeviceUpdateRequest, instanceOfDeviceUpdateRequestData, instanceOfDeviceUpdateRequestDataAttributes, instanceOfDevicesResponse, instanceOfDiagnosticLog, instanceOfDiagnosticLogCallStackNode, instanceOfDiagnosticLogs, instanceOfDiagnosticLogsProductDataInner, instanceOfDiagnosticLogsProductDataInnerDiagnosticInsightsInner, instanceOfDiagnosticLogsProductDataInnerDiagnosticLogsInner, instanceOfDiagnosticLogsProductDataInnerDiagnosticLogsInnerCallStackTreeInner, instanceOfDiagnosticLogsProductDataInnerDiagnosticLogsInnerCallStackTreeInnerCallStacksInner, instanceOfDiagnosticLogsProductDataInnerDiagnosticLogsInnerDiagnosticMetaData, instanceOfDiagnosticSignature, instanceOfDiagnosticSignatureAttributes, instanceOfDiagnosticSignaturesResponse, instanceOfDocumentLinks, instanceOfEndUserLicenseAgreement, instanceOfEndUserLicenseAgreementCreateRequest, instanceOfEndUserLicenseAgreementCreateRequestData, instanceOfEndUserLicenseAgreementCreateRequestDataAttributes, instanceOfEndUserLicenseAgreementCreateRequestDataRelationships, instanceOfEndUserLicenseAgreementCreateRequestDataRelationshipsTerritories, instanceOfEndUserLicenseAgreementRelationships, instanceOfEndUserLicenseAgreementResponse, instanceOfEndUserLicenseAgreementUpdateRequest, instanceOfEndUserLicenseAgreementUpdateRequestData, instanceOfEndUserLicenseAgreementUpdateRequestDataRelationships, instanceOfErrorResponse, instanceOfErrorResponseErrorsInner, instanceOfErrorSourceParameter, instanceOfErrorSourcePointer, instanceOfFileLocation, instanceOfGameCenterEnabledVersion, instanceOfGameCenterEnabledVersionAttributes, instanceOfGameCenterEnabledVersionCompatibleVersionsLinkagesRequest, instanceOfGameCenterEnabledVersionCompatibleVersionsLinkagesResponse, instanceOfGameCenterEnabledVersionRelationships, instanceOfGameCenterEnabledVersionsResponse, instanceOfHttpHeader, instanceOfImageAsset, instanceOfInAppPurchase, instanceOfInAppPurchaseAppStoreReviewScreenshot, instanceOfInAppPurchaseAppStoreReviewScreenshotCreateRequest, instanceOfInAppPurchaseAppStoreReviewScreenshotCreateRequestData, instanceOfInAppPurchaseAppStoreReviewScreenshotCreateRequestDataRelationships, instanceOfInAppPurchaseAppStoreReviewScreenshotCreateRequestDataRelationshipsInAppPurchaseV2, instanceOfInAppPurchaseAppStoreReviewScreenshotRelationships, instanceOfInAppPurchaseAppStoreReviewScreenshotRelationshipsInAppPurchaseV2, instanceOfInAppPurchaseAppStoreReviewScreenshotResponse, instanceOfInAppPurchaseAppStoreReviewScreenshotUpdateRequest, instanceOfInAppPurchaseAppStoreReviewScreenshotUpdateRequestData, instanceOfInAppPurchaseAttributes, instanceOfInAppPurchaseContent, instanceOfInAppPurchaseContentAttributes, instanceOfInAppPurchaseContentResponse, instanceOfInAppPurchaseLocalization, instanceOfInAppPurchaseLocalizationAttributes, instanceOfInAppPurchaseLocalizationCreateRequest, instanceOfInAppPurchaseLocalizationCreateRequestData, instanceOfInAppPurchaseLocalizationCreateRequestDataAttributes, instanceOfInAppPurchaseLocalizationResponse, instanceOfInAppPurchaseLocalizationUpdateRequest, instanceOfInAppPurchaseLocalizationUpdateRequestData, instanceOfInAppPurchaseLocalizationUpdateRequestDataAttributes, instanceOfInAppPurchaseLocalizationsResponse, instanceOfInAppPurchasePrice, instanceOfInAppPurchasePriceAttributes, instanceOfInAppPurchasePriceInlineCreate, instanceOfInAppPurchasePriceInlineCreateRelationships, instanceOfInAppPurchasePriceInlineCreateRelationshipsInAppPurchasePricePoint, instanceOfInAppPurchasePriceInlineCreateRelationshipsInAppPurchaseV2, instanceOfInAppPurchasePricePoint, instanceOfInAppPurchasePricePointAttributes, instanceOfInAppPurchasePricePointRelationships, instanceOfInAppPurchasePricePointsResponse, instanceOfInAppPurchasePriceRelationships, instanceOfInAppPurchasePriceRelationshipsInAppPurchasePricePoint, instanceOfInAppPurchasePriceRelationshipsInAppPurchasePricePointData, instanceOfInAppPurchasePriceSchedule, instanceOfInAppPurchasePriceScheduleCreateRequest, instanceOfInAppPurchasePriceScheduleCreateRequestData, instanceOfInAppPurchasePriceScheduleCreateRequestDataRelationships, instanceOfInAppPurchasePriceScheduleCreateRequestDataRelationshipsManualPrices, instanceOfInAppPurchasePriceScheduleRelationships, instanceOfInAppPurchasePriceScheduleRelationshipsManualPrices, instanceOfInAppPurchasePriceScheduleRelationshipsManualPricesDataInner, instanceOfInAppPurchasePriceScheduleResponse, instanceOfInAppPurchasePricesResponse, instanceOfInAppPurchaseRelationships, instanceOfInAppPurchaseResponse, instanceOfInAppPurchaseSubmission, instanceOfInAppPurchaseSubmissionCreateRequest, instanceOfInAppPurchaseSubmissionCreateRequestData, instanceOfInAppPurchaseSubmissionResponse, instanceOfInAppPurchaseV2, instanceOfInAppPurchaseV2Attributes, instanceOfInAppPurchaseV2CreateRequest, instanceOfInAppPurchaseV2CreateRequestData, instanceOfInAppPurchaseV2CreateRequestDataAttributes, instanceOfInAppPurchaseV2Relationships, instanceOfInAppPurchaseV2RelationshipsAppStoreReviewScreenshot, instanceOfInAppPurchaseV2RelationshipsAppStoreReviewScreenshotData, instanceOfInAppPurchaseV2RelationshipsContent, instanceOfInAppPurchaseV2RelationshipsContentData, instanceOfInAppPurchaseV2RelationshipsIapPriceSchedule, instanceOfInAppPurchaseV2RelationshipsIapPriceScheduleData, instanceOfInAppPurchaseV2RelationshipsInAppPurchaseLocalizations, instanceOfInAppPurchaseV2RelationshipsInAppPurchaseLocalizationsDataInner, instanceOfInAppPurchaseV2RelationshipsPricePoints, instanceOfInAppPurchaseV2RelationshipsPromotedPurchase, instanceOfInAppPurchaseV2Response, instanceOfInAppPurchaseV2UpdateRequest, instanceOfInAppPurchaseV2UpdateRequestData, instanceOfInAppPurchaseV2UpdateRequestDataAttributes, instanceOfInAppPurchasesResponse, instanceOfInAppPurchasesV2Response, instanceOfMetricsInsight, instanceOfMetricsInsightPopulationsInner, instanceOfPagedDocumentLinks, instanceOfPagingInformation, instanceOfPagingInformationPaging, instanceOfPerfPowerMetric, instanceOfPerfPowerMetricAttributes, instanceOfPreReleaseVersionsResponse, instanceOfPrereleaseVersion, instanceOfPrereleaseVersionAttributes, instanceOfPrereleaseVersionRelationships, instanceOfPrereleaseVersionResponse, instanceOfProfile, instanceOfProfileAttributes, instanceOfProfileCreateRequest, instanceOfProfileCreateRequestData, instanceOfProfileCreateRequestDataAttributes, instanceOfProfileCreateRequestDataRelationships, instanceOfProfileCreateRequestDataRelationshipsCertificates, instanceOfProfileCreateRequestDataRelationshipsDevices, instanceOfProfileRelationships, instanceOfProfileRelationshipsCertificates, instanceOfProfileRelationshipsCertificatesDataInner, instanceOfProfileRelationshipsDevices, instanceOfProfileRelationshipsDevicesDataInner, instanceOfProfileResponse, instanceOfProfilesResponse, instanceOfPromotedPurchase, instanceOfPromotedPurchaseAttributes, instanceOfPromotedPurchaseCreateRequest, instanceOfPromotedPurchaseCreateRequestData, instanceOfPromotedPurchaseCreateRequestDataAttributes, instanceOfPromotedPurchaseCreateRequestDataRelationships, instanceOfPromotedPurchaseCreateRequestDataRelationshipsSubscription, instanceOfPromotedPurchaseImage, instanceOfPromotedPurchaseImageAttributes, instanceOfPromotedPurchaseImageCreateRequest, instanceOfPromotedPurchaseImageCreateRequestData, instanceOfPromotedPurchaseImageCreateRequestDataRelationships, instanceOfPromotedPurchaseImageCreateRequestDataRelationshipsPromotedPurchase, instanceOfPromotedPurchaseImageRelationships, instanceOfPromotedPurchaseImageResponse, instanceOfPromotedPurchaseImageUpdateRequest, instanceOfPromotedPurchaseImageUpdateRequestData, instanceOfPromotedPurchaseImagesResponse, instanceOfPromotedPurchaseRelationships, instanceOfPromotedPurchaseRelationshipsPromotionImages, instanceOfPromotedPurchaseRelationshipsPromotionImagesDataInner, instanceOfPromotedPurchaseRelationshipsSubscription, instanceOfPromotedPurchaseRelationshipsSubscriptionData, instanceOfPromotedPurchaseResponse, instanceOfPromotedPurchaseUpdateRequest, instanceOfPromotedPurchaseUpdateRequestData, instanceOfPromotedPurchaseUpdateRequestDataAttributes, instanceOfPromotedPurchasesResponse, instanceOfResourceLinks, instanceOfReviewSubmission, instanceOfReviewSubmissionAttributes, instanceOfReviewSubmissionCreateRequest, instanceOfReviewSubmissionCreateRequestData, instanceOfReviewSubmissionCreateRequestDataAttributes, instanceOfReviewSubmissionItem, instanceOfReviewSubmissionItemAttributes, instanceOfReviewSubmissionItemCreateRequest, instanceOfReviewSubmissionItemCreateRequestData, instanceOfReviewSubmissionItemCreateRequestDataRelationships, instanceOfReviewSubmissionItemCreateRequestDataRelationshipsAppEvent, instanceOfReviewSubmissionItemCreateRequestDataRelationshipsAppStoreVersionExperiment, instanceOfReviewSubmissionItemCreateRequestDataRelationshipsReviewSubmission, instanceOfReviewSubmissionItemRelationships, instanceOfReviewSubmissionItemResponse, instanceOfReviewSubmissionItemUpdateRequest, instanceOfReviewSubmissionItemUpdateRequestData, instanceOfReviewSubmissionItemUpdateRequestDataAttributes, instanceOfReviewSubmissionItemsResponse, instanceOfReviewSubmissionRelationships, instanceOfReviewSubmissionRelationshipsItems, instanceOfReviewSubmissionRelationshipsItemsDataInner, instanceOfReviewSubmissionResponse, instanceOfReviewSubmissionUpdateRequest, instanceOfReviewSubmissionUpdateRequestData, instanceOfReviewSubmissionUpdateRequestDataAttributes, instanceOfReviewSubmissionsResponse, instanceOfRoutingAppCoverage, instanceOfRoutingAppCoverageCreateRequest, instanceOfRoutingAppCoverageCreateRequestData, instanceOfRoutingAppCoverageResponse, instanceOfRoutingAppCoverageUpdateRequest, instanceOfRoutingAppCoverageUpdateRequestData, instanceOfSandboxTesterV2, instanceOfSandboxTesterV2Attributes, instanceOfSandboxTesterV2Response, instanceOfSandboxTesterV2UpdateRequest, instanceOfSandboxTesterV2UpdateRequestData, instanceOfSandboxTesterV2UpdateRequestDataAttributes, instanceOfSandboxTestersClearPurchaseHistoryRequestV2, instanceOfSandboxTestersClearPurchaseHistoryRequestV2CreateRequest, instanceOfSandboxTestersClearPurchaseHistoryRequestV2CreateRequestData, instanceOfSandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataRelationships, instanceOfSandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataRelationshipsSandboxTesters, instanceOfSandboxTestersClearPurchaseHistoryRequestV2CreateRequestDataRelationshipsSandboxTestersDataInner, instanceOfSandboxTestersClearPurchaseHistoryRequestV2Response, instanceOfSandboxTestersV2Response, instanceOfScmGitReference, instanceOfScmGitReferenceAttributes, instanceOfScmGitReferenceRelationships, instanceOfScmGitReferenceResponse, instanceOfScmGitReferencesResponse, instanceOfScmProvider, instanceOfScmProviderAttributes, instanceOfScmProviderResponse, instanceOfScmProviderType, instanceOfScmProvidersResponse, instanceOfScmPullRequest, instanceOfScmPullRequestAttributes, instanceOfScmPullRequestResponse, instanceOfScmPullRequestsResponse, instanceOfScmRepositoriesResponse, instanceOfScmRepository, instanceOfScmRepositoryAttributes, instanceOfScmRepositoryRelationships, instanceOfScmRepositoryRelationshipsScmProvider, instanceOfScmRepositoryRelationshipsScmProviderData, instanceOfScmRepositoryResponse, instanceOfSubscription, instanceOfSubscriptionAppStoreReviewScreenshot, instanceOfSubscriptionAppStoreReviewScreenshotCreateRequest, instanceOfSubscriptionAppStoreReviewScreenshotCreateRequestData, instanceOfSubscriptionAppStoreReviewScreenshotCreateRequestDataRelationships, instanceOfSubscriptionAppStoreReviewScreenshotCreateRequestDataRelationshipsSubscription, instanceOfSubscriptionAppStoreReviewScreenshotRelationships, instanceOfSubscriptionAppStoreReviewScreenshotResponse, instanceOfSubscriptionAppStoreReviewScreenshotUpdateRequest, instanceOfSubscriptionAppStoreReviewScreenshotUpdateRequestData, instanceOfSubscriptionAttributes, instanceOfSubscriptionCreateRequest, instanceOfSubscriptionCreateRequestData, instanceOfSubscriptionCreateRequestDataAttributes, instanceOfSubscriptionCreateRequestDataRelationships, instanceOfSubscriptionGracePeriod, instanceOfSubscriptionGracePeriodAttributes, instanceOfSubscriptionGracePeriodResponse, instanceOfSubscriptionGracePeriodUpdateRequest, instanceOfSubscriptionGracePeriodUpdateRequestData, instanceOfSubscriptionGroup, instanceOfSubscriptionGroupAttributes, instanceOfSubscriptionGroupCreateRequest, instanceOfSubscriptionGroupCreateRequestData, instanceOfSubscriptionGroupCreateRequestDataAttributes, instanceOfSubscriptionGroupLocalization, instanceOfSubscriptionGroupLocalizationAttributes, instanceOfSubscriptionGroupLocalizationCreateRequest, instanceOfSubscriptionGroupLocalizationCreateRequestData, instanceOfSubscriptionGroupLocalizationCreateRequestDataAttributes, instanceOfSubscriptionGroupLocalizationCreateRequestDataRelationships, instanceOfSubscriptionGroupLocalizationCreateRequestDataRelationshipsSubscriptionGroup, instanceOfSubscriptionGroupLocalizationRelationships, instanceOfSubscriptionGroupLocalizationRelationshipsSubscriptionGroup, instanceOfSubscriptionGroupLocalizationResponse, instanceOfSubscriptionGroupLocalizationUpdateRequest, instanceOfSubscriptionGroupLocalizationUpdateRequestData, instanceOfSubscriptionGroupLocalizationUpdateRequestDataAttributes, instanceOfSubscriptionGroupLocalizationsResponse, instanceOfSubscriptionGroupRelationships, instanceOfSubscriptionGroupRelationshipsSubscriptionGroupLocalizations, instanceOfSubscriptionGroupRelationshipsSubscriptionGroupLocalizationsDataInner, instanceOfSubscriptionGroupRelationshipsSubscriptions, instanceOfSubscriptionGroupResponse, instanceOfSubscriptionGroupSubmission, instanceOfSubscriptionGroupSubmissionCreateRequest, instanceOfSubscriptionGroupSubmissionCreateRequestData, instanceOfSubscriptionGroupSubmissionResponse, instanceOfSubscriptionGroupUpdateRequest, instanceOfSubscriptionGroupUpdateRequestData, instanceOfSubscriptionGroupsResponse, instanceOfSubscriptionIntroductoryOffer, instanceOfSubscriptionIntroductoryOfferAttributes, instanceOfSubscriptionIntroductoryOfferCreateRequest, instanceOfSubscriptionIntroductoryOfferCreateRequestData, instanceOfSubscriptionIntroductoryOfferCreateRequestDataRelationships, instanceOfSubscriptionIntroductoryOfferInlineCreate, instanceOfSubscriptionIntroductoryOfferInlineCreateAttributes, instanceOfSubscriptionIntroductoryOfferInlineCreateRelationships, instanceOfSubscriptionIntroductoryOfferInlineCreateRelationshipsSubscriptionPricePoint, instanceOfSubscriptionIntroductoryOfferInlineCreateRelationshipsTerritory, instanceOfSubscriptionIntroductoryOfferRelationships, instanceOfSubscriptionIntroductoryOfferRelationshipsSubscriptionPricePoint, instanceOfSubscriptionIntroductoryOfferRelationshipsSubscriptionPricePointData, instanceOfSubscriptionIntroductoryOfferResponse, instanceOfSubscriptionIntroductoryOfferUpdateRequest, instanceOfSubscriptionIntroductoryOfferUpdateRequestData, instanceOfSubscriptionIntroductoryOfferUpdateRequestDataAttributes, instanceOfSubscriptionIntroductoryOffersLinkagesRequest, instanceOfSubscriptionIntroductoryOffersLinkagesResponse, instanceOfSubscriptionIntroductoryOffersResponse, instanceOfSubscriptionLocalization, instanceOfSubscriptionLocalizationCreateRequest, instanceOfSubscriptionLocalizationCreateRequestData, instanceOfSubscriptionLocalizationResponse, instanceOfSubscriptionLocalizationUpdateRequest, instanceOfSubscriptionLocalizationUpdateRequestData, instanceOfSubscriptionLocalizationsResponse, instanceOfSubscriptionOfferCode, instanceOfSubscriptionOfferCodeAttributes, instanceOfSubscriptionOfferCodeCreateRequest, instanceOfSubscriptionOfferCodeCreateRequestData, instanceOfSubscriptionOfferCodeCreateRequestDataAttributes, instanceOfSubscriptionOfferCodeCreateRequestDataRelationships, instanceOfSubscriptionOfferCodeCreateRequestDataRelationshipsPrices, instanceOfSubscriptionOfferCodeCustomCode, instanceOfSubscriptionOfferCodeCustomCodeAttributes, instanceOfSubscriptionOfferCodeCustomCodeCreateRequest, instanceOfSubscriptionOfferCodeCustomCodeCreateRequestData, instanceOfSubscriptionOfferCodeCustomCodeCreateRequestDataAttributes, instanceOfSubscriptionOfferCodeCustomCodeCreateRequestDataRelationships, instanceOfSubscriptionOfferCodeCustomCodeCreateRequestDataRelationshipsOfferCode, instanceOfSubscriptionOfferCodeCustomCodeRelationships, instanceOfSubscriptionOfferCodeCustomCodeRelationshipsOfferCode, instanceOfSubscriptionOfferCodeCustomCodeRelationshipsOfferCodeData, instanceOfSubscriptionOfferCodeCustomCodeResponse, instanceOfSubscriptionOfferCodeCustomCodeUpdateRequest, instanceOfSubscriptionOfferCodeCustomCodeUpdateRequestData, instanceOfSubscriptionOfferCodeCustomCodeUpdateRequestDataAttributes, instanceOfSubscriptionOfferCodeCustomCodesResponse, instanceOfSubscriptionOfferCodeOneTimeUseCode, instanceOfSubscriptionOfferCodeOneTimeUseCodeAttributes, instanceOfSubscriptionOfferCodeOneTimeUseCodeCreateRequest, instanceOfSubscriptionOfferCodeOneTimeUseCodeCreateRequestData, instanceOfSubscriptionOfferCodeOneTimeUseCodeCreateRequestDataAttributes, instanceOfSubscriptionOfferCodeOneTimeUseCodeResponse, instanceOfSubscriptionOfferCodeOneTimeUseCodeUpdateRequest, instanceOfSubscriptionOfferCodeOneTimeUseCodeUpdateRequestData, instanceOfSubscriptionOfferCodeOneTimeUseCodeValue, instanceOfSubscriptionOfferCodeOneTimeUseCodesResponse, instanceOfSubscriptionOfferCodePrice, instanceOfSubscriptionOfferCodePriceInlineCreate, instanceOfSubscriptionOfferCodePriceInlineCreateRelationships, instanceOfSubscriptionOfferCodePriceRelationships, instanceOfSubscriptionOfferCodePricesResponse, instanceOfSubscriptionOfferCodeRelationships, instanceOfSubscriptionOfferCodeRelationshipsCustomCodes, instanceOfSubscriptionOfferCodeRelationshipsCustomCodesDataInner, instanceOfSubscriptionOfferCodeRelationshipsOneTimeUseCodes, instanceOfSubscriptionOfferCodeRelationshipsOneTimeUseCodesDataInner, instanceOfSubscriptionOfferCodeRelationshipsPrices, instanceOfSubscriptionOfferCodeRelationshipsPricesDataInner, instanceOfSubscriptionOfferCodeResponse, instanceOfSubscriptionOfferCodeUpdateRequest, instanceOfSubscriptionOfferCodeUpdateRequestData, instanceOfSubscriptionOfferCodesResponse, instanceOfSubscriptionPrice, instanceOfSubscriptionPriceAttributes, instanceOfSubscriptionPriceCreateRequest, instanceOfSubscriptionPriceCreateRequestData, instanceOfSubscriptionPriceCreateRequestDataRelationships, instanceOfSubscriptionPriceCreateRequestDataRelationshipsSubscriptionPricePoint, instanceOfSubscriptionPriceInlineCreate, instanceOfSubscriptionPriceInlineCreateAttributes, instanceOfSubscriptionPricePoint, instanceOfSubscriptionPricePointAttributes, instanceOfSubscriptionPricePointInlineCreate, instanceOfSubscriptionPricePointResponse, instanceOfSubscriptionPricePointsResponse, instanceOfSubscriptionPriceResponse, instanceOfSubscriptionPricesLinkagesRequest, instanceOfSubscriptionPricesLinkagesResponse, instanceOfSubscriptionPricesResponse, instanceOfSubscriptionPromotionalOffer, instanceOfSubscriptionPromotionalOfferAttributes, instanceOfSubscriptionPromotionalOfferCreateRequest, instanceOfSubscriptionPromotionalOfferCreateRequestData, instanceOfSubscriptionPromotionalOfferCreateRequestDataRelationships, instanceOfSubscriptionPromotionalOfferCreateRequestDataRelationshipsPrices, instanceOfSubscriptionPromotionalOfferInlineCreate, instanceOfSubscriptionPromotionalOfferInlineCreateAttributes, instanceOfSubscriptionPromotionalOfferInlineCreateRelationships, instanceOfSubscriptionPromotionalOfferInlineCreateRelationshipsPrices, instanceOfSubscriptionPromotionalOfferPrice, instanceOfSubscriptionPromotionalOfferPriceInlineCreate, instanceOfSubscriptionPromotionalOfferPricesResponse, instanceOfSubscriptionPromotionalOfferRelationships, instanceOfSubscriptionPromotionalOfferRelationshipsPrices, instanceOfSubscriptionPromotionalOfferRelationshipsPricesDataInner, instanceOfSubscriptionPromotionalOfferResponse, instanceOfSubscriptionPromotionalOfferUpdateRequest, instanceOfSubscriptionPromotionalOfferUpdateRequestData, instanceOfSubscriptionPromotionalOfferUpdateRequestDataRelationships, instanceOfSubscriptionPromotionalOffersResponse, instanceOfSubscriptionRelationships, instanceOfSubscriptionRelationshipsAppStoreReviewScreenshot, instanceOfSubscriptionRelationshipsAppStoreReviewScreenshotData, instanceOfSubscriptionRelationshipsIntroductoryOffers, instanceOfSubscriptionRelationshipsIntroductoryOffersDataInner, instanceOfSubscriptionRelationshipsOfferCodes, instanceOfSubscriptionRelationshipsPrices, instanceOfSubscriptionRelationshipsPricesDataInner, instanceOfSubscriptionRelationshipsPromotionalOffers, instanceOfSubscriptionRelationshipsPromotionalOffersDataInner, instanceOfSubscriptionRelationshipsSubscriptionLocalizations, instanceOfSubscriptionRelationshipsSubscriptionLocalizationsDataInner, instanceOfSubscriptionResponse, instanceOfSubscriptionSubmission, instanceOfSubscriptionSubmissionCreateRequest, instanceOfSubscriptionSubmissionCreateRequestData, instanceOfSubscriptionSubmissionResponse, instanceOfSubscriptionUpdateRequest, instanceOfSubscriptionUpdateRequestData, instanceOfSubscriptionUpdateRequestDataAttributes, instanceOfSubscriptionUpdateRequestDataRelationships, instanceOfSubscriptionUpdateRequestDataRelationshipsIntroductoryOffers, instanceOfSubscriptionUpdateRequestDataRelationshipsPrices, instanceOfSubscriptionUpdateRequestDataRelationshipsPromotionalOffers, instanceOfSubscriptionsResponse, instanceOfTerritoriesResponse, instanceOfTerritory, instanceOfTerritoryAttributes, instanceOfTerritoryResponse, instanceOfUploadOperation, instanceOfUser, instanceOfUserAttributes, instanceOfUserInvitation, instanceOfUserInvitationAttributes, instanceOfUserInvitationCreateRequest, instanceOfUserInvitationCreateRequestData, instanceOfUserInvitationCreateRequestDataAttributes, instanceOfUserInvitationCreateRequestDataRelationships, instanceOfUserInvitationCreateRequestDataRelationshipsVisibleApps, instanceOfUserInvitationRelationships, instanceOfUserInvitationResponse, instanceOfUserInvitationsResponse, instanceOfUserResponse, instanceOfUserUpdateRequest, instanceOfUserUpdateRequestData, instanceOfUserUpdateRequestDataAttributes, instanceOfUserVisibleAppsLinkagesRequest, instanceOfUserVisibleAppsLinkagesResponse, instanceOfUsersResponse, instanceOfXcodeMetrics, instanceOfXcodeMetricsInsights, instanceOfXcodeMetricsProductDataInner, instanceOfXcodeMetricsProductDataInnerMetricCategoriesInner, instanceOfXcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInner, instanceOfXcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInner, instanceOfXcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerFilterCriteria, instanceOfXcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerPointsInner, instanceOfXcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerDatasetsInnerPointsInnerPercentageBreakdown, instanceOfXcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerGoalKeysInner, instanceOfXcodeMetricsProductDataInnerMetricCategoriesInnerMetricsInnerUnit, mapValues, querystring */
+;// CONCATENATED MODULE: ./node_modules/appstore-connect-sdk/dist/openapi/index.js
 // src/openapi/runtime.ts
-var BASE_PATH = "https://api.appstoreconnect.apple.com".replace(/\/+$/, "");
-var Configuration = class {
+var openapi_BASE_PATH = "https://api.appstoreconnect.apple.com".replace(/\/+$/, "");
+var openapi_Configuration = class {
   constructor(configuration = {}) {
     this.configuration = configuration;
   }
@@ -28722,7 +26733,7 @@ var Configuration = class {
     this.configuration = configuration;
   }
   get basePath() {
-    return this.configuration.basePath != null ? this.configuration.basePath : BASE_PATH;
+    return this.configuration.basePath != null ? this.configuration.basePath : openapi_BASE_PATH;
   }
   get fetchApi() {
     return this.configuration.fetchApi;
@@ -28731,7 +26742,7 @@ var Configuration = class {
     return this.configuration.middleware || [];
   }
   get queryParamsStringify() {
-    return this.configuration.queryParamsStringify || querystring;
+    return this.configuration.queryParamsStringify || openapi_querystring;
   }
   get username() {
     return this.configuration.username;
@@ -28760,9 +26771,9 @@ var Configuration = class {
     return this.configuration.credentials;
   }
 };
-var DefaultConfig = new Configuration();
-var BaseAPI = class {
-  constructor(configuration = DefaultConfig) {
+var openapi_DefaultConfig = new openapi_Configuration();
+var openapi_BaseAPI = class {
+  constructor(configuration = openapi_DefaultConfig) {
     this.configuration = configuration;
     this.fetchApi = async (url, init) => {
       let fetchParams = { url, init };
@@ -28791,7 +26802,7 @@ var BaseAPI = class {
         }
         if (response === void 0) {
           if (e instanceof Error) {
-            throw new FetchError(e, "The request failed and the interceptors did not return an alternative response");
+            throw new openapi_FetchError(e, "The request failed and the interceptors did not return an alternative response");
           } else {
             throw e;
           }
@@ -28830,7 +26841,7 @@ var BaseAPI = class {
     if (response && (response.status >= 200 && response.status < 300)) {
       return response;
     }
-    throw new ResponseError(response, "Response returned an error code");
+    throw new openapi_ResponseError(response, "Response returned an error code");
   }
   async createFetchParams(context, initOverrides) {
     let url = this.configuration.basePath + context.path;
@@ -28855,7 +26866,7 @@ var BaseAPI = class {
     };
     const init = {
       ...overriddenInit,
-      body: isFormData(overriddenInit.body) || overriddenInit.body instanceof URLSearchParams || isBlob(overriddenInit.body) ? overriddenInit.body : JSON.stringify(overriddenInit.body)
+      body: openapi_isFormData(overriddenInit.body) || overriddenInit.body instanceof URLSearchParams || openapi_isBlob(overriddenInit.body) ? overriddenInit.body : JSON.stringify(overriddenInit.body)
     };
     return { url, init };
   }
@@ -28870,20 +26881,20 @@ var BaseAPI = class {
     return next;
   }
 };
-function isBlob(value) {
+function openapi_isBlob(value) {
   return typeof Blob !== "undefined" && value instanceof Blob;
 }
-function isFormData(value) {
+function openapi_isFormData(value) {
   return typeof FormData !== "undefined" && value instanceof FormData;
 }
-var ResponseError = class extends Error {
+var openapi_ResponseError = class extends Error {
   constructor(response, msg) {
     super(msg);
     this.response = response;
     this.name = "ResponseError";
   }
 };
-var FetchError = class extends Error {
+var openapi_FetchError = class extends Error {
   constructor(cause, msg) {
     super(msg);
     this.cause = cause;
@@ -28907,10 +26918,10 @@ function exists(json, key) {
   const value = json[key];
   return value !== null && value !== void 0;
 }
-function querystring(params, prefix = "") {
-  return Object.keys(params).map((key) => querystringSingleKey(key, params[key], prefix)).filter((part) => part.length > 0).join("&");
+function openapi_querystring(params, prefix = "") {
+  return Object.keys(params).map((key) => openapi_querystringSingleKey(key, params[key], prefix)).filter((part) => part.length > 0).join("&");
 }
-function querystringSingleKey(key, value, keyPrefix = "") {
+function openapi_querystringSingleKey(key, value, keyPrefix = "") {
   const fullKey = keyPrefix + (keyPrefix.length ? `[${key}]` : key);
   if (value instanceof Array) {
     const multiValue = value.map((singleValue) => encodeURIComponent(String(singleValue))).join(`&${encodeURIComponent(fullKey)}=`);
@@ -28918,13 +26929,13 @@ function querystringSingleKey(key, value, keyPrefix = "") {
   }
   if (value instanceof Set) {
     const valueAsArray = Array.from(value);
-    return querystringSingleKey(key, valueAsArray, keyPrefix);
+    return openapi_querystringSingleKey(key, valueAsArray, keyPrefix);
   }
   if (value instanceof Date) {
     return `${encodeURIComponent(fullKey)}=${encodeURIComponent(value.toISOString())}`;
   }
   if (value instanceof Object) {
-    return querystring(value, fullKey);
+    return openapi_querystring(value, fullKey);
   }
   return `${encodeURIComponent(fullKey)}=${encodeURIComponent(String(value))}`;
 }
@@ -77674,7 +75685,7 @@ function XcodeMetricsToJSON(value) {
 }
 
 // src/openapi/apis/AgeRatingDeclarationsApi.ts
-var AgeRatingDeclarationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AgeRatingDeclarationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async ageRatingDeclarationsUpdateInstanceRaw(requestParameters, initOverrides) {
@@ -77712,7 +75723,7 @@ var AgeRatingDeclarationsApi = class extends (/* unused pure expression or super
 };
 
 // src/openapi/apis/AppCategoriesApi.ts
-var AppCategoriesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppCategoriesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appCategoriesGetCollectionRaw(requestParameters, initOverrides) {
@@ -77898,7 +75909,7 @@ var AppCategoriesSubcategoriesGetToManyRelatedFieldsAppCategoriesEnum = {
 };
 
 // src/openapi/apis/AppClipAdvancedExperienceImagesApi.ts
-var AppClipAdvancedExperienceImagesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppClipAdvancedExperienceImagesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appClipAdvancedExperienceImagesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -78008,7 +76019,7 @@ var AppClipAdvancedExperienceImagesGetInstanceFieldsAppClipAdvancedExperienceIma
 };
 
 // src/openapi/apis/AppClipAdvancedExperiencesApi.ts
-var AppClipAdvancedExperiencesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppClipAdvancedExperiencesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appClipAdvancedExperiencesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -78135,7 +76146,7 @@ var AppClipAdvancedExperiencesGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/AppClipAppStoreReviewDetailsApi.ts
-var AppClipAppStoreReviewDetailsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppClipAppStoreReviewDetailsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appClipAppStoreReviewDetailsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -78246,7 +76257,7 @@ var AppClipAppStoreReviewDetailsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/AppClipDefaultExperienceLocalizationsApi.ts
-var AppClipDefaultExperienceLocalizationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppClipDefaultExperienceLocalizationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appClipDefaultExperienceLocalizationsAppClipHeaderImageGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -78458,7 +76469,7 @@ var AppClipDefaultExperienceLocalizationsGetInstanceFieldsAppClipHeaderImagesEnu
 };
 
 // src/openapi/apis/AppClipDefaultExperiencesApi.ts
-var AppClipDefaultExperiencesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppClipDefaultExperiencesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appClipDefaultExperiencesAppClipAppStoreReviewDetailGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -79088,7 +77099,7 @@ var AppClipDefaultExperiencesReleaseWithAppStoreVersionGetToOneRelatedIncludeEnu
 };
 
 // src/openapi/apis/AppClipHeaderImagesApi.ts
-var AppClipHeaderImagesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppClipHeaderImagesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appClipHeaderImagesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -79233,7 +77244,7 @@ var AppClipHeaderImagesGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/AppClipsApi.ts
-var AppClipsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppClipsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appClipsAppClipAdvancedExperiencesGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -79535,7 +77546,7 @@ var AppClipsGetInstanceFieldsAppClipDefaultExperiencesEnum = {
 };
 
 // src/openapi/apis/AppCustomProductPageLocalizationsApi.ts
-var AppCustomProductPageLocalizationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppCustomProductPageLocalizationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appCustomProductPageLocalizationsAppPreviewSetsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -79980,7 +77991,7 @@ var AppCustomProductPageLocalizationsGetInstanceFieldsAppPreviewSetsEnum = {
 };
 
 // src/openapi/apis/AppCustomProductPageVersionsApi.ts
-var AppCustomProductPageVersionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppCustomProductPageVersionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appCustomProductPageVersionsAppCustomProductPageLocalizationsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -80161,7 +78172,7 @@ var AppCustomProductPageVersionsGetInstanceFieldsAppCustomProductPageLocalizatio
 };
 
 // src/openapi/apis/AppCustomProductPagesApi.ts
-var AppCustomProductPagesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppCustomProductPagesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appCustomProductPagesAppCustomProductPageVersionsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -80404,7 +78415,7 @@ var AppCustomProductPagesGetInstanceFieldsAppCustomProductPageVersionsEnum = {
 };
 
 // src/openapi/apis/AppEncryptionDeclarationDocumentsApi.ts
-var AppEncryptionDeclarationDocumentsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppEncryptionDeclarationDocumentsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appEncryptionDeclarationDocumentsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -80516,7 +78527,7 @@ var AppEncryptionDeclarationDocumentsGetInstanceFieldsAppEncryptionDeclarationDo
 };
 
 // src/openapi/apis/AppEncryptionDeclarationsApi.ts
-var AppEncryptionDeclarationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppEncryptionDeclarationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appEncryptionDeclarationsAppEncryptionDeclarationDocumentGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -80920,7 +78931,7 @@ var AppEncryptionDeclarationsGetInstanceFieldsAppsEnum = {
 };
 
 // src/openapi/apis/AppEventLocalizationsApi.ts
-var AppEventLocalizationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppEventLocalizationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appEventLocalizationsAppEventScreenshotsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -81230,7 +79241,7 @@ var AppEventLocalizationsGetInstanceFieldsAppEventVideoClipsEnum = {
 };
 
 // src/openapi/apis/AppEventScreenshotsApi.ts
-var AppEventScreenshotsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppEventScreenshotsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appEventScreenshotsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -81376,7 +79387,7 @@ var AppEventScreenshotsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/AppEventVideoClipsApi.ts
-var AppEventVideoClipsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppEventVideoClipsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appEventVideoClipsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -81523,7 +79534,7 @@ var AppEventVideoClipsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/AppEventsApi.ts
-var AppEventsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppEventsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appEventsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -81791,7 +79802,7 @@ var AppEventsLocalizationsGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/AppInfoLocalizationsApi.ts
-var AppInfoLocalizationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppInfoLocalizationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appInfoLocalizationsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -81935,7 +79946,7 @@ var AppInfoLocalizationsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/AppInfosApi.ts
-var AppInfosApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppInfosApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appInfosAgeRatingDeclarationGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -82485,7 +80496,7 @@ var AppInfosSecondarySubcategoryTwoGetToOneRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/AppPreOrdersApi.ts
-var AppPreOrdersApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppPreOrdersApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appPreOrdersCreateInstanceRaw(requestParameters, initOverrides) {
@@ -82625,7 +80636,7 @@ var AppPreOrdersGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/AppPreviewSetsApi.ts
-var AppPreviewSetsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppPreviewSetsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appPreviewSetsAppPreviewsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -82884,7 +80895,7 @@ var AppPreviewSetsGetInstanceFieldsAppPreviewsEnum = {
 };
 
 // src/openapi/apis/AppPreviewsApi.ts
-var AppPreviewsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppPreviewsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appPreviewsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -83032,7 +81043,7 @@ var AppPreviewsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/AppPricePointsApi.ts
-var AppPricePointsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppPricePointsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appPricePointsGetCollectionRaw(requestParameters, initOverrides) {
@@ -83179,7 +81190,7 @@ var AppPricePointsTerritoryGetToOneRelatedFieldsTerritoriesEnum = {
 };
 
 // src/openapi/apis/AppPriceTiersApi.ts
-var AppPriceTiersApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppPriceTiersApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appPriceTiersGetCollectionRaw(requestParameters, initOverrides) {
@@ -83355,7 +81366,7 @@ var AppPriceTiersPricePointsGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/AppPricesApi.ts
-var AppPricesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppPricesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appPricesGetInstanceRaw(requestParameters, initOverrides) {
@@ -83402,7 +81413,7 @@ var AppPricesGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/AppScreenshotSetsApi.ts
-var AppScreenshotSetsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppScreenshotSetsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appScreenshotSetsAppScreenshotsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -83659,7 +81670,7 @@ var AppScreenshotSetsGetInstanceFieldsAppScreenshotsEnum = {
 };
 
 // src/openapi/apis/AppScreenshotsApi.ts
-var AppScreenshotsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppScreenshotsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appScreenshotsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -83806,7 +81817,7 @@ var AppScreenshotsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/AppStoreReviewAttachmentsApi.ts
-var AppStoreReviewAttachmentsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppStoreReviewAttachmentsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appStoreReviewAttachmentsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -83950,7 +81961,7 @@ var AppStoreReviewAttachmentsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/AppStoreReviewDetailsApi.ts
-var AppStoreReviewDetailsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppStoreReviewDetailsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appStoreReviewDetailsAppStoreReviewAttachmentsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -84150,7 +82161,7 @@ var AppStoreReviewDetailsGetInstanceFieldsAppStoreReviewAttachmentsEnum = {
 };
 
 // src/openapi/apis/AppStoreVersionExperimentTreatmentLocalizationsApi.ts
-var AppStoreVersionExperimentTreatmentLocalizationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppStoreVersionExperimentTreatmentLocalizationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appStoreVersionExperimentTreatmentLocalizationsAppPreviewSetsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -84560,7 +82571,7 @@ var AppStoreVersionExperimentTreatmentLocalizationsGetInstanceFieldsAppPreviewSe
 };
 
 // src/openapi/apis/AppStoreVersionExperimentTreatmentsApi.ts
-var AppStoreVersionExperimentTreatmentsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppStoreVersionExperimentTreatmentsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appStoreVersionExperimentTreatmentsAppStoreVersionExperimentTreatmentLocalizationsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -84805,7 +82816,7 @@ var AppStoreVersionExperimentTreatmentsGetInstanceFieldsAppStoreVersionExperimen
 };
 
 // src/openapi/apis/AppStoreVersionExperimentsApi.ts
-var AppStoreVersionExperimentsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppStoreVersionExperimentsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appStoreVersionExperimentsAppStoreVersionExperimentTreatmentsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -85042,7 +83053,7 @@ var AppStoreVersionExperimentsGetInstanceFieldsAppStoreVersionExperimentTreatmen
 };
 
 // src/openapi/apis/AppStoreVersionLocalizationsApi.ts
-var AppStoreVersionLocalizationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppStoreVersionLocalizationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appStoreVersionLocalizationsAppPreviewSetsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -85492,7 +83503,7 @@ var AppStoreVersionLocalizationsGetInstanceFieldsAppPreviewSetsEnum = {
 };
 
 // src/openapi/apis/AppStoreVersionPhasedReleasesApi.ts
-var AppStoreVersionPhasedReleasesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppStoreVersionPhasedReleasesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appStoreVersionPhasedReleasesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -85589,7 +83600,7 @@ var AppStoreVersionPhasedReleasesApi = class extends (/* unused pure expression 
 };
 
 // src/openapi/apis/AppStoreVersionPromotionsApi.ts
-var AppStoreVersionPromotionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppStoreVersionPromotionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appStoreVersionPromotionsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -85624,7 +83635,7 @@ var AppStoreVersionPromotionsApi = class extends (/* unused pure expression or s
 };
 
 // src/openapi/apis/AppStoreVersionReleaseRequestsApi.ts
-var AppStoreVersionReleaseRequestsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppStoreVersionReleaseRequestsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appStoreVersionReleaseRequestsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -85659,7 +83670,7 @@ var AppStoreVersionReleaseRequestsApi = class extends (/* unused pure expression
 };
 
 // src/openapi/apis/AppStoreVersionSubmissionsApi.ts
-var AppStoreVersionSubmissionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppStoreVersionSubmissionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appStoreVersionSubmissionsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -85722,7 +83733,7 @@ var AppStoreVersionSubmissionsApi = class extends (/* unused pure expression or 
 };
 
 // src/openapi/apis/AppStoreVersionsApi.ts
-var AppStoreVersionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppStoreVersionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appStoreVersionsAgeRatingDeclarationGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -87071,7 +85082,7 @@ var AppStoreVersionsRoutingAppCoverageGetToOneRelatedFieldsRoutingAppCoveragesEn
 };
 
 // src/openapi/apis/AppsApi.ts
-var AppsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var AppsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async appsAppClipsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -90856,7 +88867,7 @@ var AppsSubscriptionGroupsGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/BetaAppClipInvocationLocalizationsApi.ts
-var BetaAppClipInvocationLocalizationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BetaAppClipInvocationLocalizationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async betaAppClipInvocationLocalizationsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -90953,7 +88964,7 @@ var BetaAppClipInvocationLocalizationsApi = class extends (/* unused pure expres
 };
 
 // src/openapi/apis/BetaAppClipInvocationsApi.ts
-var BetaAppClipInvocationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BetaAppClipInvocationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async betaAppClipInvocationsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -91096,7 +89107,7 @@ var BetaAppClipInvocationsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/BetaAppLocalizationsApi.ts
-var BetaAppLocalizationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BetaAppLocalizationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async betaAppLocalizationsAppGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -91451,7 +89462,7 @@ var BetaAppLocalizationsGetInstanceFieldsAppsEnum = {
 };
 
 // src/openapi/apis/BetaAppReviewDetailsApi.ts
-var BetaAppReviewDetailsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BetaAppReviewDetailsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async betaAppReviewDetailsAppGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -91751,7 +89762,7 @@ var BetaAppReviewDetailsGetInstanceFieldsAppsEnum = {
 };
 
 // src/openapi/apis/BetaAppReviewSubmissionsApi.ts
-var BetaAppReviewSubmissionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BetaAppReviewSubmissionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async betaAppReviewSubmissionsBuildGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -92003,7 +90014,7 @@ var BetaAppReviewSubmissionsGetInstanceFieldsBuildsEnum = {
 };
 
 // src/openapi/apis/BetaBuildLocalizationsApi.ts
-var BetaBuildLocalizationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BetaBuildLocalizationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async betaBuildLocalizationsBuildGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -92308,7 +90319,7 @@ var BetaBuildLocalizationsGetInstanceFieldsBuildsEnum = {
 };
 
 // src/openapi/apis/BetaGroupsApi.ts
-var BetaGroupsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BetaGroupsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async betaGroupsAppGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -93107,7 +91118,7 @@ var BetaGroupsGetInstanceFieldsBuildsEnum = {
 };
 
 // src/openapi/apis/BetaLicenseAgreementsApi.ts
-var BetaLicenseAgreementsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BetaLicenseAgreementsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async betaLicenseAgreementsAppGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -93390,7 +91401,7 @@ var BetaLicenseAgreementsGetInstanceFieldsAppsEnum = {
 };
 
 // src/openapi/apis/BetaTesterInvitationsApi.ts
-var BetaTesterInvitationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BetaTesterInvitationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async betaTesterInvitationsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -93425,7 +91436,7 @@ var BetaTesterInvitationsApi = class extends (/* unused pure expression or super
 };
 
 // src/openapi/apis/BetaTestersApi.ts
-var BetaTestersApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BetaTestersApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async betaTestersAppsDeleteToManyRelationshipRaw(requestParameters, initOverrides) {
@@ -94275,7 +92286,7 @@ var BetaTestersGetInstanceFieldsBetaGroupsEnum = {
 };
 
 // src/openapi/apis/BuildBetaDetailsApi.ts
-var BuildBetaDetailsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BuildBetaDetailsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async buildBetaDetailsBuildGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -94523,7 +92534,7 @@ var BuildBetaDetailsGetInstanceFieldsBuildsEnum = {
 };
 
 // src/openapi/apis/BuildBetaNotificationsApi.ts
-var BuildBetaNotificationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BuildBetaNotificationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async buildBetaNotificationsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -94558,7 +92569,7 @@ var BuildBetaNotificationsApi = class extends (/* unused pure expression or supe
 };
 
 // src/openapi/apis/BuildBundlesApi.ts
-var BuildBundlesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BuildBundlesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async buildBundlesAppClipDomainCacheStatusGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -94732,7 +92743,7 @@ var BuildBundlesBuildBundleFileSizesGetToManyRelatedFieldsBuildBundleFileSizesEn
 };
 
 // src/openapi/apis/BuildsApi.ts
-var BuildsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BuildsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async buildsAppEncryptionDeclarationGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -96274,7 +94285,7 @@ var BuildsPreReleaseVersionGetToOneRelatedFieldsPreReleaseVersionsEnum = {
 };
 
 // src/openapi/apis/BundleIdCapabilitiesApi.ts
-var BundleIdCapabilitiesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BundleIdCapabilitiesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async bundleIdCapabilitiesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -96371,7 +94382,7 @@ var BundleIdCapabilitiesApi = class extends (/* unused pure expression or super 
 };
 
 // src/openapi/apis/BundleIdsApi.ts
-var BundleIdsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var BundleIdsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async bundleIdsAppGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -96906,7 +94917,7 @@ var BundleIdsProfilesGetToManyRelatedFieldsProfilesEnum = {
 };
 
 // src/openapi/apis/CertificatesApi.ts
-var CertificatesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var CertificatesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async certificatesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -97091,7 +95102,7 @@ var CertificatesGetInstanceFieldsCertificatesEnum = {
 };
 
 // src/openapi/apis/CiArtifactsApi.ts
-var CiArtifactsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var CiArtifactsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async ciArtifactsGetInstanceRaw(requestParameters, initOverrides) {
@@ -97133,7 +95144,7 @@ var CiArtifactsGetInstanceFieldsCiArtifactsEnum = {
 };
 
 // src/openapi/apis/CiBuildActionsApi.ts
-var CiBuildActionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var CiBuildActionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async ciBuildActionsArtifactsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -97530,7 +95541,7 @@ var CiBuildActionsTestResultsGetToManyRelatedFieldsCiTestResultsEnum = {
 };
 
 // src/openapi/apis/CiBuildRunsApi.ts
-var CiBuildRunsApi = class extends BaseAPI {
+var CiBuildRunsApi = class extends openapi_BaseAPI {
   /**
    */
   async ciBuildRunsActionsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -98112,7 +96123,7 @@ var CiBuildRunsGetInstanceFieldsBuildsEnum = {
 };
 
 // src/openapi/apis/CiIssuesApi.ts
-var CiIssuesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var CiIssuesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async ciIssuesGetInstanceRaw(requestParameters, initOverrides) {
@@ -98154,7 +96165,7 @@ var CiIssuesGetInstanceFieldsCiIssuesEnum = {
 };
 
 // src/openapi/apis/CiMacOsVersionsApi.ts
-var CiMacOsVersionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var CiMacOsVersionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async ciMacOsVersionsGetCollectionRaw(requestParameters, initOverrides) {
@@ -98326,7 +96337,7 @@ var CiMacOsVersionsXcodeVersionsGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/CiProductsApi.ts
-var CiProductsApi = class extends BaseAPI {
+var CiProductsApi = class extends openapi_BaseAPI {
   /**
    */
   async ciProductsAdditionalRepositoriesGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -99547,7 +97558,7 @@ var CiProductsWorkflowsGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/CiTestResultsApi.ts
-var CiTestResultsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var CiTestResultsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async ciTestResultsGetInstanceRaw(requestParameters, initOverrides) {
@@ -99591,7 +97602,7 @@ var CiTestResultsGetInstanceFieldsCiTestResultsEnum = {
 };
 
 // src/openapi/apis/CiWorkflowsApi.ts
-var CiWorkflowsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var CiWorkflowsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async ciWorkflowsBuildRunsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -100023,7 +98034,7 @@ var CiWorkflowsRepositoryGetToOneRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/CiXcodeVersionsApi.ts
-var CiXcodeVersionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var CiXcodeVersionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async ciXcodeVersionsGetCollectionRaw(requestParameters, initOverrides) {
@@ -100195,7 +98206,7 @@ var CiXcodeVersionsMacOsVersionsGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/CustomerReviewResponsesApi.ts
-var CustomerReviewResponsesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var CustomerReviewResponsesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async customerReviewResponsesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -100302,7 +98313,7 @@ var CustomerReviewResponsesGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/CustomerReviewsApi.ts
-var CustomerReviewsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var CustomerReviewsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async customerReviewsGetInstanceRaw(requestParameters, initOverrides) {
@@ -100418,7 +98429,7 @@ var CustomerReviewsResponseGetToOneRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/DevicesApi.ts
-var DevicesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var DevicesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async devicesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -100607,7 +98618,7 @@ var DevicesGetInstanceFieldsDevicesEnum = {
 };
 
 // src/openapi/apis/DiagnosticSignaturesApi.ts
-var DiagnosticSignaturesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var DiagnosticSignaturesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async diagnosticSignaturesLogsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -100643,7 +98654,7 @@ var DiagnosticSignaturesApi = class extends (/* unused pure expression or super 
 };
 
 // src/openapi/apis/EndUserLicenseAgreementsApi.ts
-var EndUserLicenseAgreementsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var EndUserLicenseAgreementsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async endUserLicenseAgreementsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -100831,7 +98842,7 @@ var EndUserLicenseAgreementsTerritoriesGetToManyRelatedFieldsTerritoriesEnum = {
 };
 
 // src/openapi/apis/FinanceReportsApi.ts
-var FinanceReportsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var FinanceReportsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async financeReportsGetCollectionRaw(requestParameters, initOverrides) {
@@ -100889,7 +98900,7 @@ var FinanceReportsGetCollectionFilterReportTypeEnum = {
 };
 
 // src/openapi/apis/GameCenterEnabledVersionsApi.ts
-var GameCenterEnabledVersionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var GameCenterEnabledVersionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async gameCenterEnabledVersionsCompatibleVersionsCreateToManyRelationshipRaw(requestParameters, initOverrides) {
@@ -101143,7 +99154,7 @@ var GameCenterEnabledVersionsCompatibleVersionsGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/InAppPurchaseAppStoreReviewScreenshotsApi.ts
-var InAppPurchaseAppStoreReviewScreenshotsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var InAppPurchaseAppStoreReviewScreenshotsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async inAppPurchaseAppStoreReviewScreenshotsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -101290,7 +99301,7 @@ var InAppPurchaseAppStoreReviewScreenshotsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/InAppPurchaseContentsApi.ts
-var InAppPurchaseContentsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var InAppPurchaseContentsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async inAppPurchaseContentsGetInstanceRaw(requestParameters, initOverrides) {
@@ -101339,7 +99350,7 @@ var InAppPurchaseContentsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/InAppPurchaseLocalizationsApi.ts
-var InAppPurchaseLocalizationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var InAppPurchaseLocalizationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async inAppPurchaseLocalizationsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -101481,7 +99492,7 @@ var InAppPurchaseLocalizationsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/InAppPurchasePriceSchedulesApi.ts
-var InAppPurchasePriceSchedulesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var InAppPurchasePriceSchedulesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async inAppPurchasePriceSchedulesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -101638,7 +99649,7 @@ var InAppPurchasePriceSchedulesManualPricesGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/InAppPurchaseSubmissionsApi.ts
-var InAppPurchaseSubmissionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var InAppPurchaseSubmissionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async inAppPurchaseSubmissionsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -101673,7 +99684,7 @@ var InAppPurchaseSubmissionsApi = class extends (/* unused pure expression or su
 };
 
 // src/openapi/apis/InAppPurchasesApi.ts
-var InAppPurchasesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var InAppPurchasesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async inAppPurchasesAppStoreReviewScreenshotGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -102395,7 +100406,7 @@ var InAppPurchasesPromotedPurchaseGetToOneRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/PreReleaseVersionsApi.ts
-var PreReleaseVersionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var PreReleaseVersionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async preReleaseVersionsAppGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -102811,7 +100822,7 @@ var PreReleaseVersionsGetInstanceFieldsBuildsEnum = {
 };
 
 // src/openapi/apis/ProfilesApi.ts
-var ProfilesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var ProfilesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async profilesBundleIdGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -103241,7 +101252,7 @@ var ProfilesGetInstanceFieldsBundleIdsEnum = {
 };
 
 // src/openapi/apis/PromotedPurchaseImagesApi.ts
-var PromotedPurchaseImagesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var PromotedPurchaseImagesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async promotedPurchaseImagesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -103388,7 +101399,7 @@ var PromotedPurchaseImagesGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/PromotedPurchasesApi.ts
-var PromotedPurchasesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var PromotedPurchasesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async promotedPurchasesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -103617,7 +101628,7 @@ var PromotedPurchasesPromotionImagesGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/ReviewSubmissionItemsApi.ts
-var ReviewSubmissionItemsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var ReviewSubmissionItemsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async reviewSubmissionItemsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -103714,7 +101725,7 @@ var ReviewSubmissionItemsApi = class extends (/* unused pure expression or super
 };
 
 // src/openapi/apis/ReviewSubmissionsApi.ts
-var ReviewSubmissionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var ReviewSubmissionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async reviewSubmissionsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -104059,7 +102070,7 @@ var ReviewSubmissionsItemsGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/RoutingAppCoveragesApi.ts
-var RoutingAppCoveragesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var RoutingAppCoveragesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async routingAppCoveragesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -104203,7 +102214,7 @@ var RoutingAppCoveragesGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/SalesReportsApi.ts
-var SalesReportsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SalesReportsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async salesReportsGetCollectionRaw(requestParameters, initOverrides) {
@@ -104282,7 +102293,7 @@ var SalesReportsGetCollectionFilterReportTypeEnum = {
 };
 
 // src/openapi/apis/SandboxTestersApi.ts
-var SandboxTestersApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SandboxTestersApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async sandboxTestersGetCollectionRaw(requestParameters, initOverrides) {
@@ -104361,7 +102372,7 @@ var SandboxTestersGetCollectionFieldsSandboxTestersEnum = {
 };
 
 // src/openapi/apis/SandboxTestersClearPurchaseHistoryRequestApi.ts
-var SandboxTestersClearPurchaseHistoryRequestApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SandboxTestersClearPurchaseHistoryRequestApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async sandboxTestersClearPurchaseHistoryRequestCreateInstanceRaw(requestParameters, initOverrides) {
@@ -104396,7 +102407,7 @@ var SandboxTestersClearPurchaseHistoryRequestApi = class extends (/* unused pure
 };
 
 // src/openapi/apis/ScmGitReferencesApi.ts
-var ScmGitReferencesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var ScmGitReferencesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async scmGitReferencesGetInstanceRaw(requestParameters, initOverrides) {
@@ -104445,7 +102456,7 @@ var ScmGitReferencesGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/ScmProvidersApi.ts
-var ScmProvidersApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var ScmProvidersApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async scmProvidersGetCollectionRaw(requestParameters, initOverrides) {
@@ -104625,7 +102636,7 @@ var ScmProvidersRepositoriesGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/ScmPullRequestsApi.ts
-var ScmPullRequestsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var ScmPullRequestsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async scmPullRequestsGetInstanceRaw(requestParameters, initOverrides) {
@@ -104681,7 +102692,7 @@ var ScmPullRequestsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/ScmRepositoriesApi.ts
-var ScmRepositoriesApi = class extends BaseAPI {
+var ScmRepositoriesApi = class extends openapi_BaseAPI {
   /**
    */
   async scmRepositoriesGetCollectionRaw(requestParameters, initOverrides) {
@@ -104973,7 +102984,7 @@ var ScmRepositoriesPullRequestsGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/SubscriptionAppStoreReviewScreenshotsApi.ts
-var SubscriptionAppStoreReviewScreenshotsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionAppStoreReviewScreenshotsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionAppStoreReviewScreenshotsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -105120,7 +103131,7 @@ var SubscriptionAppStoreReviewScreenshotsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/SubscriptionGracePeriodsApi.ts
-var SubscriptionGracePeriodsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionGracePeriodsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionGracePeriodsGetInstanceRaw(requestParameters, initOverrides) {
@@ -105196,7 +103207,7 @@ var SubscriptionGracePeriodsGetInstanceFieldsSubscriptionGracePeriodsEnum = {
 };
 
 // src/openapi/apis/SubscriptionGroupLocalizationsApi.ts
-var SubscriptionGroupLocalizationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionGroupLocalizationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionGroupLocalizationsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -105338,7 +103349,7 @@ var SubscriptionGroupLocalizationsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/SubscriptionGroupSubmissionsApi.ts
-var SubscriptionGroupSubmissionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionGroupSubmissionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionGroupSubmissionsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -105373,7 +103384,7 @@ var SubscriptionGroupSubmissionsApi = class extends (/* unused pure expression o
 };
 
 // src/openapi/apis/SubscriptionGroupsApi.ts
-var SubscriptionGroupsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionGroupsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionGroupsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -105819,7 +103830,7 @@ var SubscriptionGroupsSubscriptionsGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/SubscriptionIntroductoryOffersApi.ts
-var SubscriptionIntroductoryOffersApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionIntroductoryOffersApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionIntroductoryOffersCreateInstanceRaw(requestParameters, initOverrides) {
@@ -105916,7 +103927,7 @@ var SubscriptionIntroductoryOffersApi = class extends (/* unused pure expression
 };
 
 // src/openapi/apis/SubscriptionLocalizationsApi.ts
-var SubscriptionLocalizationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionLocalizationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionLocalizationsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -106058,7 +104069,7 @@ var SubscriptionLocalizationsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/SubscriptionOfferCodeCustomCodesApi.ts
-var SubscriptionOfferCodeCustomCodesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionOfferCodeCustomCodesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionOfferCodeCustomCodesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -106173,7 +104184,7 @@ var SubscriptionOfferCodeCustomCodesGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/SubscriptionOfferCodeOneTimeUseCodesApi.ts
-var SubscriptionOfferCodeOneTimeUseCodesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionOfferCodeOneTimeUseCodesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionOfferCodeOneTimeUseCodesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -106320,7 +104331,7 @@ var SubscriptionOfferCodeOneTimeUseCodesGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/SubscriptionOfferCodesApi.ts
-var SubscriptionOfferCodesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionOfferCodesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionOfferCodesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -106680,7 +104691,7 @@ var SubscriptionOfferCodesPricesGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/SubscriptionPricePointsApi.ts
-var SubscriptionPricePointsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionPricePointsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionPricePointsEqualizationsGetToManyRelatedRaw(requestParameters, initOverrides) {
@@ -106791,7 +104802,7 @@ var SubscriptionPricePointsGetInstanceIncludeEnum = {
 };
 
 // src/openapi/apis/SubscriptionPricesApi.ts
-var SubscriptionPricesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionPricesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionPricesCreateInstanceRaw(requestParameters, initOverrides) {
@@ -106854,7 +104865,7 @@ var SubscriptionPricesApi = class extends (/* unused pure expression or super */
 };
 
 // src/openapi/apis/SubscriptionPromotionalOffersApi.ts
-var SubscriptionPromotionalOffersApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionPromotionalOffersApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionPromotionalOffersCreateInstanceRaw(requestParameters, initOverrides) {
@@ -107075,7 +105086,7 @@ var SubscriptionPromotionalOffersPricesGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/SubscriptionSubmissionsApi.ts
-var SubscriptionSubmissionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionSubmissionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionSubmissionsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -107110,7 +105121,7 @@ var SubscriptionSubmissionsApi = class extends (/* unused pure expression or sup
 };
 
 // src/openapi/apis/SubscriptionsApi.ts
-var SubscriptionsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var SubscriptionsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async subscriptionsAppStoreReviewScreenshotGetToOneRelatedRaw(requestParameters, initOverrides) {
@@ -108201,7 +106212,7 @@ var SubscriptionsSubscriptionLocalizationsGetToManyRelatedIncludeEnum = {
 };
 
 // src/openapi/apis/TerritoriesApi.ts
-var TerritoriesApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var TerritoriesApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async territoriesGetCollectionRaw(requestParameters, initOverrides) {
@@ -108240,7 +106251,7 @@ var TerritoriesGetCollectionFieldsTerritoriesEnum = {
 };
 
 // src/openapi/apis/UserInvitationsApi.ts
-var UserInvitationsApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var UserInvitationsApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async userInvitationsCreateInstanceRaw(requestParameters, initOverrides) {
@@ -108599,7 +106610,7 @@ var UserInvitationsVisibleAppsGetToManyRelatedFieldsAppsEnum = {
 };
 
 // src/openapi/apis/UsersApi.ts
-var UsersApi = class extends (/* unused pure expression or super */ null && (BaseAPI)) {
+var UsersApi = class extends (/* unused pure expression or super */ null && (openapi_BaseAPI)) {
   /**
    */
   async usersDeleteInstanceRaw(requestParameters, initOverrides) {
@@ -109091,6 +107102,2061 @@ var UsersVisibleAppsGetToManyRelatedFieldsAppsEnum = {
 
 //# sourceMappingURL=index.js.map
 
+;// CONCATENATED MODULE: ./src/utils.ts
+function sleep(time) {
+    return new Promise((resolve) => {
+        setTimeout(() => {
+            resolve();
+        }, time);
+    });
+}
+async function exponentialRetry(asyncRequest, { maxRetries = 10, timeBetween = 10 * 1000, timeMultiplier = 1.5, identifier } = {}) {
+    let retries = maxRetries;
+    let waitTime = timeBetween;
+    while (retries > 0) {
+        try {
+            retries--;
+            const result = await asyncRequest();
+            if (result !== undefined) {
+                return result;
+            }
+            await sleep(waitTime);
+            waitTime *= timeMultiplier;
+        }
+        catch (error) {
+            if (retries === 0) {
+                throw error;
+            }
+        }
+    }
+    throw new Error(`Request ${identifier} failed after ${maxRetries} times.`);
+}
+
+;// CONCATENATED MODULE: ./src/appstore-sdk.ts
+
+
+
+;
+var InitState;
+(function (InitState) {
+    InitState[InitState["Uninitialized"] = 0] = "Uninitialized";
+    InitState[InitState["Initializing"] = 1] = "Initializing";
+    InitState[InitState["Initialized"] = 2] = "Initialized";
+})(InitState || (InitState = {}));
+class AppStoreApi {
+    client;
+    ciProductsApi;
+    ciBuildRunsApi;
+    scmRepositoriesApi;
+    initState = InitState.Uninitialized;
+    constructor(input) {
+        this.client = new AppStoreConnectAPI(input);
+    }
+    async init() {
+        while (this.initState === InitState.Initializing) {
+            await sleep(100);
+        }
+        if (this.initState === InitState.Initialized) {
+            return;
+        }
+        this.initState = InitState.Initializing;
+        this.ciProductsApi = await this.client.create(CiProductsApi);
+        this.ciBuildRunsApi = await this.client.create(CiBuildRunsApi);
+        this.scmRepositoriesApi = await this.client.create(ScmRepositoriesApi);
+        this.initState = InitState.Initialized;
+    }
+    async getRepositoryAndProductByName(repositoryName) {
+        await this.init();
+        return await exponentialRetry(async () => {
+            const ciProductResponse = await this.ciProductsApi.ciProductsGetCollection({
+                filterProductType: [CiProductsGetCollectionFilterProductTypeEnum.App],
+                include: [
+                    CiProductsGetCollectionIncludeEnum.PrimaryRepositories,
+                    CiProductsGetCollectionIncludeEnum.BundleId,
+                ],
+            });
+            const repository = assertRepositoryExists(ciProductResponse, repositoryName);
+            const product = assertProductExists(ciProductResponse, repository.id);
+            return {
+                repository,
+                product
+            };
+        }, { identifier: 'get-repository-by-name' });
+    }
+    async getGitReference(repositoryId, gitRef) {
+        await this.init();
+        // When the github action is triggered too soon after pushing a tag
+        // It's possible that the xcode cloud repository is not yet updated with the tag
+        // So we keep retrying until we find it.
+        return await exponentialRetry(async () => {
+            const gitReferences = await this.scmRepositoriesApi.scmRepositoriesGitReferencesGetToManyRelated({
+                id: repositoryId,
+                fieldsScmGitReferences: [
+                    ScmRepositoriesGetCollectionFieldsScmGitReferencesEnum.CanonicalName,
+                ],
+            });
+            return assertGitReferenceExists(gitReferences, gitRef);
+        }, {
+            identifier: 'get-git-reference'
+        });
+    }
+    async getWorkflowByName(productId, workflowName) {
+        await this.init();
+        return await exponentialRetry(async () => {
+            const allWorkflows = await this.ciProductsApi.ciProductsWorkflowsGetToManyRelated({
+                id: productId,
+                include: [CiProductsWorkflowsGetToManyRelatedIncludeEnum.Repository],
+            });
+            return await assertWorkflowExists(allWorkflows, workflowName);
+        }, { identifier: 'get-workflow-by-name' });
+    }
+    async createBuildRun(workflowId, gitRefId) {
+        await this.init();
+        return await exponentialRetry(async () => {
+            const buildRun = await this.ciBuildRunsApi.ciBuildRunsCreateInstance({
+                ciBuildRunCreateRequest: {
+                    data: {
+                        type: CiBuildRunCreateRequestDataTypeEnum.CiBuildRuns,
+                        relationships: {
+                            workflow: {
+                                data: {
+                                    id: workflowId,
+                                    type: CiBuildRunRelationshipsWorkflowDataTypeEnum.CiWorkflows,
+                                },
+                            },
+                            sourceBranchOrTag: {
+                                data: {
+                                    id: gitRefId,
+                                    type: CiBuildRunRelationshipsSourceBranchOrTagDataTypeEnum.ScmGitReferences,
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+            return buildRun;
+        }, { identifier: 'create-build-run' });
+    }
+}
+function assertRepositoryExists(response, repositoryName) {
+    const repository = response.included?.find((includedItem) => includedItem.type === "scmRepositories" &&
+        includedItem.attributes.repositoryName === repositoryName);
+    if (!repository) {
+        throw new Error(`Repository ${repositoryName} not found`);
+    }
+    return repository;
+}
+function assertProductExists(response, repositoryId) {
+    const product = response.data.find((ciProduct) => ciProduct.relationships?.primaryRepositories?.data?.find((repo) => repo.id === repositoryId) !== undefined);
+    if (!product) {
+        throw new Error(`Product for repository ${repositoryId} not be found.`);
+    }
+    return product;
+}
+function assertGitReferenceExists(response, gitRef) {
+    const gitReference = response.data.find((reference) => reference.attributes.canonicalName === gitRef);
+    if (!gitReference) {
+        throw new Error(`Git reference for ref ${gitRef} not be found.`);
+    }
+    return gitReference;
+}
+function assertWorkflowExists(response, workflowName) {
+    const correctWorkflow = response.data.find((workflow) => workflow.attributes.name === workflowName);
+    if (!correctWorkflow) {
+        throw new Error(`Workflow ${workflowName} not found`);
+    }
+    return correctWorkflow;
+}
+
+;// CONCATENATED MODULE: ./src/core.ts
+
+async function startXCodeCloudBuild(input) {
+    const { workflowName, gitRef, repositoryName } = input;
+    const appStoreApi = new AppStoreApi(input);
+    const { repository, product } = await appStoreApi.getRepositoryAndProductByName(repositoryName);
+    const gitReference = await appStoreApi.getGitReference(repository.id, gitRef);
+    const workflow = await appStoreApi.getWorkflowByName(product.id, workflowName);
+    const buildRun = await appStoreApi.createBuildRun(workflow.id, gitReference.id);
+    return {
+        repositoryId: repository.id,
+        productId: product.id,
+        workflowId: workflow.id,
+        buildId: buildRun.data.id,
+        buildNumber: buildRun.data.attributes.number,
+    };
+}
+
+
+/***/ }),
+
+/***/ 9407:
+/***/ ((module, __unused_webpack___webpack_exports__, __nccwpck_require__) => {
+
+__nccwpck_require__.a(module, async (__webpack_handle_async_dependencies__, __webpack_async_result__) => { try {
+/* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(7484);
+/* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__nccwpck_require__.n(_actions_core__WEBPACK_IMPORTED_MODULE_0__);
+/* harmony import */ var _core_js__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(6699);
+
+
+function getInput() {
+    const issuerId = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput("appstore-issuer-id");
+    const privateKeyId = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput("appstore-private-key-id");
+    const privateKey = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput("appstore-private-key");
+    const repositoryName = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput("repository-name");
+    const workflowName = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput("workflow-name");
+    const gitRef = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput("git-ref");
+    return {
+        issuerId,
+        privateKeyId,
+        privateKey,
+        repositoryName,
+        workflowName,
+        gitRef,
+    };
+}
+try {
+    const result = await (0,_core_js__WEBPACK_IMPORTED_MODULE_1__/* .startXCodeCloudBuild */ .J)(getInput());
+    _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("repository-id", result.repositoryId);
+    _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("product-id", result.productId);
+    _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("workflow-id", result.workflowId);
+    _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("build-id", result.buildId);
+    _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("build-number", result.buildNumber);
+}
+catch (error) {
+}
+
+__webpack_async_result__();
+} catch(e) { __webpack_async_result__(e); } }, 1);
+
+/***/ }),
+
+/***/ 2613:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("assert");
+
+/***/ }),
+
+/***/ 290:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("async_hooks");
+
+/***/ }),
+
+/***/ 181:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("buffer");
+
+/***/ }),
+
+/***/ 5317:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("child_process");
+
+/***/ }),
+
+/***/ 4236:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("console");
+
+/***/ }),
+
+/***/ 6982:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("crypto");
+
+/***/ }),
+
+/***/ 1637:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("diagnostics_channel");
+
+/***/ }),
+
+/***/ 4434:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("events");
+
+/***/ }),
+
+/***/ 9896:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("fs");
+
+/***/ }),
+
+/***/ 8611:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("http");
+
+/***/ }),
+
+/***/ 5675:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("http2");
+
+/***/ }),
+
+/***/ 5692:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("https");
+
+/***/ }),
+
+/***/ 9278:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("net");
+
+/***/ }),
+
+/***/ 7598:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:crypto");
+
+/***/ }),
+
+/***/ 8474:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:events");
+
+/***/ }),
+
+/***/ 7075:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:stream");
+
+/***/ }),
+
+/***/ 7975:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:util");
+
+/***/ }),
+
+/***/ 857:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("os");
+
+/***/ }),
+
+/***/ 6928:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("path");
+
+/***/ }),
+
+/***/ 2987:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("perf_hooks");
+
+/***/ }),
+
+/***/ 3480:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("querystring");
+
+/***/ }),
+
+/***/ 2203:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("stream");
+
+/***/ }),
+
+/***/ 3774:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("stream/web");
+
+/***/ }),
+
+/***/ 3193:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("string_decoder");
+
+/***/ }),
+
+/***/ 3557:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("timers");
+
+/***/ }),
+
+/***/ 4756:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("tls");
+
+/***/ }),
+
+/***/ 7016:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("url");
+
+/***/ }),
+
+/***/ 9023:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("util");
+
+/***/ }),
+
+/***/ 8253:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("util/types");
+
+/***/ }),
+
+/***/ 8167:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("worker_threads");
+
+/***/ }),
+
+/***/ 3106:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("zlib");
+
+/***/ }),
+
+/***/ 7182:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+const WritableStream = (__nccwpck_require__(7075).Writable)
+const inherits = (__nccwpck_require__(7975).inherits)
+
+const StreamSearch = __nccwpck_require__(4136)
+
+const PartStream = __nccwpck_require__(612)
+const HeaderParser = __nccwpck_require__(2271)
+
+const DASH = 45
+const B_ONEDASH = Buffer.from('-')
+const B_CRLF = Buffer.from('\r\n')
+const EMPTY_FN = function () {}
+
+function Dicer (cfg) {
+  if (!(this instanceof Dicer)) { return new Dicer(cfg) }
+  WritableStream.call(this, cfg)
+
+  if (!cfg || (!cfg.headerFirst && typeof cfg.boundary !== 'string')) { throw new TypeError('Boundary required') }
+
+  if (typeof cfg.boundary === 'string') { this.setBoundary(cfg.boundary) } else { this._bparser = undefined }
+
+  this._headerFirst = cfg.headerFirst
+
+  this._dashes = 0
+  this._parts = 0
+  this._finished = false
+  this._realFinish = false
+  this._isPreamble = true
+  this._justMatched = false
+  this._firstWrite = true
+  this._inHeader = true
+  this._part = undefined
+  this._cb = undefined
+  this._ignoreData = false
+  this._partOpts = { highWaterMark: cfg.partHwm }
+  this._pause = false
+
+  const self = this
+  this._hparser = new HeaderParser(cfg)
+  this._hparser.on('header', function (header) {
+    self._inHeader = false
+    self._part.emit('header', header)
+  })
+}
+inherits(Dicer, WritableStream)
+
+Dicer.prototype.emit = function (ev) {
+  if (ev === 'finish' && !this._realFinish) {
+    if (!this._finished) {
+      const self = this
+      process.nextTick(function () {
+        self.emit('error', new Error('Unexpected end of multipart data'))
+        if (self._part && !self._ignoreData) {
+          const type = (self._isPreamble ? 'Preamble' : 'Part')
+          self._part.emit('error', new Error(type + ' terminated early due to unexpected end of multipart data'))
+          self._part.push(null)
+          process.nextTick(function () {
+            self._realFinish = true
+            self.emit('finish')
+            self._realFinish = false
+          })
+          return
+        }
+        self._realFinish = true
+        self.emit('finish')
+        self._realFinish = false
+      })
+    }
+  } else { WritableStream.prototype.emit.apply(this, arguments) }
+}
+
+Dicer.prototype._write = function (data, encoding, cb) {
+  // ignore unexpected data (e.g. extra trailer data after finished)
+  if (!this._hparser && !this._bparser) { return cb() }
+
+  if (this._headerFirst && this._isPreamble) {
+    if (!this._part) {
+      this._part = new PartStream(this._partOpts)
+      if (this.listenerCount('preamble') !== 0) { this.emit('preamble', this._part) } else { this._ignore() }
+    }
+    const r = this._hparser.push(data)
+    if (!this._inHeader && r !== undefined && r < data.length) { data = data.slice(r) } else { return cb() }
+  }
+
+  // allows for "easier" testing
+  if (this._firstWrite) {
+    this._bparser.push(B_CRLF)
+    this._firstWrite = false
+  }
+
+  this._bparser.push(data)
+
+  if (this._pause) { this._cb = cb } else { cb() }
+}
+
+Dicer.prototype.reset = function () {
+  this._part = undefined
+  this._bparser = undefined
+  this._hparser = undefined
+}
+
+Dicer.prototype.setBoundary = function (boundary) {
+  const self = this
+  this._bparser = new StreamSearch('\r\n--' + boundary)
+  this._bparser.on('info', function (isMatch, data, start, end) {
+    self._oninfo(isMatch, data, start, end)
+  })
+}
+
+Dicer.prototype._ignore = function () {
+  if (this._part && !this._ignoreData) {
+    this._ignoreData = true
+    this._part.on('error', EMPTY_FN)
+    // we must perform some kind of read on the stream even though we are
+    // ignoring the data, otherwise node's Readable stream will not emit 'end'
+    // after pushing null to the stream
+    this._part.resume()
+  }
+}
+
+Dicer.prototype._oninfo = function (isMatch, data, start, end) {
+  let buf; const self = this; let i = 0; let r; let shouldWriteMore = true
+
+  if (!this._part && this._justMatched && data) {
+    while (this._dashes < 2 && (start + i) < end) {
+      if (data[start + i] === DASH) {
+        ++i
+        ++this._dashes
+      } else {
+        if (this._dashes) { buf = B_ONEDASH }
+        this._dashes = 0
+        break
+      }
+    }
+    if (this._dashes === 2) {
+      if ((start + i) < end && this.listenerCount('trailer') !== 0) { this.emit('trailer', data.slice(start + i, end)) }
+      this.reset()
+      this._finished = true
+      // no more parts will be added
+      if (self._parts === 0) {
+        self._realFinish = true
+        self.emit('finish')
+        self._realFinish = false
+      }
+    }
+    if (this._dashes) { return }
+  }
+  if (this._justMatched) { this._justMatched = false }
+  if (!this._part) {
+    this._part = new PartStream(this._partOpts)
+    this._part._read = function (n) {
+      self._unpause()
+    }
+    if (this._isPreamble && this.listenerCount('preamble') !== 0) {
+      this.emit('preamble', this._part)
+    } else if (this._isPreamble !== true && this.listenerCount('part') !== 0) {
+      this.emit('part', this._part)
+    } else {
+      this._ignore()
+    }
+    if (!this._isPreamble) { this._inHeader = true }
+  }
+  if (data && start < end && !this._ignoreData) {
+    if (this._isPreamble || !this._inHeader) {
+      if (buf) { shouldWriteMore = this._part.push(buf) }
+      shouldWriteMore = this._part.push(data.slice(start, end))
+      if (!shouldWriteMore) { this._pause = true }
+    } else if (!this._isPreamble && this._inHeader) {
+      if (buf) { this._hparser.push(buf) }
+      r = this._hparser.push(data.slice(start, end))
+      if (!this._inHeader && r !== undefined && r < end) { this._oninfo(false, data, start + r, end) }
+    }
+  }
+  if (isMatch) {
+    this._hparser.reset()
+    if (this._isPreamble) { this._isPreamble = false } else {
+      if (start !== end) {
+        ++this._parts
+        this._part.on('end', function () {
+          if (--self._parts === 0) {
+            if (self._finished) {
+              self._realFinish = true
+              self.emit('finish')
+              self._realFinish = false
+            } else {
+              self._unpause()
+            }
+          }
+        })
+      }
+    }
+    this._part.push(null)
+    this._part = undefined
+    this._ignoreData = false
+    this._justMatched = true
+    this._dashes = 0
+  }
+}
+
+Dicer.prototype._unpause = function () {
+  if (!this._pause) { return }
+
+  this._pause = false
+  if (this._cb) {
+    const cb = this._cb
+    this._cb = undefined
+    cb()
+  }
+}
+
+module.exports = Dicer
+
+
+/***/ }),
+
+/***/ 2271:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+const EventEmitter = (__nccwpck_require__(8474).EventEmitter)
+const inherits = (__nccwpck_require__(7975).inherits)
+const getLimit = __nccwpck_require__(2393)
+
+const StreamSearch = __nccwpck_require__(4136)
+
+const B_DCRLF = Buffer.from('\r\n\r\n')
+const RE_CRLF = /\r\n/g
+const RE_HDR = /^([^:]+):[ \t]?([\x00-\xFF]+)?$/ // eslint-disable-line no-control-regex
+
+function HeaderParser (cfg) {
+  EventEmitter.call(this)
+
+  cfg = cfg || {}
+  const self = this
+  this.nread = 0
+  this.maxed = false
+  this.npairs = 0
+  this.maxHeaderPairs = getLimit(cfg, 'maxHeaderPairs', 2000)
+  this.maxHeaderSize = getLimit(cfg, 'maxHeaderSize', 80 * 1024)
+  this.buffer = ''
+  this.header = {}
+  this.finished = false
+  this.ss = new StreamSearch(B_DCRLF)
+  this.ss.on('info', function (isMatch, data, start, end) {
+    if (data && !self.maxed) {
+      if (self.nread + end - start >= self.maxHeaderSize) {
+        end = self.maxHeaderSize - self.nread + start
+        self.nread = self.maxHeaderSize
+        self.maxed = true
+      } else { self.nread += (end - start) }
+
+      self.buffer += data.toString('binary', start, end)
+    }
+    if (isMatch) { self._finish() }
+  })
+}
+inherits(HeaderParser, EventEmitter)
+
+HeaderParser.prototype.push = function (data) {
+  const r = this.ss.push(data)
+  if (this.finished) { return r }
+}
+
+HeaderParser.prototype.reset = function () {
+  this.finished = false
+  this.buffer = ''
+  this.header = {}
+  this.ss.reset()
+}
+
+HeaderParser.prototype._finish = function () {
+  if (this.buffer) { this._parseHeader() }
+  this.ss.matches = this.ss.maxMatches
+  const header = this.header
+  this.header = {}
+  this.buffer = ''
+  this.finished = true
+  this.nread = this.npairs = 0
+  this.maxed = false
+  this.emit('header', header)
+}
+
+HeaderParser.prototype._parseHeader = function () {
+  if (this.npairs === this.maxHeaderPairs) { return }
+
+  const lines = this.buffer.split(RE_CRLF)
+  const len = lines.length
+  let m, h
+
+  for (var i = 0; i < len; ++i) { // eslint-disable-line no-var
+    if (lines[i].length === 0) { continue }
+    if (lines[i][0] === '\t' || lines[i][0] === ' ') {
+      // folded header content
+      // RFC2822 says to just remove the CRLF and not the whitespace following
+      // it, so we follow the RFC and include the leading whitespace ...
+      if (h) {
+        this.header[h][this.header[h].length - 1] += lines[i]
+        continue
+      }
+    }
+
+    const posColon = lines[i].indexOf(':')
+    if (
+      posColon === -1 ||
+      posColon === 0
+    ) {
+      return
+    }
+    m = RE_HDR.exec(lines[i])
+    h = m[1].toLowerCase()
+    this.header[h] = this.header[h] || []
+    this.header[h].push((m[2] || ''))
+    if (++this.npairs === this.maxHeaderPairs) { break }
+  }
+}
+
+module.exports = HeaderParser
+
+
+/***/ }),
+
+/***/ 612:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+const inherits = (__nccwpck_require__(7975).inherits)
+const ReadableStream = (__nccwpck_require__(7075).Readable)
+
+function PartStream (opts) {
+  ReadableStream.call(this, opts)
+}
+inherits(PartStream, ReadableStream)
+
+PartStream.prototype._read = function (n) {}
+
+module.exports = PartStream
+
+
+/***/ }),
+
+/***/ 4136:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+/**
+ * Copyright Brian White. All rights reserved.
+ *
+ * @see https://github.com/mscdex/streamsearch
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ *
+ * Based heavily on the Streaming Boyer-Moore-Horspool C++ implementation
+ * by Hongli Lai at: https://github.com/FooBarWidget/boyer-moore-horspool
+ */
+const EventEmitter = (__nccwpck_require__(8474).EventEmitter)
+const inherits = (__nccwpck_require__(7975).inherits)
+
+function SBMH (needle) {
+  if (typeof needle === 'string') {
+    needle = Buffer.from(needle)
+  }
+
+  if (!Buffer.isBuffer(needle)) {
+    throw new TypeError('The needle has to be a String or a Buffer.')
+  }
+
+  const needleLength = needle.length
+
+  if (needleLength === 0) {
+    throw new Error('The needle cannot be an empty String/Buffer.')
+  }
+
+  if (needleLength > 256) {
+    throw new Error('The needle cannot have a length bigger than 256.')
+  }
+
+  this.maxMatches = Infinity
+  this.matches = 0
+
+  this._occ = new Array(256)
+    .fill(needleLength) // Initialize occurrence table.
+  this._lookbehind_size = 0
+  this._needle = needle
+  this._bufpos = 0
+
+  this._lookbehind = Buffer.alloc(needleLength)
+
+  // Populate occurrence table with analysis of the needle,
+  // ignoring last letter.
+  for (var i = 0; i < needleLength - 1; ++i) { // eslint-disable-line no-var
+    this._occ[needle[i]] = needleLength - 1 - i
+  }
+}
+inherits(SBMH, EventEmitter)
+
+SBMH.prototype.reset = function () {
+  this._lookbehind_size = 0
+  this.matches = 0
+  this._bufpos = 0
+}
+
+SBMH.prototype.push = function (chunk, pos) {
+  if (!Buffer.isBuffer(chunk)) {
+    chunk = Buffer.from(chunk, 'binary')
+  }
+  const chlen = chunk.length
+  this._bufpos = pos || 0
+  let r
+  while (r !== chlen && this.matches < this.maxMatches) { r = this._sbmh_feed(chunk) }
+  return r
+}
+
+SBMH.prototype._sbmh_feed = function (data) {
+  const len = data.length
+  const needle = this._needle
+  const needleLength = needle.length
+  const lastNeedleChar = needle[needleLength - 1]
+
+  // Positive: points to a position in `data`
+  //           pos == 3 points to data[3]
+  // Negative: points to a position in the lookbehind buffer
+  //           pos == -2 points to lookbehind[lookbehind_size - 2]
+  let pos = -this._lookbehind_size
+  let ch
+
+  if (pos < 0) {
+    // Lookbehind buffer is not empty. Perform Boyer-Moore-Horspool
+    // search with character lookup code that considers both the
+    // lookbehind buffer and the current round's haystack data.
+    //
+    // Loop until
+    //   there is a match.
+    // or until
+    //   we've moved past the position that requires the
+    //   lookbehind buffer. In this case we switch to the
+    //   optimized loop.
+    // or until
+    //   the character to look at lies outside the haystack.
+    while (pos < 0 && pos <= len - needleLength) {
+      ch = this._sbmh_lookup_char(data, pos + needleLength - 1)
+
+      if (
+        ch === lastNeedleChar &&
+        this._sbmh_memcmp(data, pos, needleLength - 1)
+      ) {
+        this._lookbehind_size = 0
+        ++this.matches
+        this.emit('info', true)
+
+        return (this._bufpos = pos + needleLength)
+      }
+      pos += this._occ[ch]
+    }
+
+    // No match.
+
+    if (pos < 0) {
+      // There's too few data for Boyer-Moore-Horspool to run,
+      // so let's use a different algorithm to skip as much as
+      // we can.
+      // Forward pos until
+      //   the trailing part of lookbehind + data
+      //   looks like the beginning of the needle
+      // or until
+      //   pos == 0
+      while (pos < 0 && !this._sbmh_memcmp(data, pos, len - pos)) { ++pos }
+    }
+
+    if (pos >= 0) {
+      // Discard lookbehind buffer.
+      this.emit('info', false, this._lookbehind, 0, this._lookbehind_size)
+      this._lookbehind_size = 0
+    } else {
+      // Cut off part of the lookbehind buffer that has
+      // been processed and append the entire haystack
+      // into it.
+      const bytesToCutOff = this._lookbehind_size + pos
+      if (bytesToCutOff > 0) {
+        // The cut off data is guaranteed not to contain the needle.
+        this.emit('info', false, this._lookbehind, 0, bytesToCutOff)
+      }
+
+      this._lookbehind.copy(this._lookbehind, 0, bytesToCutOff,
+        this._lookbehind_size - bytesToCutOff)
+      this._lookbehind_size -= bytesToCutOff
+
+      data.copy(this._lookbehind, this._lookbehind_size)
+      this._lookbehind_size += len
+
+      this._bufpos = len
+      return len
+    }
+  }
+
+  pos += (pos >= 0) * this._bufpos
+
+  // Lookbehind buffer is now empty. We only need to check if the
+  // needle is in the haystack.
+  if (data.indexOf(needle, pos) !== -1) {
+    pos = data.indexOf(needle, pos)
+    ++this.matches
+    if (pos > 0) { this.emit('info', true, data, this._bufpos, pos) } else { this.emit('info', true) }
+
+    return (this._bufpos = pos + needleLength)
+  } else {
+    pos = len - needleLength
+  }
+
+  // There was no match. If there's trailing haystack data that we cannot
+  // match yet using the Boyer-Moore-Horspool algorithm (because the trailing
+  // data is less than the needle size) then match using a modified
+  // algorithm that starts matching from the beginning instead of the end.
+  // Whatever trailing data is left after running this algorithm is added to
+  // the lookbehind buffer.
+  while (
+    pos < len &&
+    (
+      data[pos] !== needle[0] ||
+      (
+        (Buffer.compare(
+          data.subarray(pos, pos + len - pos),
+          needle.subarray(0, len - pos)
+        ) !== 0)
+      )
+    )
+  ) {
+    ++pos
+  }
+  if (pos < len) {
+    data.copy(this._lookbehind, 0, pos, pos + (len - pos))
+    this._lookbehind_size = len - pos
+  }
+
+  // Everything until pos is guaranteed not to contain needle data.
+  if (pos > 0) { this.emit('info', false, data, this._bufpos, pos < len ? pos : len) }
+
+  this._bufpos = len
+  return len
+}
+
+SBMH.prototype._sbmh_lookup_char = function (data, pos) {
+  return (pos < 0)
+    ? this._lookbehind[this._lookbehind_size + pos]
+    : data[pos]
+}
+
+SBMH.prototype._sbmh_memcmp = function (data, pos, len) {
+  for (var i = 0; i < len; ++i) { // eslint-disable-line no-var
+    if (this._sbmh_lookup_char(data, pos + i) !== this._needle[i]) { return false }
+  }
+  return true
+}
+
+module.exports = SBMH
+
+
+/***/ }),
+
+/***/ 9581:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+const WritableStream = (__nccwpck_require__(7075).Writable)
+const { inherits } = __nccwpck_require__(7975)
+const Dicer = __nccwpck_require__(7182)
+
+const MultipartParser = __nccwpck_require__(1192)
+const UrlencodedParser = __nccwpck_require__(855)
+const parseParams = __nccwpck_require__(8929)
+
+function Busboy (opts) {
+  if (!(this instanceof Busboy)) { return new Busboy(opts) }
+
+  if (typeof opts !== 'object') {
+    throw new TypeError('Busboy expected an options-Object.')
+  }
+  if (typeof opts.headers !== 'object') {
+    throw new TypeError('Busboy expected an options-Object with headers-attribute.')
+  }
+  if (typeof opts.headers['content-type'] !== 'string') {
+    throw new TypeError('Missing Content-Type-header.')
+  }
+
+  const {
+    headers,
+    ...streamOptions
+  } = opts
+
+  this.opts = {
+    autoDestroy: false,
+    ...streamOptions
+  }
+  WritableStream.call(this, this.opts)
+
+  this._done = false
+  this._parser = this.getParserByHeaders(headers)
+  this._finished = false
+}
+inherits(Busboy, WritableStream)
+
+Busboy.prototype.emit = function (ev) {
+  if (ev === 'finish') {
+    if (!this._done) {
+      this._parser?.end()
+      return
+    } else if (this._finished) {
+      return
+    }
+    this._finished = true
+  }
+  WritableStream.prototype.emit.apply(this, arguments)
+}
+
+Busboy.prototype.getParserByHeaders = function (headers) {
+  const parsed = parseParams(headers['content-type'])
+
+  const cfg = {
+    defCharset: this.opts.defCharset,
+    fileHwm: this.opts.fileHwm,
+    headers,
+    highWaterMark: this.opts.highWaterMark,
+    isPartAFile: this.opts.isPartAFile,
+    limits: this.opts.limits,
+    parsedConType: parsed,
+    preservePath: this.opts.preservePath
+  }
+
+  if (MultipartParser.detect.test(parsed[0])) {
+    return new MultipartParser(this, cfg)
+  }
+  if (UrlencodedParser.detect.test(parsed[0])) {
+    return new UrlencodedParser(this, cfg)
+  }
+  throw new Error('Unsupported Content-Type.')
+}
+
+Busboy.prototype._write = function (chunk, encoding, cb) {
+  this._parser.write(chunk, cb)
+}
+
+module.exports = Busboy
+module.exports["default"] = Busboy
+module.exports.Busboy = Busboy
+
+module.exports.Dicer = Dicer
+
+
+/***/ }),
+
+/***/ 1192:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+// TODO:
+//  * support 1 nested multipart level
+//    (see second multipart example here:
+//     http://www.w3.org/TR/html401/interact/forms.html#didx-multipartform-data)
+//  * support limits.fieldNameSize
+//     -- this will require modifications to utils.parseParams
+
+const { Readable } = __nccwpck_require__(7075)
+const { inherits } = __nccwpck_require__(7975)
+
+const Dicer = __nccwpck_require__(7182)
+
+const parseParams = __nccwpck_require__(8929)
+const decodeText = __nccwpck_require__(2747)
+const basename = __nccwpck_require__(692)
+const getLimit = __nccwpck_require__(2393)
+
+const RE_BOUNDARY = /^boundary$/i
+const RE_FIELD = /^form-data$/i
+const RE_CHARSET = /^charset$/i
+const RE_FILENAME = /^filename$/i
+const RE_NAME = /^name$/i
+
+Multipart.detect = /^multipart\/form-data/i
+function Multipart (boy, cfg) {
+  let i
+  let len
+  const self = this
+  let boundary
+  const limits = cfg.limits
+  const isPartAFile = cfg.isPartAFile || ((fieldName, contentType, fileName) => (contentType === 'application/octet-stream' || fileName !== undefined))
+  const parsedConType = cfg.parsedConType || []
+  const defCharset = cfg.defCharset || 'utf8'
+  const preservePath = cfg.preservePath
+  const fileOpts = { highWaterMark: cfg.fileHwm }
+
+  for (i = 0, len = parsedConType.length; i < len; ++i) {
+    if (Array.isArray(parsedConType[i]) &&
+      RE_BOUNDARY.test(parsedConType[i][0])) {
+      boundary = parsedConType[i][1]
+      break
+    }
+  }
+
+  function checkFinished () {
+    if (nends === 0 && finished && !boy._done) {
+      finished = false
+      self.end()
+    }
+  }
+
+  if (typeof boundary !== 'string') { throw new Error('Multipart: Boundary not found') }
+
+  const fieldSizeLimit = getLimit(limits, 'fieldSize', 1 * 1024 * 1024)
+  const fileSizeLimit = getLimit(limits, 'fileSize', Infinity)
+  const filesLimit = getLimit(limits, 'files', Infinity)
+  const fieldsLimit = getLimit(limits, 'fields', Infinity)
+  const partsLimit = getLimit(limits, 'parts', Infinity)
+  const headerPairsLimit = getLimit(limits, 'headerPairs', 2000)
+  const headerSizeLimit = getLimit(limits, 'headerSize', 80 * 1024)
+
+  let nfiles = 0
+  let nfields = 0
+  let nends = 0
+  let curFile
+  let curField
+  let finished = false
+
+  this._needDrain = false
+  this._pause = false
+  this._cb = undefined
+  this._nparts = 0
+  this._boy = boy
+
+  const parserCfg = {
+    boundary,
+    maxHeaderPairs: headerPairsLimit,
+    maxHeaderSize: headerSizeLimit,
+    partHwm: fileOpts.highWaterMark,
+    highWaterMark: cfg.highWaterMark
+  }
+
+  this.parser = new Dicer(parserCfg)
+  this.parser.on('drain', function () {
+    self._needDrain = false
+    if (self._cb && !self._pause) {
+      const cb = self._cb
+      self._cb = undefined
+      cb()
+    }
+  }).on('part', function onPart (part) {
+    if (++self._nparts > partsLimit) {
+      self.parser.removeListener('part', onPart)
+      self.parser.on('part', skipPart)
+      boy.hitPartsLimit = true
+      boy.emit('partsLimit')
+      return skipPart(part)
+    }
+
+    // hack because streams2 _always_ doesn't emit 'end' until nextTick, so let
+    // us emit 'end' early since we know the part has ended if we are already
+    // seeing the next part
+    if (curField) {
+      const field = curField
+      field.emit('end')
+      field.removeAllListeners('end')
+    }
+
+    part.on('header', function (header) {
+      let contype
+      let fieldname
+      let parsed
+      let charset
+      let encoding
+      let filename
+      let nsize = 0
+
+      if (header['content-type']) {
+        parsed = parseParams(header['content-type'][0])
+        if (parsed[0]) {
+          contype = parsed[0].toLowerCase()
+          for (i = 0, len = parsed.length; i < len; ++i) {
+            if (RE_CHARSET.test(parsed[i][0])) {
+              charset = parsed[i][1].toLowerCase()
+              break
+            }
+          }
+        }
+      }
+
+      if (contype === undefined) { contype = 'text/plain' }
+      if (charset === undefined) { charset = defCharset }
+
+      if (header['content-disposition']) {
+        parsed = parseParams(header['content-disposition'][0])
+        if (!RE_FIELD.test(parsed[0])) { return skipPart(part) }
+        for (i = 0, len = parsed.length; i < len; ++i) {
+          if (RE_NAME.test(parsed[i][0])) {
+            fieldname = parsed[i][1]
+          } else if (RE_FILENAME.test(parsed[i][0])) {
+            filename = parsed[i][1]
+            if (!preservePath) { filename = basename(filename) }
+          }
+        }
+      } else { return skipPart(part) }
+
+      if (header['content-transfer-encoding']) { encoding = header['content-transfer-encoding'][0].toLowerCase() } else { encoding = '7bit' }
+
+      let onData,
+        onEnd
+
+      if (isPartAFile(fieldname, contype, filename)) {
+        // file/binary field
+        if (nfiles === filesLimit) {
+          if (!boy.hitFilesLimit) {
+            boy.hitFilesLimit = true
+            boy.emit('filesLimit')
+          }
+          return skipPart(part)
+        }
+
+        ++nfiles
+
+        if (boy.listenerCount('file') === 0) {
+          self.parser._ignore()
+          return
+        }
+
+        ++nends
+        const file = new FileStream(fileOpts)
+        curFile = file
+        file.on('end', function () {
+          --nends
+          self._pause = false
+          checkFinished()
+          if (self._cb && !self._needDrain) {
+            const cb = self._cb
+            self._cb = undefined
+            cb()
+          }
+        })
+        file._read = function (n) {
+          if (!self._pause) { return }
+          self._pause = false
+          if (self._cb && !self._needDrain) {
+            const cb = self._cb
+            self._cb = undefined
+            cb()
+          }
+        }
+        boy.emit('file', fieldname, file, filename, encoding, contype)
+
+        onData = function (data) {
+          if ((nsize += data.length) > fileSizeLimit) {
+            const extralen = fileSizeLimit - nsize + data.length
+            if (extralen > 0) { file.push(data.slice(0, extralen)) }
+            file.truncated = true
+            file.bytesRead = fileSizeLimit
+            part.removeAllListeners('data')
+            file.emit('limit')
+            return
+          } else if (!file.push(data)) { self._pause = true }
+
+          file.bytesRead = nsize
+        }
+
+        onEnd = function () {
+          curFile = undefined
+          file.push(null)
+        }
+      } else {
+        // non-file field
+        if (nfields === fieldsLimit) {
+          if (!boy.hitFieldsLimit) {
+            boy.hitFieldsLimit = true
+            boy.emit('fieldsLimit')
+          }
+          return skipPart(part)
+        }
+
+        ++nfields
+        ++nends
+        let buffer = ''
+        let truncated = false
+        curField = part
+
+        onData = function (data) {
+          if ((nsize += data.length) > fieldSizeLimit) {
+            const extralen = (fieldSizeLimit - (nsize - data.length))
+            buffer += data.toString('binary', 0, extralen)
+            truncated = true
+            part.removeAllListeners('data')
+          } else { buffer += data.toString('binary') }
+        }
+
+        onEnd = function () {
+          curField = undefined
+          if (buffer.length) { buffer = decodeText(buffer, 'binary', charset) }
+          boy.emit('field', fieldname, buffer, false, truncated, encoding, contype)
+          --nends
+          checkFinished()
+        }
+      }
+
+      /* As of node@2efe4ab761666 (v0.10.29+/v0.11.14+), busboy had become
+         broken. Streams2/streams3 is a huge black box of confusion, but
+         somehow overriding the sync state seems to fix things again (and still
+         seems to work for previous node versions).
+      */
+      part._readableState.sync = false
+
+      part.on('data', onData)
+      part.on('end', onEnd)
+    }).on('error', function (err) {
+      if (curFile) { curFile.emit('error', err) }
+    })
+  }).on('error', function (err) {
+    boy.emit('error', err)
+  }).on('finish', function () {
+    finished = true
+    checkFinished()
+  })
+}
+
+Multipart.prototype.write = function (chunk, cb) {
+  const r = this.parser.write(chunk)
+  if (r && !this._pause) {
+    cb()
+  } else {
+    this._needDrain = !r
+    this._cb = cb
+  }
+}
+
+Multipart.prototype.end = function () {
+  const self = this
+
+  if (self.parser.writable) {
+    self.parser.end()
+  } else if (!self._boy._done) {
+    process.nextTick(function () {
+      self._boy._done = true
+      self._boy.emit('finish')
+    })
+  }
+}
+
+function skipPart (part) {
+  part.resume()
+}
+
+function FileStream (opts) {
+  Readable.call(this, opts)
+
+  this.bytesRead = 0
+
+  this.truncated = false
+}
+
+inherits(FileStream, Readable)
+
+FileStream.prototype._read = function (n) {}
+
+module.exports = Multipart
+
+
+/***/ }),
+
+/***/ 855:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+const Decoder = __nccwpck_require__(1496)
+const decodeText = __nccwpck_require__(2747)
+const getLimit = __nccwpck_require__(2393)
+
+const RE_CHARSET = /^charset$/i
+
+UrlEncoded.detect = /^application\/x-www-form-urlencoded/i
+function UrlEncoded (boy, cfg) {
+  const limits = cfg.limits
+  const parsedConType = cfg.parsedConType
+  this.boy = boy
+
+  this.fieldSizeLimit = getLimit(limits, 'fieldSize', 1 * 1024 * 1024)
+  this.fieldNameSizeLimit = getLimit(limits, 'fieldNameSize', 100)
+  this.fieldsLimit = getLimit(limits, 'fields', Infinity)
+
+  let charset
+  for (var i = 0, len = parsedConType.length; i < len; ++i) { // eslint-disable-line no-var
+    if (Array.isArray(parsedConType[i]) &&
+        RE_CHARSET.test(parsedConType[i][0])) {
+      charset = parsedConType[i][1].toLowerCase()
+      break
+    }
+  }
+
+  if (charset === undefined) { charset = cfg.defCharset || 'utf8' }
+
+  this.decoder = new Decoder()
+  this.charset = charset
+  this._fields = 0
+  this._state = 'key'
+  this._checkingBytes = true
+  this._bytesKey = 0
+  this._bytesVal = 0
+  this._key = ''
+  this._val = ''
+  this._keyTrunc = false
+  this._valTrunc = false
+  this._hitLimit = false
+}
+
+UrlEncoded.prototype.write = function (data, cb) {
+  if (this._fields === this.fieldsLimit) {
+    if (!this.boy.hitFieldsLimit) {
+      this.boy.hitFieldsLimit = true
+      this.boy.emit('fieldsLimit')
+    }
+    return cb()
+  }
+
+  let idxeq; let idxamp; let i; let p = 0; const len = data.length
+
+  while (p < len) {
+    if (this._state === 'key') {
+      idxeq = idxamp = undefined
+      for (i = p; i < len; ++i) {
+        if (!this._checkingBytes) { ++p }
+        if (data[i] === 0x3D/* = */) {
+          idxeq = i
+          break
+        } else if (data[i] === 0x26/* & */) {
+          idxamp = i
+          break
+        }
+        if (this._checkingBytes && this._bytesKey === this.fieldNameSizeLimit) {
+          this._hitLimit = true
+          break
+        } else if (this._checkingBytes) { ++this._bytesKey }
+      }
+
+      if (idxeq !== undefined) {
+        // key with assignment
+        if (idxeq > p) { this._key += this.decoder.write(data.toString('binary', p, idxeq)) }
+        this._state = 'val'
+
+        this._hitLimit = false
+        this._checkingBytes = true
+        this._val = ''
+        this._bytesVal = 0
+        this._valTrunc = false
+        this.decoder.reset()
+
+        p = idxeq + 1
+      } else if (idxamp !== undefined) {
+        // key with no assignment
+        ++this._fields
+        let key; const keyTrunc = this._keyTrunc
+        if (idxamp > p) { key = (this._key += this.decoder.write(data.toString('binary', p, idxamp))) } else { key = this._key }
+
+        this._hitLimit = false
+        this._checkingBytes = true
+        this._key = ''
+        this._bytesKey = 0
+        this._keyTrunc = false
+        this.decoder.reset()
+
+        if (key.length) {
+          this.boy.emit('field', decodeText(key, 'binary', this.charset),
+            '',
+            keyTrunc,
+            false)
+        }
+
+        p = idxamp + 1
+        if (this._fields === this.fieldsLimit) { return cb() }
+      } else if (this._hitLimit) {
+        // we may not have hit the actual limit if there are encoded bytes...
+        if (i > p) { this._key += this.decoder.write(data.toString('binary', p, i)) }
+        p = i
+        if ((this._bytesKey = this._key.length) === this.fieldNameSizeLimit) {
+          // yep, we actually did hit the limit
+          this._checkingBytes = false
+          this._keyTrunc = true
+        }
+      } else {
+        if (p < len) { this._key += this.decoder.write(data.toString('binary', p)) }
+        p = len
+      }
+    } else {
+      idxamp = undefined
+      for (i = p; i < len; ++i) {
+        if (!this._checkingBytes) { ++p }
+        if (data[i] === 0x26/* & */) {
+          idxamp = i
+          break
+        }
+        if (this._checkingBytes && this._bytesVal === this.fieldSizeLimit) {
+          this._hitLimit = true
+          break
+        } else if (this._checkingBytes) { ++this._bytesVal }
+      }
+
+      if (idxamp !== undefined) {
+        ++this._fields
+        if (idxamp > p) { this._val += this.decoder.write(data.toString('binary', p, idxamp)) }
+        this.boy.emit('field', decodeText(this._key, 'binary', this.charset),
+          decodeText(this._val, 'binary', this.charset),
+          this._keyTrunc,
+          this._valTrunc)
+        this._state = 'key'
+
+        this._hitLimit = false
+        this._checkingBytes = true
+        this._key = ''
+        this._bytesKey = 0
+        this._keyTrunc = false
+        this.decoder.reset()
+
+        p = idxamp + 1
+        if (this._fields === this.fieldsLimit) { return cb() }
+      } else if (this._hitLimit) {
+        // we may not have hit the actual limit if there are encoded bytes...
+        if (i > p) { this._val += this.decoder.write(data.toString('binary', p, i)) }
+        p = i
+        if ((this._val === '' && this.fieldSizeLimit === 0) ||
+            (this._bytesVal = this._val.length) === this.fieldSizeLimit) {
+          // yep, we actually did hit the limit
+          this._checkingBytes = false
+          this._valTrunc = true
+        }
+      } else {
+        if (p < len) { this._val += this.decoder.write(data.toString('binary', p)) }
+        p = len
+      }
+    }
+  }
+  cb()
+}
+
+UrlEncoded.prototype.end = function () {
+  if (this.boy._done) { return }
+
+  if (this._state === 'key' && this._key.length > 0) {
+    this.boy.emit('field', decodeText(this._key, 'binary', this.charset),
+      '',
+      this._keyTrunc,
+      false)
+  } else if (this._state === 'val') {
+    this.boy.emit('field', decodeText(this._key, 'binary', this.charset),
+      decodeText(this._val, 'binary', this.charset),
+      this._keyTrunc,
+      this._valTrunc)
+  }
+  this.boy._done = true
+  this.boy.emit('finish')
+}
+
+module.exports = UrlEncoded
+
+
+/***/ }),
+
+/***/ 1496:
+/***/ ((module) => {
+
+
+
+const RE_PLUS = /\+/g
+
+const HEX = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
+  0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]
+
+function Decoder () {
+  this.buffer = undefined
+}
+Decoder.prototype.write = function (str) {
+  // Replace '+' with ' ' before decoding
+  str = str.replace(RE_PLUS, ' ')
+  let res = ''
+  let i = 0; let p = 0; const len = str.length
+  for (; i < len; ++i) {
+    if (this.buffer !== undefined) {
+      if (!HEX[str.charCodeAt(i)]) {
+        res += '%' + this.buffer
+        this.buffer = undefined
+        --i // retry character
+      } else {
+        this.buffer += str[i]
+        ++p
+        if (this.buffer.length === 2) {
+          res += String.fromCharCode(parseInt(this.buffer, 16))
+          this.buffer = undefined
+        }
+      }
+    } else if (str[i] === '%') {
+      if (i > p) {
+        res += str.substring(p, i)
+        p = i
+      }
+      this.buffer = ''
+      ++p
+    }
+  }
+  if (p < len && this.buffer === undefined) { res += str.substring(p) }
+  return res
+}
+Decoder.prototype.reset = function () {
+  this.buffer = undefined
+}
+
+module.exports = Decoder
+
+
+/***/ }),
+
+/***/ 692:
+/***/ ((module) => {
+
+
+
+module.exports = function basename (path) {
+  if (typeof path !== 'string') { return '' }
+  for (var i = path.length - 1; i >= 0; --i) { // eslint-disable-line no-var
+    switch (path.charCodeAt(i)) {
+      case 0x2F: // '/'
+      case 0x5C: // '\'
+        path = path.slice(i + 1)
+        return (path === '..' || path === '.' ? '' : path)
+    }
+  }
+  return (path === '..' || path === '.' ? '' : path)
+}
+
+
+/***/ }),
+
+/***/ 2747:
+/***/ (function(module) {
+
+
+
+// Node has always utf-8
+const utf8Decoder = new TextDecoder('utf-8')
+const textDecoders = new Map([
+  ['utf-8', utf8Decoder],
+  ['utf8', utf8Decoder]
+])
+
+function getDecoder (charset) {
+  let lc
+  while (true) {
+    switch (charset) {
+      case 'utf-8':
+      case 'utf8':
+        return decoders.utf8
+      case 'latin1':
+      case 'ascii': // TODO: Make these a separate, strict decoder?
+      case 'us-ascii':
+      case 'iso-8859-1':
+      case 'iso8859-1':
+      case 'iso88591':
+      case 'iso_8859-1':
+      case 'windows-1252':
+      case 'iso_8859-1:1987':
+      case 'cp1252':
+      case 'x-cp1252':
+        return decoders.latin1
+      case 'utf16le':
+      case 'utf-16le':
+      case 'ucs2':
+      case 'ucs-2':
+        return decoders.utf16le
+      case 'base64':
+        return decoders.base64
+      default:
+        if (lc === undefined) {
+          lc = true
+          charset = charset.toLowerCase()
+          continue
+        }
+        return decoders.other.bind(charset)
+    }
+  }
+}
+
+const decoders = {
+  utf8: (data, sourceEncoding) => {
+    if (data.length === 0) {
+      return ''
+    }
+    if (typeof data === 'string') {
+      data = Buffer.from(data, sourceEncoding)
+    }
+    return data.utf8Slice(0, data.length)
+  },
+
+  latin1: (data, sourceEncoding) => {
+    if (data.length === 0) {
+      return ''
+    }
+    if (typeof data === 'string') {
+      return data
+    }
+    return data.latin1Slice(0, data.length)
+  },
+
+  utf16le: (data, sourceEncoding) => {
+    if (data.length === 0) {
+      return ''
+    }
+    if (typeof data === 'string') {
+      data = Buffer.from(data, sourceEncoding)
+    }
+    return data.ucs2Slice(0, data.length)
+  },
+
+  base64: (data, sourceEncoding) => {
+    if (data.length === 0) {
+      return ''
+    }
+    if (typeof data === 'string') {
+      data = Buffer.from(data, sourceEncoding)
+    }
+    return data.base64Slice(0, data.length)
+  },
+
+  other: (data, sourceEncoding) => {
+    if (data.length === 0) {
+      return ''
+    }
+    if (typeof data === 'string') {
+      data = Buffer.from(data, sourceEncoding)
+    }
+
+    if (textDecoders.has(this.toString())) {
+      try {
+        return textDecoders.get(this).decode(data)
+      } catch {}
+    }
+    return typeof data === 'string'
+      ? data
+      : data.toString()
+  }
+}
+
+function decodeText (text, sourceEncoding, destEncoding) {
+  if (text) {
+    return getDecoder(destEncoding)(text, sourceEncoding)
+  }
+  return text
+}
+
+module.exports = decodeText
+
+
+/***/ }),
+
+/***/ 2393:
+/***/ ((module) => {
+
+
+
+module.exports = function getLimit (limits, name, defaultLimit) {
+  if (
+    !limits ||
+    limits[name] === undefined ||
+    limits[name] === null
+  ) { return defaultLimit }
+
+  if (
+    typeof limits[name] !== 'number' ||
+    isNaN(limits[name])
+  ) { throw new TypeError('Limit ' + name + ' is not a valid number') }
+
+  return limits[name]
+}
+
+
+/***/ }),
+
+/***/ 8929:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+/* eslint-disable object-property-newline */
+
+
+const decodeText = __nccwpck_require__(2747)
+
+const RE_ENCODED = /%[a-fA-F0-9][a-fA-F0-9]/g
+
+const EncodedLookup = {
+  '%00': '\x00', '%01': '\x01', '%02': '\x02', '%03': '\x03', '%04': '\x04',
+  '%05': '\x05', '%06': '\x06', '%07': '\x07', '%08': '\x08', '%09': '\x09',
+  '%0a': '\x0a', '%0A': '\x0a', '%0b': '\x0b', '%0B': '\x0b', '%0c': '\x0c',
+  '%0C': '\x0c', '%0d': '\x0d', '%0D': '\x0d', '%0e': '\x0e', '%0E': '\x0e',
+  '%0f': '\x0f', '%0F': '\x0f', '%10': '\x10', '%11': '\x11', '%12': '\x12',
+  '%13': '\x13', '%14': '\x14', '%15': '\x15', '%16': '\x16', '%17': '\x17',
+  '%18': '\x18', '%19': '\x19', '%1a': '\x1a', '%1A': '\x1a', '%1b': '\x1b',
+  '%1B': '\x1b', '%1c': '\x1c', '%1C': '\x1c', '%1d': '\x1d', '%1D': '\x1d',
+  '%1e': '\x1e', '%1E': '\x1e', '%1f': '\x1f', '%1F': '\x1f', '%20': '\x20',
+  '%21': '\x21', '%22': '\x22', '%23': '\x23', '%24': '\x24', '%25': '\x25',
+  '%26': '\x26', '%27': '\x27', '%28': '\x28', '%29': '\x29', '%2a': '\x2a',
+  '%2A': '\x2a', '%2b': '\x2b', '%2B': '\x2b', '%2c': '\x2c', '%2C': '\x2c',
+  '%2d': '\x2d', '%2D': '\x2d', '%2e': '\x2e', '%2E': '\x2e', '%2f': '\x2f',
+  '%2F': '\x2f', '%30': '\x30', '%31': '\x31', '%32': '\x32', '%33': '\x33',
+  '%34': '\x34', '%35': '\x35', '%36': '\x36', '%37': '\x37', '%38': '\x38',
+  '%39': '\x39', '%3a': '\x3a', '%3A': '\x3a', '%3b': '\x3b', '%3B': '\x3b',
+  '%3c': '\x3c', '%3C': '\x3c', '%3d': '\x3d', '%3D': '\x3d', '%3e': '\x3e',
+  '%3E': '\x3e', '%3f': '\x3f', '%3F': '\x3f', '%40': '\x40', '%41': '\x41',
+  '%42': '\x42', '%43': '\x43', '%44': '\x44', '%45': '\x45', '%46': '\x46',
+  '%47': '\x47', '%48': '\x48', '%49': '\x49', '%4a': '\x4a', '%4A': '\x4a',
+  '%4b': '\x4b', '%4B': '\x4b', '%4c': '\x4c', '%4C': '\x4c', '%4d': '\x4d',
+  '%4D': '\x4d', '%4e': '\x4e', '%4E': '\x4e', '%4f': '\x4f', '%4F': '\x4f',
+  '%50': '\x50', '%51': '\x51', '%52': '\x52', '%53': '\x53', '%54': '\x54',
+  '%55': '\x55', '%56': '\x56', '%57': '\x57', '%58': '\x58', '%59': '\x59',
+  '%5a': '\x5a', '%5A': '\x5a', '%5b': '\x5b', '%5B': '\x5b', '%5c': '\x5c',
+  '%5C': '\x5c', '%5d': '\x5d', '%5D': '\x5d', '%5e': '\x5e', '%5E': '\x5e',
+  '%5f': '\x5f', '%5F': '\x5f', '%60': '\x60', '%61': '\x61', '%62': '\x62',
+  '%63': '\x63', '%64': '\x64', '%65': '\x65', '%66': '\x66', '%67': '\x67',
+  '%68': '\x68', '%69': '\x69', '%6a': '\x6a', '%6A': '\x6a', '%6b': '\x6b',
+  '%6B': '\x6b', '%6c': '\x6c', '%6C': '\x6c', '%6d': '\x6d', '%6D': '\x6d',
+  '%6e': '\x6e', '%6E': '\x6e', '%6f': '\x6f', '%6F': '\x6f', '%70': '\x70',
+  '%71': '\x71', '%72': '\x72', '%73': '\x73', '%74': '\x74', '%75': '\x75',
+  '%76': '\x76', '%77': '\x77', '%78': '\x78', '%79': '\x79', '%7a': '\x7a',
+  '%7A': '\x7a', '%7b': '\x7b', '%7B': '\x7b', '%7c': '\x7c', '%7C': '\x7c',
+  '%7d': '\x7d', '%7D': '\x7d', '%7e': '\x7e', '%7E': '\x7e', '%7f': '\x7f',
+  '%7F': '\x7f', '%80': '\x80', '%81': '\x81', '%82': '\x82', '%83': '\x83',
+  '%84': '\x84', '%85': '\x85', '%86': '\x86', '%87': '\x87', '%88': '\x88',
+  '%89': '\x89', '%8a': '\x8a', '%8A': '\x8a', '%8b': '\x8b', '%8B': '\x8b',
+  '%8c': '\x8c', '%8C': '\x8c', '%8d': '\x8d', '%8D': '\x8d', '%8e': '\x8e',
+  '%8E': '\x8e', '%8f': '\x8f', '%8F': '\x8f', '%90': '\x90', '%91': '\x91',
+  '%92': '\x92', '%93': '\x93', '%94': '\x94', '%95': '\x95', '%96': '\x96',
+  '%97': '\x97', '%98': '\x98', '%99': '\x99', '%9a': '\x9a', '%9A': '\x9a',
+  '%9b': '\x9b', '%9B': '\x9b', '%9c': '\x9c', '%9C': '\x9c', '%9d': '\x9d',
+  '%9D': '\x9d', '%9e': '\x9e', '%9E': '\x9e', '%9f': '\x9f', '%9F': '\x9f',
+  '%a0': '\xa0', '%A0': '\xa0', '%a1': '\xa1', '%A1': '\xa1', '%a2': '\xa2',
+  '%A2': '\xa2', '%a3': '\xa3', '%A3': '\xa3', '%a4': '\xa4', '%A4': '\xa4',
+  '%a5': '\xa5', '%A5': '\xa5', '%a6': '\xa6', '%A6': '\xa6', '%a7': '\xa7',
+  '%A7': '\xa7', '%a8': '\xa8', '%A8': '\xa8', '%a9': '\xa9', '%A9': '\xa9',
+  '%aa': '\xaa', '%Aa': '\xaa', '%aA': '\xaa', '%AA': '\xaa', '%ab': '\xab',
+  '%Ab': '\xab', '%aB': '\xab', '%AB': '\xab', '%ac': '\xac', '%Ac': '\xac',
+  '%aC': '\xac', '%AC': '\xac', '%ad': '\xad', '%Ad': '\xad', '%aD': '\xad',
+  '%AD': '\xad', '%ae': '\xae', '%Ae': '\xae', '%aE': '\xae', '%AE': '\xae',
+  '%af': '\xaf', '%Af': '\xaf', '%aF': '\xaf', '%AF': '\xaf', '%b0': '\xb0',
+  '%B0': '\xb0', '%b1': '\xb1', '%B1': '\xb1', '%b2': '\xb2', '%B2': '\xb2',
+  '%b3': '\xb3', '%B3': '\xb3', '%b4': '\xb4', '%B4': '\xb4', '%b5': '\xb5',
+  '%B5': '\xb5', '%b6': '\xb6', '%B6': '\xb6', '%b7': '\xb7', '%B7': '\xb7',
+  '%b8': '\xb8', '%B8': '\xb8', '%b9': '\xb9', '%B9': '\xb9', '%ba': '\xba',
+  '%Ba': '\xba', '%bA': '\xba', '%BA': '\xba', '%bb': '\xbb', '%Bb': '\xbb',
+  '%bB': '\xbb', '%BB': '\xbb', '%bc': '\xbc', '%Bc': '\xbc', '%bC': '\xbc',
+  '%BC': '\xbc', '%bd': '\xbd', '%Bd': '\xbd', '%bD': '\xbd', '%BD': '\xbd',
+  '%be': '\xbe', '%Be': '\xbe', '%bE': '\xbe', '%BE': '\xbe', '%bf': '\xbf',
+  '%Bf': '\xbf', '%bF': '\xbf', '%BF': '\xbf', '%c0': '\xc0', '%C0': '\xc0',
+  '%c1': '\xc1', '%C1': '\xc1', '%c2': '\xc2', '%C2': '\xc2', '%c3': '\xc3',
+  '%C3': '\xc3', '%c4': '\xc4', '%C4': '\xc4', '%c5': '\xc5', '%C5': '\xc5',
+  '%c6': '\xc6', '%C6': '\xc6', '%c7': '\xc7', '%C7': '\xc7', '%c8': '\xc8',
+  '%C8': '\xc8', '%c9': '\xc9', '%C9': '\xc9', '%ca': '\xca', '%Ca': '\xca',
+  '%cA': '\xca', '%CA': '\xca', '%cb': '\xcb', '%Cb': '\xcb', '%cB': '\xcb',
+  '%CB': '\xcb', '%cc': '\xcc', '%Cc': '\xcc', '%cC': '\xcc', '%CC': '\xcc',
+  '%cd': '\xcd', '%Cd': '\xcd', '%cD': '\xcd', '%CD': '\xcd', '%ce': '\xce',
+  '%Ce': '\xce', '%cE': '\xce', '%CE': '\xce', '%cf': '\xcf', '%Cf': '\xcf',
+  '%cF': '\xcf', '%CF': '\xcf', '%d0': '\xd0', '%D0': '\xd0', '%d1': '\xd1',
+  '%D1': '\xd1', '%d2': '\xd2', '%D2': '\xd2', '%d3': '\xd3', '%D3': '\xd3',
+  '%d4': '\xd4', '%D4': '\xd4', '%d5': '\xd5', '%D5': '\xd5', '%d6': '\xd6',
+  '%D6': '\xd6', '%d7': '\xd7', '%D7': '\xd7', '%d8': '\xd8', '%D8': '\xd8',
+  '%d9': '\xd9', '%D9': '\xd9', '%da': '\xda', '%Da': '\xda', '%dA': '\xda',
+  '%DA': '\xda', '%db': '\xdb', '%Db': '\xdb', '%dB': '\xdb', '%DB': '\xdb',
+  '%dc': '\xdc', '%Dc': '\xdc', '%dC': '\xdc', '%DC': '\xdc', '%dd': '\xdd',
+  '%Dd': '\xdd', '%dD': '\xdd', '%DD': '\xdd', '%de': '\xde', '%De': '\xde',
+  '%dE': '\xde', '%DE': '\xde', '%df': '\xdf', '%Df': '\xdf', '%dF': '\xdf',
+  '%DF': '\xdf', '%e0': '\xe0', '%E0': '\xe0', '%e1': '\xe1', '%E1': '\xe1',
+  '%e2': '\xe2', '%E2': '\xe2', '%e3': '\xe3', '%E3': '\xe3', '%e4': '\xe4',
+  '%E4': '\xe4', '%e5': '\xe5', '%E5': '\xe5', '%e6': '\xe6', '%E6': '\xe6',
+  '%e7': '\xe7', '%E7': '\xe7', '%e8': '\xe8', '%E8': '\xe8', '%e9': '\xe9',
+  '%E9': '\xe9', '%ea': '\xea', '%Ea': '\xea', '%eA': '\xea', '%EA': '\xea',
+  '%eb': '\xeb', '%Eb': '\xeb', '%eB': '\xeb', '%EB': '\xeb', '%ec': '\xec',
+  '%Ec': '\xec', '%eC': '\xec', '%EC': '\xec', '%ed': '\xed', '%Ed': '\xed',
+  '%eD': '\xed', '%ED': '\xed', '%ee': '\xee', '%Ee': '\xee', '%eE': '\xee',
+  '%EE': '\xee', '%ef': '\xef', '%Ef': '\xef', '%eF': '\xef', '%EF': '\xef',
+  '%f0': '\xf0', '%F0': '\xf0', '%f1': '\xf1', '%F1': '\xf1', '%f2': '\xf2',
+  '%F2': '\xf2', '%f3': '\xf3', '%F3': '\xf3', '%f4': '\xf4', '%F4': '\xf4',
+  '%f5': '\xf5', '%F5': '\xf5', '%f6': '\xf6', '%F6': '\xf6', '%f7': '\xf7',
+  '%F7': '\xf7', '%f8': '\xf8', '%F8': '\xf8', '%f9': '\xf9', '%F9': '\xf9',
+  '%fa': '\xfa', '%Fa': '\xfa', '%fA': '\xfa', '%FA': '\xfa', '%fb': '\xfb',
+  '%Fb': '\xfb', '%fB': '\xfb', '%FB': '\xfb', '%fc': '\xfc', '%Fc': '\xfc',
+  '%fC': '\xfc', '%FC': '\xfc', '%fd': '\xfd', '%Fd': '\xfd', '%fD': '\xfd',
+  '%FD': '\xfd', '%fe': '\xfe', '%Fe': '\xfe', '%fE': '\xfe', '%FE': '\xfe',
+  '%ff': '\xff', '%Ff': '\xff', '%fF': '\xff', '%FF': '\xff'
+}
+
+function encodedReplacer (match) {
+  return EncodedLookup[match]
+}
+
+const STATE_KEY = 0
+const STATE_VALUE = 1
+const STATE_CHARSET = 2
+const STATE_LANG = 3
+
+function parseParams (str) {
+  const res = []
+  let state = STATE_KEY
+  let charset = ''
+  let inquote = false
+  let escaping = false
+  let p = 0
+  let tmp = ''
+  const len = str.length
+
+  for (var i = 0; i < len; ++i) { // eslint-disable-line no-var
+    const char = str[i]
+    if (char === '\\' && inquote) {
+      if (escaping) { escaping = false } else {
+        escaping = true
+        continue
+      }
+    } else if (char === '"') {
+      if (!escaping) {
+        if (inquote) {
+          inquote = false
+          state = STATE_KEY
+        } else { inquote = true }
+        continue
+      } else { escaping = false }
+    } else {
+      if (escaping && inquote) { tmp += '\\' }
+      escaping = false
+      if ((state === STATE_CHARSET || state === STATE_LANG) && char === "'") {
+        if (state === STATE_CHARSET) {
+          state = STATE_LANG
+          charset = tmp.substring(1)
+        } else { state = STATE_VALUE }
+        tmp = ''
+        continue
+      } else if (state === STATE_KEY &&
+        (char === '*' || char === '=') &&
+        res.length) {
+        state = char === '*'
+          ? STATE_CHARSET
+          : STATE_VALUE
+        res[p] = [tmp, undefined]
+        tmp = ''
+        continue
+      } else if (!inquote && char === ';') {
+        state = STATE_KEY
+        if (charset) {
+          if (tmp.length) {
+            tmp = decodeText(tmp.replace(RE_ENCODED, encodedReplacer),
+              'binary',
+              charset)
+          }
+          charset = ''
+        } else if (tmp.length) {
+          tmp = decodeText(tmp, 'binary', 'utf8')
+        }
+        if (res[p] === undefined) { res[p] = tmp } else { res[p][1] = tmp }
+        tmp = ''
+        ++p
+        continue
+      } else if (!inquote && (char === ' ' || char === '\t')) { continue }
+    }
+    tmp += char
+  }
+  if (charset && tmp.length) {
+    tmp = decodeText(tmp.replace(RE_ENCODED, encodedReplacer),
+      'binary',
+      charset)
+  } else if (tmp) {
+    tmp = decodeText(tmp, 'binary', 'utf8')
+  }
+
+  if (res[p] === undefined) {
+    if (tmp) { res[p] = tmp }
+  } else { res[p][1] = tmp }
+
+  return res
+}
+
+module.exports = parseParams
+
 
 /***/ })
 
@@ -109234,6 +109300,6 @@ var UsersVisibleAppsGetToManyRelatedFieldsAppsEnum = {
 /******/ // startup
 /******/ // Load entry module and return exports
 /******/ // This entry module used 'module' so it can't be inlined
-/******/ var __webpack_exports__ = __nccwpck_require__(98);
+/******/ var __webpack_exports__ = __nccwpck_require__(9407);
 /******/ __webpack_exports__ = await __webpack_exports__;
 /******/ 
