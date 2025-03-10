@@ -1,17 +1,18 @@
 import {
   AppStoreConnectAPIOptions,
 } from "appstore-connect-sdk";
-import { AppStoreApi, CreateXCodeCloudBuildInput } from "./appstore-sdk.js";
+import { AppStoreApi, assertRepositoryId, CreateXCodeCloudBuildInput } from "./appstore-sdk.js";
 
 export async function startXCodeCloudBuild(
   input: AppStoreConnectAPIOptions & CreateXCodeCloudBuildInput
 ) {
-  const { workflowName, gitRef, repositoryName } = input;
+  const { workflowName, gitRef, bundleId } = input;
   const appStoreApi = new AppStoreApi(input);
 
-  const { repository, product } =
-    await appStoreApi.getRepositoryAndProductByName(repositoryName);
-  const gitReference = await appStoreApi.getGitReference(repository.id, gitRef);
+  const product = await appStoreApi.getProductByBundleId(bundleId);
+  const repositoryId = assertRepositoryId(product);
+
+  const gitReference = await appStoreApi.getGitReference(repositoryId, gitRef);
   const workflow = await appStoreApi.getWorkflowByName(
     product.id,
     workflowName
@@ -22,7 +23,7 @@ export async function startXCodeCloudBuild(
   );
 
   return {
-    repositoryId: repository.id,
+    repositoryId,
     productId: product.id,
     workflowId: workflow.id,
     buildId: buildRun.data.id,

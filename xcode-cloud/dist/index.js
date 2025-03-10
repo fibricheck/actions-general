@@ -107124,6 +107124,7 @@ async function exponentialRetry(asyncRequest, { maxRetries = 10, timeBetween = 1
             waitTime *= timeMultiplier;
         }
         catch (error) {
+            console.warn(error);
             if (retries === 0) {
                 throw error;
             }
@@ -107136,7 +107137,6 @@ async function exponentialRetry(asyncRequest, { maxRetries = 10, timeBetween = 1
 
 
 
-;
 var InitState;
 (function (InitState) {
     InitState[InitState["Uninitialized"] = 0] = "Uninitialized";
@@ -107165,23 +107165,33 @@ class AppStoreApi {
         this.scmRepositoriesApi = await this.client.create(ScmRepositoriesApi);
         this.initState = InitState.Initialized;
     }
-    async getRepositoryAndProductByName(repositoryName) {
+    async getProductById(productId) {
         await this.init();
         return await exponentialRetry(async () => {
-            const ciProductResponse = await this.ciProductsApi.ciProductsGetCollection({
-                filterProductType: [CiProductsGetCollectionFilterProductTypeEnum.App],
+            const ciProductResponse = await this.ciProductsApi.ciProductsGetInstance({
+                id: productId,
                 include: [
                     CiProductsGetCollectionIncludeEnum.PrimaryRepositories,
                     CiProductsGetCollectionIncludeEnum.BundleId,
                 ],
             });
-            const repository = assertRepositoryExists(ciProductResponse, repositoryName);
-            const product = assertProductExists(ciProductResponse, repository.id);
-            return {
-                repository,
-                product
-            };
-        }, { identifier: 'get-repository-by-name' });
+            return ciProductResponse.data;
+        }, { identifier: "get-repository-by-name" });
+    }
+    async getProductByBundleId(bundleId) {
+        await this.init();
+        return await exponentialRetry(async () => {
+            const ciProductResponse = await this.ciProductsApi.ciProductsGetCollection({
+                filterProductType: [
+                    CiProductsGetCollectionFilterProductTypeEnum.App,
+                ],
+                include: [
+                    CiProductsGetCollectionIncludeEnum.PrimaryRepositories,
+                    CiProductsGetCollectionIncludeEnum.BundleId,
+                ],
+            });
+            return assertProductByBundleId(ciProductResponse, bundleId);
+        }, { identifier: "get-repository-by-name" });
     }
     async getGitReference(repositoryId, gitRef) {
         await this.init();
@@ -107197,7 +107207,7 @@ class AppStoreApi {
             });
             return assertGitReferenceExists(gitReferences, gitRef);
         }, {
-            identifier: 'get-git-reference'
+            identifier: "get-git-reference",
         });
     }
     async getWorkflowByName(productId, workflowName) {
@@ -107205,10 +107215,12 @@ class AppStoreApi {
         return await exponentialRetry(async () => {
             const allWorkflows = await this.ciProductsApi.ciProductsWorkflowsGetToManyRelated({
                 id: productId,
-                include: [CiProductsWorkflowsGetToManyRelatedIncludeEnum.Repository],
+                include: [
+                    CiProductsWorkflowsGetToManyRelatedIncludeEnum.Repository,
+                ],
             });
             return await assertWorkflowExists(allWorkflows, workflowName);
-        }, { identifier: 'get-workflow-by-name' });
+        }, { identifier: "get-workflow-by-name" });
     }
     async createBuildRun(workflowId, gitRefId) {
         await this.init();
@@ -107235,23 +107247,22 @@ class AppStoreApi {
                 },
             });
             return buildRun;
-        }, { identifier: 'create-build-run' });
+        }, { identifier: "create-build-run" });
     }
 }
-function assertRepositoryExists(response, repositoryName) {
-    const repository = response.included?.find((includedItem) => includedItem.type === "scmRepositories" &&
-        includedItem.attributes.repositoryName === repositoryName);
-    if (!repository) {
-        throw new Error(`Repository ${repositoryName} not found`);
-    }
-    return repository;
-}
-function assertProductExists(response, repositoryId) {
-    const product = response.data.find((ciProduct) => ciProduct.relationships?.primaryRepositories?.data?.find((repo) => repo.id === repositoryId) !== undefined);
+function assertProductByBundleId(products, bundleId) {
+    const product = products.data?.find((tempProduct) => tempProduct.relationships?.bundleId?.data?.id === bundleId);
     if (!product) {
-        throw new Error(`Product for repository ${repositoryId} not be found.`);
+        throw new Error(`Product for bundle id ${bundleId} could not be found.`);
     }
     return product;
+}
+function assertRepositoryId(productData) {
+    const repositoryInfo = productData.relationships?.primaryRepositories?.data?.find((x) => x.type === "scmRepositories");
+    if (!repositoryInfo) {
+        throw new Error(`No repository attached to product ${productData.id}`);
+    }
+    return repositoryInfo.id;
 }
 function assertGitReferenceExists(response, gitRef) {
     const gitReference = response.data.find((reference) => reference.attributes.canonicalName === gitRef);
@@ -107271,14 +107282,15 @@ function assertWorkflowExists(response, workflowName) {
 ;// CONCATENATED MODULE: ./src/core.ts
 
 async function startXCodeCloudBuild(input) {
-    const { workflowName, gitRef, repositoryName } = input;
+    const { workflowName, gitRef, bundleId } = input;
     const appStoreApi = new AppStoreApi(input);
-    const { repository, product } = await appStoreApi.getRepositoryAndProductByName(repositoryName);
-    const gitReference = await appStoreApi.getGitReference(repository.id, gitRef);
+    const product = await appStoreApi.getProductByBundleId(bundleId);
+    const repositoryId = assertRepositoryId(product);
+    const gitReference = await appStoreApi.getGitReference(repositoryId, gitRef);
     const workflow = await appStoreApi.getWorkflowByName(product.id, workflowName);
     const buildRun = await appStoreApi.createBuildRun(workflow.id, gitReference.id);
     return {
-        repositoryId: repository.id,
+        repositoryId,
         productId: product.id,
         workflowId: workflow.id,
         buildId: buildRun.data.id,
@@ -107300,16 +107312,16 @@ __nccwpck_require__.a(module, async (__webpack_handle_async_dependencies__, __we
 
 function getInput() {
     const issuerId = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput("appstore-issuer-id");
+    const bundleId = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput("appstore-bundle-id");
     const privateKeyId = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput("appstore-private-key-id");
     const privateKey = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput("appstore-private-key");
-    const repositoryName = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput("repository-name");
     const workflowName = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput("workflow-name");
     const gitRef = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput("git-ref");
     return {
         issuerId,
+        bundleId,
         privateKeyId,
         privateKey,
-        repositoryName,
         workflowName,
         gitRef,
     };

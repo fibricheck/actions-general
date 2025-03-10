@@ -4,17 +4,17 @@ import { startXCodeCloudBuild } from "./core.js";
 
 function getInput() {
   const issuerId = core.getInput("appstore-issuer-id");
+  const bundleId = core.getInput("appstore-bundle-id");
   const privateKeyId = core.getInput("appstore-private-key-id");
   const privateKey = core.getInput("appstore-private-key");
-  const repositoryName = core.getInput("repository-name");
   const workflowName = core.getInput("workflow-name");
   const gitRef = core.getInput("git-ref");
 
   return {
     issuerId,
+    bundleId,
     privateKeyId,
     privateKey,
-    repositoryName,
     workflowName,
     gitRef,
   };

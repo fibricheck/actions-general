@@ -38,6 +38,7 @@ export async function exponentialRetry<T>(
         waitTime *= timeMultiplier;
       }
       catch (error) {
+        console.warn(error);
         if (retries === 0) {
           throw error;
         }

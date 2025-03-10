@@ -10,8 +10,8 @@ inputs:
   appstore-private-key:
     description: 'AppStore Private Key'
     required: true
-  repository-name:
-    description: 'Name of the repository'
+  appstore-bundle-id:
+    description: 'The bundle id of the app as on the app store'
     required: true
   workflow-name:
     description: 'Name of the XCode Cloud workflow'
