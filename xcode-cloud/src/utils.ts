@@ -33,9 +33,6 @@ export async function exponentialRetry<T>(
         if (result !== undefined) {
           return result;
         }
-
-        await sleep(waitTime);
-        waitTime *= timeMultiplier;
       }
       catch (error) {
         console.warn(error);
@@ -43,6 +40,9 @@ export async function exponentialRetry<T>(
           throw error;
         }
       }
+
+      await sleep(waitTime);
+      waitTime *= timeMultiplier;
     }
   
     throw new Error(`Request ${identifier} failed after ${maxRetries} times.`)

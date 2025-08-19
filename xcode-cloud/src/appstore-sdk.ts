@@ -12,15 +12,46 @@ import {
   CiProductsGetCollectionFilterProductTypeEnum,
   CiProductsGetCollectionIncludeEnum,
   CiProductsResponse,
-  CiProductsResponseIncludedInner,
   CiProductsWorkflowsGetToManyRelatedIncludeEnum,
-  CiWorkflowResponse,
   CiWorkflowsResponse,
+  PagedDocumentLinks,
   ScmGitReferencesResponse,
   ScmRepositoriesApi,
   ScmRepositoriesGetCollectionFieldsScmGitReferencesEnum,
 } from "appstore-connect-sdk/openapi";
 import { exponentialRetry, sleep } from "./utils.js";
+
+interface PagedResponse {
+  links: PagedDocumentLinks
+}
+
+export class PaginationHelper<ResponseType extends PagedResponse> {
+  private originalPromise: Promise<ResponseType>
+  private nextLink?: string
+  public isDone: boolean = false
+
+  constructor(private client: AppStoreConnectAPI, firstPromise: Promise<ResponseType>) {
+    this.originalPromise = firstPromise
+  }
+
+  async getNext(): Promise<ResponseType | undefined> {
+    if (this.isDone) {
+      return undefined
+    }
+
+    if (!this.nextLink) {
+      const response = await this.originalPromise
+      this.nextLink = response?.links?.next
+    }
+
+    const clientResponse = await this.client.request({
+      url: this.nextLink!!
+    })
+
+    const clientJson = await clientResponse.json()
+    return clientJson as unknown as ResponseType
+  }
+}
 
 export interface CreateXCodeCloudBuildInput {
   bundleId: string;
@@ -111,17 +142,24 @@ export class AppStoreApi {
     // So we keep retrying until we find it.
     return await exponentialRetry(
       async () => {
-        const gitReferences =
-          await this.scmRepositoriesApi.scmRepositoriesGitReferencesGetToManyRelated(
-            {
-              id: repositoryId,
-              fieldsScmGitReferences: [
-                ScmRepositoriesGetCollectionFieldsScmGitReferencesEnum.CanonicalName,
-              ],
-            }
-          );
+        const paginated = new PaginationHelper(this.client, this.scmRepositoriesApi.scmRepositoriesGitReferencesGetToManyRelated(
+          {
+            id: repositoryId,
+            fieldsScmGitReferences: [
+              ScmRepositoriesGetCollectionFieldsScmGitReferencesEnum.CanonicalName,
+            ],
+          }
+        ))
 
-        return assertGitReferenceExists(gitReferences, gitRef);
+        while (!paginated.isDone) {
+          const gitReferences = await paginated.getNext()
+          const foundRef = findGitReference(gitReferences, gitRef)
+          if (foundRef) {
+            return foundRef
+          }
+        }
+
+        throw new Error(`Git reference for ref ${gitRef} not be found.`);
       },
       {
         identifier: "get-git-reference",
@@ -212,14 +250,30 @@ export function assertRepositoryId(
   return repositoryInfo.id;
 }
 
+function findGitReference(
+  response: ScmGitReferencesResponse,
+  gitRef: string
+) {
+  // console.log(`Checking ${response.data.length} entries`)
+  const gitReference = response.data.find(
+    (reference) =>  {
+      // console.log(reference.attributes.canonicalName)
+      return reference.attributes.canonicalName === gitRef
+    }
+  );
+
+  if (!gitReference) {
+    return undefined
+  }
+
+  return gitReference;
+}
+
 function assertGitReferenceExists(
   response: ScmGitReferencesResponse,
   gitRef: string
 ) {
-  const gitReference = response.data.find(
-    (reference) => reference.attributes.canonicalName === gitRef
-  );
-
+  const gitReference = findGitReference(response, gitRef)
   if (!gitReference) {
     throw new Error(`Git reference for ref ${gitRef} not be found.`);
   }
