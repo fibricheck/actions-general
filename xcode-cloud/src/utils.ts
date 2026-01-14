@@ -11,7 +11,6 @@ export function sleep(time) {
 interface ExponentialRetryOptions {
     maxRetries?: number;
     timeBetween?: number;
-    timeMultiplier?: number;
     identifier?: string;
 }
 
@@ -33,14 +32,9 @@ export async function exponentialRetry<T>(
         retries--;
 
         const result = await asyncRequest();
-        if (result !== undefined) {
-          return result;
-        }
+        return result;
       }
       catch (error) {
-        console.warn(`Request ${identifier} failed, reason:`);
-        console.warn(error);
-
         if (retries === 0 ||
           !(error instanceof ResponseError) ||
           (error instanceof ResponseError && doNotRetryCodes.includes(error.response.status))

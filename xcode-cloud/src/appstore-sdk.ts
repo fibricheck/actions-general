@@ -53,10 +53,16 @@ export class AppStoreApi {
     }
 
     this.initState = InitState.Initializing;
-    this.ciProductsApi = await this.client.create(CiProductsApi);
-    this.ciBuildRunsApi = await this.client.create(CiBuildRunsApi);
-    this.scmRepositoriesApi = await this.client.create(ScmRepositoriesApi);
-    this.initState = InitState.Initialized;
+    try {
+      this.ciProductsApi = await this.client.create(CiProductsApi);
+      this.ciBuildRunsApi = await this.client.create(CiBuildRunsApi);
+      this.scmRepositoriesApi = await this.client.create(ScmRepositoriesApi);
+      this.initState = InitState.Initialized;
+    }
+    catch (error) {
+      this.initState = InitState.Uninitialized;
+      throw error;
+    }
   }
 
   async getProductById(productId: string) {
@@ -94,22 +100,18 @@ export class AppStoreApi {
           ],
         }));
 
-        while (!paginated.isDone) {
-          const productResponse = await paginated.getNext()
-          const foundRef = findProductByBundleId(productResponse, bundleId)
-          if (foundRef) {
-            return foundRef
-          }
-          await sleep(200);
+        const productInfo = await paginated.find(x => findProductByBundleId(x, bundleId));
+        if (!productInfo) {
+          throw new Error(`Product for bundle id ${bundleId} could not be found.`);
         }
 
-        throw new Error(`Product for bundle id ${bundleId} could not be found.`);
+        return productInfo;
       },
       { identifier: "get-repository-by-name" }
     );
   }
 
-  async getGitReference(repositoryId: string, gitRef: string) {
+  async getGitReference(repositoryId: string, gitRefToFind: string) {
     await this.init();
 
     // When the github action is triggered too soon after pushing a tag
@@ -126,16 +128,12 @@ export class AppStoreApi {
           }
         ))
 
-        while (!paginated.isDone) {
-          const gitReferences = await paginated.getNext()
-          const foundRef = findGitReference(gitReferences, gitRef)
-          if (foundRef) {
-            return foundRef
-          }
-          await sleep(200);
+        const gitReference = await paginated.find(x => findGitReference(x, gitRefToFind));
+        if (!gitReference) {
+          throw new Error(`Git reference for ref ${gitRefToFind} could not be found.`);
         }
 
-        throw new Error(`Git reference for ref ${gitRef} not be found.`);
+        return gitReference;
       },
       {
         identifier: "get-git-reference",
@@ -155,16 +153,12 @@ export class AppStoreApi {
           ],
         }));
 
-        while (!paginated.isDone) {
-          const workflowResponse = await paginated.getNext()
-          const foundRef = findWorkflow(workflowResponse, workflowName)
-          if (foundRef) {
-            return foundRef
-          }
-          await sleep(200);
+        const workflow = await paginated.find(x => findWorkflow(x, workflowName));
+        if (!workflow) {
+          throw new Error(`Workflow ${workflowName} not found`);
         }
 
-        throw new Error(`Workflow ${workflowName} not found`);
+        return workflow;
       },
       { identifier: "get-workflow-by-name" }
     );
@@ -234,10 +228,8 @@ function findGitReference(
   response: ScmGitReferencesResponse,
   gitRef: string
 ) {
-  // console.log(`Checking ${response.data.length} entries`)
   const gitReference = response.data.find(
     (reference) =>  {
-      // console.log(reference.attributes.canonicalName)
       return reference.attributes.canonicalName === gitRef
     }
   );

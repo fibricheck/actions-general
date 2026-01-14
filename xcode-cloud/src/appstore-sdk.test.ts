@@ -1,5 +1,5 @@
 import "@dotenvx/dotenvx/config";
-import { describe, test, expect, afterAll } from "@jest/globals";
+import { describe, test, expect } from "@jest/globals";
 import { AppStoreApi, assertRepositoryId } from "./appstore-sdk.js";
 
 const api = new AppStoreApi({
@@ -19,6 +19,11 @@ describe("api test", () => {
     expect(product.id).toBeDefined();
   });
 
+  test("can paginate through all product pages", async () => {
+    await expect(api.getProductByBundleId('not existent'))
+      .rejects.toThrow();
+  });
+
   test("can retrieve git reference", async () => {
     const gitReference = await api.getGitReference(
       process.env.REPOSITORY_ID,
@@ -27,11 +32,25 @@ describe("api test", () => {
     expect(gitReference.id).toBeDefined();
   });
 
+  test("can paginate through all git references", async () => {
+    await expect(api.getGitReference(
+      process.env.REPOSITORY_ID,
+      'non existent'
+    )).rejects.toThrow();
+  });
+
   test("can retrieve workflow", async () => {
     const workflow = await api.getWorkflowByName(
       process.env.PRODUCT_ID,
       process.env.WORKFLOW_NAME
     );
     expect(workflow.id).toBeDefined();
+  });
+
+  test("can paginate through all workflows", async () => {
+    await expect(api.getWorkflowByName(
+      process.env.PRODUCT_ID,
+      'non existent'
+    )).rejects.toThrow()
   });
 });

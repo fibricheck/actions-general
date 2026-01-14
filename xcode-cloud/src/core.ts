@@ -2,40 +2,41 @@ import {
   AppStoreConnectAPIOptions,
 } from "appstore-connect-sdk";
 import { AppStoreApi, assertRepositoryId, CreateXCodeCloudBuildInput } from "./appstore-sdk.js";
+import * as core from "@actions/core";
 
 export async function startXCodeCloudBuild(
   input: AppStoreConnectAPIOptions & CreateXCodeCloudBuildInput
 ) {
-  console.log(`Creating AppStore API...`);
+  core.debug(`Creating AppStore API...`);
   const { workflowName, gitRef, bundleId } = input;
   const appStoreApi = new AppStoreApi(input);
-  console.log(`AppStore API Created!`);
+  core.debug(`AppStore API Created!`);
 
-  console.log(`Retrieving Product ID`);
+  core.debug(`Retrieving Product ID`);
   const product = await appStoreApi.getProductByBundleId(bundleId);
-  console.log(`Product retrieved: ${product.id}`);
+  core.debug(`Product retrieved: ${product.id}`);
 
-  console.log(`Asserting Repository ID`)
+  core.debug(`Asserting Repository ID`)
   const repositoryId = assertRepositoryId(product);
-  console.log(`Repository id asserted: ${repositoryId}`);
+  core.debug(`Repository id asserted: ${repositoryId}`);
 
-  console.log(`Retrieving Git Reference`);
+  core.debug(`Retrieving Git Reference`);
   const gitReference = await appStoreApi.getGitReference(repositoryId, gitRef);
-  console.log(`Git reference retrieved: ${gitReference.id}`);
+  core.debug(`Git reference retrieved: ${gitReference.id}`);
 
-  console.log(`Retrieving Workflow`);
+  core.debug(`Retrieving Workflow`);
   const workflow = await appStoreApi.getWorkflowByName(
     product.id,
     workflowName
   );
-  console.log(`Workflow retrieved: ${workflow.id}`);
+  core.debug(`Workflow retrieved: ${workflow.id}`);
 
-  console.log(`Starting build...`);
+  core.debug(`Starting build...`);
   const buildRun = await appStoreApi.createBuildRun(
     workflow.id,
     gitReference.id
   );
-  console.log(`Build started, id: ${buildRun.data.id}, number: ${buildRun.data.attributes.number}`);
+  core.debug(`Build started, id: ${buildRun.data.id}, number: ${buildRun.data.attributes.number}`);
 
   return {
     repositoryId,
