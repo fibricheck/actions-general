@@ -14,44 +14,12 @@ import {
   CiProductsResponse,
   CiProductsWorkflowsGetToManyRelatedIncludeEnum,
   CiWorkflowsResponse,
-  PagedDocumentLinks,
   ScmGitReferencesResponse,
   ScmRepositoriesApi,
   ScmRepositoriesGetCollectionFieldsScmGitReferencesEnum,
 } from "appstore-connect-sdk/openapi";
 import { exponentialRetry, sleep } from "./utils.js";
-
-interface PagedResponse {
-  links: PagedDocumentLinks
-}
-
-export class PaginationHelper<ResponseType extends PagedResponse> {
-  private originalPromise: Promise<ResponseType>
-  private nextLink?: string
-  public isDone: boolean = false
-
-  constructor(private client: AppStoreConnectAPI, firstPromise: Promise<ResponseType>) {
-    this.originalPromise = firstPromise
-  }
-
-  async getNext(): Promise<ResponseType | undefined> {
-    if (this.isDone) {
-      return undefined
-    }
-
-    if (!this.nextLink) {
-      const response = await this.originalPromise
-      this.nextLink = response?.links?.next
-    }
-
-    const clientResponse = await this.client.request({
-      url: this.nextLink!!
-    })
-
-    const clientJson = await clientResponse.json()
-    return clientJson as unknown as ResponseType
-  }
-}
+import { PaginationHelper } from "./pagination-helper.js";
 
 export interface CreateXCodeCloudBuildInput {
   bundleId: string;
@@ -64,7 +32,6 @@ enum InitState {
   Initializing,
   Initialized,
 }
-
 export class AppStoreApi {
   private client: AppStoreConnectAPI;
   private ciProductsApi: CiProductsApi;
@@ -117,18 +84,26 @@ export class AppStoreApi {
 
     return await exponentialRetry(
       async () => {
-        const ciProductResponse =
-          await this.ciProductsApi.ciProductsGetCollection({
-            filterProductType: [
-              CiProductsGetCollectionFilterProductTypeEnum.App,
-            ],
-            include: [
-              CiProductsGetCollectionIncludeEnum.PrimaryRepositories,
-              CiProductsGetCollectionIncludeEnum.BundleId,
-            ],
-          });
+        const paginated = new PaginationHelper(this.client, this.ciProductsApi.ciProductsGetCollection({
+          filterProductType: [
+            CiProductsGetCollectionFilterProductTypeEnum.App,
+          ],
+          include: [
+            CiProductsGetCollectionIncludeEnum.PrimaryRepositories,
+            CiProductsGetCollectionIncludeEnum.BundleId,
+          ],
+        }));
 
-        return assertProductByBundleId(ciProductResponse, bundleId);
+        while (!paginated.isDone) {
+          const productResponse = await paginated.getNext()
+          const foundRef = findProductByBundleId(productResponse, bundleId)
+          if (foundRef) {
+            return foundRef
+          }
+          await sleep(200);
+        }
+
+        throw new Error(`Product for bundle id ${bundleId} could not be found.`);
       },
       { identifier: "get-repository-by-name" }
     );
@@ -157,6 +132,7 @@ export class AppStoreApi {
           if (foundRef) {
             return foundRef
           }
+          await sleep(200);
         }
 
         throw new Error(`Git reference for ref ${gitRef} not be found.`);
@@ -172,15 +148,23 @@ export class AppStoreApi {
 
     return await exponentialRetry(
       async () => {
-        const allWorkflows =
-          await this.ciProductsApi.ciProductsWorkflowsGetToManyRelated({
-            id: productId,
-            include: [
-              CiProductsWorkflowsGetToManyRelatedIncludeEnum.Repository,
-            ],
-          });
+        const paginated = new PaginationHelper(this.client, this.ciProductsApi.ciProductsWorkflowsGetToManyRelated({
+          id: productId,
+          include: [
+            CiProductsWorkflowsGetToManyRelatedIncludeEnum.Repository,
+          ],
+        }));
 
-        return await assertWorkflowExists(allWorkflows, workflowName);
+        while (!paginated.isDone) {
+          const workflowResponse = await paginated.getNext()
+          const foundRef = findWorkflow(workflowResponse, workflowName)
+          if (foundRef) {
+            return foundRef
+          }
+          await sleep(200);
+        }
+
+        throw new Error(`Workflow ${workflowName} not found`);
       },
       { identifier: "get-workflow-by-name" }
     );
@@ -220,17 +204,13 @@ export class AppStoreApi {
   }
 }
 
-function assertProductByBundleId(
+function findProductByBundleId(
   products: CiProductsResponse,
   bundleId: string
 ) {
   const product = products.data?.find(
     (tempProduct) => tempProduct.relationships?.bundleId?.data?.id === bundleId
   );
-
-  if (!product) {
-    throw new Error(`Product for bundle id ${bundleId} could not be found.`);
-  }
 
   return product;
 }
@@ -269,29 +249,13 @@ function findGitReference(
   return gitReference;
 }
 
-function assertGitReferenceExists(
-  response: ScmGitReferencesResponse,
-  gitRef: string
-) {
-  const gitReference = findGitReference(response, gitRef)
-  if (!gitReference) {
-    throw new Error(`Git reference for ref ${gitRef} not be found.`);
-  }
-
-  return gitReference;
-}
-
-function assertWorkflowExists(
+function findWorkflow(
   response: CiWorkflowsResponse,
   workflowName: string
 ) {
   const correctWorkflow = response.data.find(
     (workflow) => workflow.attributes.name === workflowName
   );
-
-  if (!correctWorkflow) {
-    throw new Error(`Workflow ${workflowName} not found`);
-  }
 
   return correctWorkflow;
 }

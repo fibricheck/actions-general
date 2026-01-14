@@ -30,5 +30,5 @@ try {
   core.setOutput("build-number", result.buildNumber);
 }
 catch (error) {
-
+  core.setFailed(error);
 }

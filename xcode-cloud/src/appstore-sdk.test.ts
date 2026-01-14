@@ -17,9 +17,6 @@ describe("api test", () => {
 
     expect(repositoryId).toBeDefined();
     expect(product.id).toBeDefined();
-
-    console.log(repositoryId);
-    console.log(product.id);
   });
 
   test("can retrieve git reference", async () => {
