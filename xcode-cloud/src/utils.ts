@@ -1,3 +1,5 @@
+import { ResponseError } from "appstore-connect-sdk/openapi";
+
 export function sleep(time) {
   return new Promise<void>((resolve) => {
     setTimeout(() => {
@@ -9,16 +11,16 @@ export function sleep(time) {
 interface ExponentialRetryOptions {
     maxRetries?: number;
     timeBetween?: number;
-    timeMultiplier?: number;
     identifier?: string;
 }
+
+const doNotRetryCodes = [400, 401, 403, 404, 409, 422];
 
 export async function exponentialRetry<T>(
    asyncRequest: () => Promise<T>,
    {
-    maxRetries = 10,
-    timeBetween = 10 * 1000,
-    timeMultiplier = 1.5,
+    maxRetries = 5,
+    timeBetween = 3 * 1000,
     identifier
    }: ExponentialRetryOptions = {}
   ) {
@@ -30,19 +32,19 @@ export async function exponentialRetry<T>(
         retries--;
 
         const result = await asyncRequest();
-        if (result !== undefined) {
-          return result;
-        }
+        return result;
       }
       catch (error) {
-        console.warn(error);
-        if (retries === 0) {
+        if (retries === 0 ||
+          !(error instanceof ResponseError) ||
+          (error instanceof ResponseError && doNotRetryCodes.includes(error.response.status))
+        ) {
           throw error;
         }
       }
 
       await sleep(waitTime);
-      waitTime *= timeMultiplier;
+      waitTime *= 2;
     }
   
     throw new Error(`Request ${identifier} failed after ${maxRetries} times.`)

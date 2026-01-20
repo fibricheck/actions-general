@@ -1,5 +1,4 @@
 import * as core from "@actions/core";
-import * as github from "@actions/github";
 import { startXCodeCloudBuild } from "./core.js";
 
 function getInput() {
@@ -30,5 +29,5 @@ try {
   core.setOutput("build-number", result.buildNumber);
 }
 catch (error) {
-
+  core.setFailed(error instanceof Error ? error.message : String(error));
 }
