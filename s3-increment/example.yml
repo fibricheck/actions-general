@@ -10,7 +10,7 @@ jobs:
     steps:
       - name: Increment build number
         id: increment-build-number
-        uses: fibricheck/actions-general/s3-increment@v1
+        uses: fibricheck/actions-general/s3-increment@v2
         with:
           s3-file-path: 's3://example.fibricheck.com/example/example.json'
           key-selector: '.appBuildNumbers.example'

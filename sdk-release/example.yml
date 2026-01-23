@@ -1,0 +1,18 @@
+name: SDK Release Example
+
+on:
+  workflow_call:
+
+jobs: 
+  sdk-release-example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: sdk-release-dev
+        id: sdk-release-dev
+        uses: fibricheck/actions-general/sdk-release@v2
+        with:
+          token: ${{ github.token }}
+          version: 1.4.0
+          type: dev

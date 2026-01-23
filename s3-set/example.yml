@@ -7,7 +7,7 @@ jobs:
     steps:
       - name: Set Value
         id: set-value
-        uses: fibricheck/actions-general/s3-set@v1
+        uses: fibricheck/actions-general/s3-set@v2
         with:
           s3-file-path: 's3://example.fibricheck.com/example/example.json'
           key-selector: '.appVersionName.example'
