@@ -29,34 +29,24 @@ inputs:
 outputs:
   matches:
     description: 'Was there a regex match'
-    type: boolean
   group1:
     description: 'The first capture group'
-    type: string
   group2:
     description: 'The second capture group'
-    type: string
   group3:
     description: 'The third capture group'
-    type: string
   group4:
     description: 'The fourth capture group'
-    type: string
   group5:
     description: 'The fifth capture group'
-    type: string
   group6:
     description: 'The sixth capture group'
-    type: string
   group7:
     description: 'The seventh capture group'
-    type: string
   group8:
-    description: 'The eigth capture group'
-    type: string
+    description: 'The eight capture group'
   group9:
     description: 'The ninth capture group'
-    type: string
 
 runs:
   using: 'node20'

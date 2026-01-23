@@ -3,5 +3,7 @@ on:
   pull_request:
 
 jobs: 
-  test-tag:
+  on-pull-test-parse-tag:
     uses: './.github/workflows/test-parse-tag.yml'
+  on-pull-test-sdk-release:
+    uses: './.github/workflows/test-sdk-release.yml'

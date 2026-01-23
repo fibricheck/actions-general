@@ -1,0 +1,145 @@
+name: 'Parse SDK Version'
+description: 'Parses a semantic version string into its components'
+inputs:
+  version:
+    description: 'Version to release (e.g., 1.2.3)'
+    required: true
+
+  type:
+    description: 'Release type'
+    required: true
+    type: choice
+    options:
+      - prod
+      - dev
+      - snapshot
+
+  token:
+    description: 'Github Token'
+    required: true
+
+  release_filename:
+    description: 'The filename for the release info file'
+    required: false
+    default: 'sdk-release.json'
+
+  dry_run:
+    description: 'Run without making changes'
+    type: boolean
+    default: false
+
+outputs:
+  tag:
+    description: "The newly created tag"
+    value: ${{ steps.version.outputs.final_version }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ inputs.token }}
+        fetch-depth: 0
+        fetch-tags: true
+        clean: false
+
+    - name: Validate branch
+      if: ${{ !inputs.dry_run }}
+      shell: bash
+      run: |
+        CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+        
+        if [ "${{ inputs.type }}" = "prod" ] && [ "$CURRENT_BRANCH" != "main" ]; then
+          echo "Production releases must be from main branch"
+          exit 1
+        fi
+        
+        if [ "${{ inputs.type }}" = "dev" ] && [ "$CURRENT_BRANCH" != "dev" ]; then
+          echo "Dev releases must be from dev branch"
+          exit 1
+        fi
+
+    - name: Validate version format
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+        if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::Invalid version format '$VERSION'. Expected semver format: X.Y.Z (e.g., 1.2.3)"
+          exit 1
+        fi
+
+    - name: Determine final version
+      id: version
+      shell: bash
+      run: |
+        BASE_VERSION="${{ inputs.version }}"
+        
+        if [ "${{ inputs.type }}" = "prod" ]; then
+          FINAL_VERSION="$BASE_VERSION"
+          
+        elif [ "${{ inputs.type }}" = "dev" ]; then
+          # Find latest dev patch number
+          EXISTING=$(git tag -l "v${BASE_VERSION}-dev.*" | sort -V | tail -1)
+          if [ -z "$EXISTING" ]; then
+            PATCH=1
+          else
+            LAST_PATCH=$(echo $EXISTING | grep -oP 'dev\.\K[0-9]+')
+            PATCH=$((LAST_PATCH + 1))
+          fi
+          FINAL_VERSION="${BASE_VERSION}-dev.${PATCH}"
+          
+        elif [ "${{ inputs.type }}" = "snapshot" ]; then
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          BRANCH_HASH=$(echo -n "$BRANCH" | sha1sum | cut -c 1-16)
+          EXISTING=$(git tag -l "v${BASE_VERSION}-${BRANCH_HASH}.*" | sort -V | tail -1)
+          if [ -z "$EXISTING" ]; then
+            BUILD=1
+          else
+            LAST_BUILD=$(echo $EXISTING | grep -oP '\.[0-9]+$' | tr -d '.')
+            BUILD=$((LAST_BUILD + 1))
+          fi
+          FINAL_VERSION="${BASE_VERSION}-${BRANCH_HASH}.${BUILD}"
+        fi
+        
+        echo "final_version=$FINAL_VERSION" >> $GITHUB_OUTPUT
+        echo "Will create version: $FINAL_VERSION"
+
+    - name: Create version file
+      shell: bash
+      run: |
+        printf '{\n  "version": "%s",\n  "releaseDate": "%s"\n}\n' \
+          "${{ steps.version.outputs.final_version }}" \
+          "$(date +%Y-%m-%d)" > ${{ inputs.release_filename }}
+
+    - name: Commit and tag
+      if: ${{ !inputs.dry_run }}
+      shell: bash
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        git add ${{ inputs.release_filename }}
+        git commit -m "chore: prepare release ${{ steps.version.outputs.final_version }}"
+        git push
+        
+        # Tag the commit we just created
+        NEW_COMMIT=$(git rev-parse HEAD)
+        git tag -a "v${{ steps.version.outputs.final_version }}" $NEW_COMMIT \
+          -m "Release ${{ steps.version.outputs.final_version }}"
+        git push origin "v${{ steps.version.outputs.final_version }}"
+
+    - name: Create GitHub Release
+      if: ${{ !inputs.dry_run }}
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const isPrerelease = '${{ inputs.type }}' !== 'prod';
+          await github.rest.repos.createRelease({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            tag_name: 'v${{ steps.version.outputs.final_version }}',
+            name: 'Release ${{ steps.version.outputs.final_version }}',
+            prerelease: isPrerelease,
+            generate_release_notes: true
+          });
