@@ -1,0 +1,70 @@
+name: 'Parse SDK Version'
+description: 'Parses a semantic version string into its components'
+inputs:
+  version:
+    description: 'The version string to parse (e.g., v2.13.0, 2.13.0-dev, v2.13.0-dev.10)'
+    required: true
+    type: string
+
+outputs:
+  major:
+    description: "The major version number"
+    value: ${{ steps.parse-version.outputs.major }}
+
+  minor:
+    description: "The minor version number"
+    value: ${{ steps.parse-version.outputs.minor }}
+
+  patch:
+    description: "The patch version number"
+    value: ${{ steps.parse-version.outputs.patch }}
+
+  name:
+    description: "The prerelease name (e.g., dev, alpha, beta)"
+    value: ${{ steps.parse-version.outputs.name }}
+
+  increment:
+    description: "The prerelease increment number"
+    value: ${{ steps.parse-version.outputs.increment }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Parse Version
+      shell: bash
+      id: parse-version
+      run: |
+        VERSION="${{ inputs.version }}"
+
+        # Remove leading 'v' if present
+        VERSION="${VERSION#v}"
+
+        # Split version and prerelease parts
+        BASE_VERSION="${VERSION%%-*}"
+        PRERELEASE=""
+        if [[ "$VERSION" == *-* ]]; then
+          PRERELEASE="${VERSION#*-}"
+        fi
+
+        # Parse major.minor.patch
+        MAJOR=$(echo "$BASE_VERSION" | cut -d '.' -f 1)
+        MINOR=$(echo "$BASE_VERSION" | cut -d '.' -f 2)
+        PATCH=$(echo "$BASE_VERSION" | cut -d '.' -f 3)
+
+        # Parse prerelease name and increment
+        NAME=""
+        INCREMENT=""
+        if [[ -n "$PRERELEASE" ]]; then
+          if [[ "$PRERELEASE" == *.* ]]; then
+            NAME="${PRERELEASE%.*}"
+            INCREMENT="${PRERELEASE##*.}"
+          else
+            NAME="$PRERELEASE"
+          fi
+        fi
+
+        echo "major=$MAJOR" >> $GITHUB_OUTPUT
+        echo "minor=$MINOR" >> $GITHUB_OUTPUT
+        echo "patch=$PATCH" >> $GITHUB_OUTPUT
+        echo "name=$NAME" >> $GITHUB_OUTPUT
+        echo "increment=$INCREMENT" >> $GITHUB_OUTPUT
