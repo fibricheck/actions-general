@@ -1,0 +1,19 @@
+name: S3 Set JSON Value Example
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SDK Version Parse
+        id: sdk-version-parse
+        uses: fibricheck/actions-general/sdk-version-parse@v1
+        with:
+          version: 'v2.13.0-dev.10'
+      
+      - run: |
+        echo "Major: ${{ steps.version.outputs.major }}"
+        echo "Minor: ${{ steps.version.outputs.minor }}"
+        echo "Patch: ${{ steps.version.outputs.patch }}"
+        echo "Name: ${{ steps.version.outputs.name }}"
+        echo "Increment: ${{ steps.version.outputs.increment }}"
