@@ -2,9 +2,8 @@ name: 'Parse SDK Version'
 description: 'Parses a semantic version string into its components'
 inputs:
   version:
-    description: 'The version string to parse (e.g., v2.13.0, 2.13.0-dev, v2.13.0-dev.10)'
+    description: 'The version string to parse (e.g., v2.13.0, 2.13.0-snapshot.abc1234, v2.13.0-dev.10)'
     required: true
-    type: string
 
 outputs:
   major:
@@ -44,6 +43,12 @@ runs:
         PRERELEASE=""
         if [[ "$VERSION" == *-* ]]; then
           PRERELEASE="${VERSION#*-}"
+        fi
+
+        # Validate base version format
+        if ! [[ "$BASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::Invalid version format '${{ inputs.version }}'. Expected semver format: X.Y.Z or vX.Y.Z (e.g., 1.2.3, v2.0.0-dev.5)"
+          exit 1
         fi
 
         # Parse major.minor.patch

@@ -1,4 +1,7 @@
-name: S3 Set JSON Value Example
+name: SDK Version Parse Example
+
+on:
+  workflow_call:
 
 jobs:
   prepare:
@@ -12,8 +15,8 @@ jobs:
           version: 'v2.13.0-dev.10'
       
       - run: |
-        echo "Major: ${{ steps.version.outputs.major }}"
-        echo "Minor: ${{ steps.version.outputs.minor }}"
-        echo "Patch: ${{ steps.version.outputs.patch }}"
-        echo "Name: ${{ steps.version.outputs.name }}"
-        echo "Increment: ${{ steps.version.outputs.increment }}"
+          echo "Major: ${{ steps.sdk-version-parse.outputs.major }}"
+          echo "Minor: ${{ steps.sdk-version-parse.outputs.minor }}"
+          echo "Patch: ${{ steps.sdk-version-parse.outputs.patch }}"
+          echo "Name: ${{ steps.sdk-version-parse.outputs.name }}"
+          echo "Increment: ${{ steps.sdk-version-parse.outputs.increment }}"
