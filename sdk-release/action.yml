@@ -1,18 +1,9 @@
-name: 'Parse SDK Version'
-description: 'Parses a semantic version string into its components'
+name: 'Release SDK Version'
+description: 'Release a new SDK version and tags the version'
 inputs:
-  version:
-    description: 'Version to release (e.g., 1.2.3)'
-    required: true
-
   type:
-    description: 'Release type'
+    description: 'Release type (dev/prod/snapshot)'
     required: true
-    type: choice
-    options:
-      - prod
-      - dev
-      - snapshot
 
   token:
     description: 'Github Token'
@@ -25,13 +16,13 @@ inputs:
 
   dry_run:
     description: 'Run without making changes'
-    type: boolean
-    default: false
+    required: false
+    default: 'false'
 
 outputs:
   tag:
     description: "The newly created tag"
-    value: ${{ steps.version.outputs.final_version }}
+    value: v${{ steps.version.outputs.final_version }}
 
 runs:
   using: "composite"
@@ -39,18 +30,27 @@ runs:
     - uses: actions/checkout@v4
       with:
         token: ${{ inputs.token }}
-        fetch-depth: 0
+        fetch-depth: 1
         fetch-tags: true
         clean: false
 
+    - name: Validate release type
+      shell: bash
+      run: |
+        TYPE="${{ inputs.type }}"
+        if [ "$TYPE" != "prod" ] && [ "$TYPE" != "dev" ] && [ "$TYPE" != "snapshot" ]; then
+          echo "::error::Invalid release type '$TYPE'. Must be one of: prod, dev, snapshot"
+          exit 1
+        fi
+
     - name: Validate branch
-      if: ${{ !inputs.dry_run }}
+      if: ${{ inputs.dry_run != 'true' }}
       shell: bash
       run: |
         CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
         
-        if [ "${{ inputs.type }}" = "prod" ] && [ "$CURRENT_BRANCH" != "main" ]; then
-          echo "Production releases must be from main branch"
+        if [ "${{ inputs.type }}" = "prod" ] && [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "master" ]; then
+          echo "Production releases must be from main or master branch"
           exit 1
         fi
         
@@ -59,77 +59,85 @@ runs:
           exit 1
         fi
 
-    - name: Validate version format
+    - name: Parse and validate version file
+      id: parse_version
       shell: bash
       run: |
-        VERSION="${{ inputs.version }}"
+        if [ ! -f "${{ inputs.release_filename }}" ]; then
+          echo "::error::Version file '${{ inputs.release_filename }}' not found. Please create it locally before releasing."
+          exit 1
+        fi
+
+        # Parse version from file
+        VERSION=$(grep -oP '"version"\s*:\s*"\K[^"]+' ${{ inputs.release_filename }})
+        if [ -z "$VERSION" ]; then
+          echo "::error::Could not read version from '${{ inputs.release_filename }}'"
+          exit 1
+        fi
+
+        # Validate version format
         if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
           echo "::error::Invalid version format '$VERSION'. Expected semver format: X.Y.Z (e.g., 1.2.3)"
           exit 1
         fi
 
+        # Validate release date (only for prod and dev, not snapshot)
+        if [ "${{ inputs.type }}" != "snapshot" ]; then
+          FILE_DATE=$(grep -oP '"releaseDate"\s*:\s*"\K[^"]+' ${{ inputs.release_filename }})
+          TODAY=$(date +%Y-%m-%d)
+          if [ "$FILE_DATE" != "$TODAY" ]; then
+            echo "::error::Version file date ($FILE_DATE) does not match today's date ($TODAY). Please update the file locally before releasing."
+            exit 1
+          fi
+        fi
+
+        echo "base_version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Parsed version: $VERSION"
+
     - name: Determine final version
       id: version
       shell: bash
       run: |
-        BASE_VERSION="${{ inputs.version }}"
+        BASE_VERSION="${{ steps.parse_version.outputs.base_version }}"
         
         if [ "${{ inputs.type }}" = "prod" ]; then
           FINAL_VERSION="$BASE_VERSION"
           
         elif [ "${{ inputs.type }}" = "dev" ]; then
-          # Find latest dev patch number
+          # Find latest dev version
           EXISTING=$(git tag -l "v${BASE_VERSION}-dev.*" | sort -V | tail -1)
           if [ -z "$EXISTING" ]; then
-            PATCH=1
+            DEV_VERSION=1
           else
-            LAST_PATCH=$(echo $EXISTING | grep -oP 'dev\.\K[0-9]+')
-            PATCH=$((LAST_PATCH + 1))
+            LAST_DEV_VERSION=$(echo $EXISTING | grep -oP 'dev\.\K[0-9]+')
+            DEV_VERSION=$((LAST_DEV_VERSION + 1))
           fi
-          FINAL_VERSION="${BASE_VERSION}-dev.${PATCH}"
+          FINAL_VERSION="${BASE_VERSION}-dev.${DEV_VERSION}"
           
         elif [ "${{ inputs.type }}" = "snapshot" ]; then
-          BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          BRANCH_HASH=$(echo -n "$BRANCH" | sha1sum | cut -c 1-16)
-          EXISTING=$(git tag -l "v${BASE_VERSION}-${BRANCH_HASH}.*" | sort -V | tail -1)
-          if [ -z "$EXISTING" ]; then
-            BUILD=1
-          else
-            LAST_BUILD=$(echo $EXISTING | grep -oP '\.[0-9]+$' | tr -d '.')
-            BUILD=$((LAST_BUILD + 1))
-          fi
-          FINAL_VERSION="${BASE_VERSION}-${BRANCH_HASH}.${BUILD}"
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          FINAL_VERSION="${BASE_VERSION}-snapshot.${COMMIT_HASH}"
         fi
         
+        # Check if tag already exists
+        if git rev-parse "v$FINAL_VERSION" >/dev/null 2>&1; then
+          echo "::error::Tag v$FINAL_VERSION already exists. Cannot create duplicate release."
+          exit 1
+        fi
+
         echo "final_version=$FINAL_VERSION" >> $GITHUB_OUTPUT
         echo "Will create version: $FINAL_VERSION"
 
-    - name: Create version file
+    - name: Create tag
+      if: ${{ inputs.dry_run != 'true' }}
       shell: bash
       run: |
-        printf '{\n  "version": "%s",\n  "releaseDate": "%s"\n}\n' \
-          "${{ steps.version.outputs.final_version }}" \
-          "$(date +%Y-%m-%d)" > ${{ inputs.release_filename }}
-
-    - name: Commit and tag
-      if: ${{ !inputs.dry_run }}
-      shell: bash
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        
-        git add ${{ inputs.release_filename }}
-        git commit -m "chore: prepare release ${{ steps.version.outputs.final_version }}"
-        git push
-        
-        # Tag the commit we just created
-        NEW_COMMIT=$(git rev-parse HEAD)
-        git tag -a "v${{ steps.version.outputs.final_version }}" $NEW_COMMIT \
+        git tag -a "v${{ steps.version.outputs.final_version }}" HEAD \
           -m "Release ${{ steps.version.outputs.final_version }}"
         git push origin "v${{ steps.version.outputs.final_version }}"
 
     - name: Create GitHub Release
-      if: ${{ !inputs.dry_run }}
+      if: ${{ inputs.dry_run != 'true' }}
       uses: actions/github-script@v7
       with:
         github-token: ${{ inputs.token }}
