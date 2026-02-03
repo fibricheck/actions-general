@@ -1,9 +1,8 @@
 name: 'Release SDK Version'
 description: 'Release a new SDK version and tags the version'
 inputs:
-  # This should be one of: prod, dev, snapshot
   type:
-    description: 'Release type'
+    description: 'Release type (dev/prod/snapshot)'
     required: true
 
   token:
