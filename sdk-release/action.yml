@@ -69,7 +69,7 @@ runs:
         fi
 
         # Parse version from file
-        VERSION=$(grep -oP '"version"\s*:\s*"\K[^"]+' ${{ inputs.release_filename }})
+        VERSION=$(jq -r '.version' ${{ inputs.release_filename }})
         if [ -z "$VERSION" ]; then
           echo "::error::Could not read version from '${{ inputs.release_filename }}'"
           exit 1
@@ -83,7 +83,7 @@ runs:
 
         # Validate release date (only for prod and dev, not snapshot)
         if [ "${{ inputs.type }}" != "snapshot" ]; then
-          FILE_DATE=$(grep -oP '"releaseDate"\s*:\s*"\K[^"]+' ${{ inputs.release_filename }})
+          FILE_DATE=$(jq -r '.releaseDate' ${{ inputs.release_filename }})
           TODAY=$(date +%Y-%m-%d)
           if [ "$FILE_DATE" != "$TODAY" ]; then
             echo "::error::Version file date ($FILE_DATE) does not match today's date ($TODAY). Please update the file locally before releasing."
@@ -109,7 +109,7 @@ runs:
           if [ -z "$EXISTING" ]; then
             DEV_VERSION=1
           else
-            LAST_DEV_VERSION=$(echo $EXISTING | grep -oP 'dev\.\K[0-9]+')
+            LAST_DEV_VERSION=$(echo "$EXISTING" | sed 's/.*dev\.//')
             DEV_VERSION=$((LAST_DEV_VERSION + 1))
           fi
           FINAL_VERSION="${BASE_VERSION}-dev.${DEV_VERSION}"
