@@ -1,51 +1,48 @@
-import { AppStoreConnectAPI } from "appstore-connect-sdk"
-import { PagedDocumentLinks } from "appstore-connect-sdk/openapi"
+import { Client, PagedDocumentLinks } from "appstore-connect-sdk"
 import { sleep } from "./utils.js"
 
-interface PagedResponse {
-  links: PagedDocumentLinks
+interface PagedResponse<D, E> {
+  data?: D & {
+    links?: PagedDocumentLinks
+  },
+  error?: E
 }
 
-export class PaginationHelper<ResponseType extends PagedResponse> {
-  private originalPromise: Promise<ResponseType>
+export class PaginationHelper<D, E> {
+  private originalPromise: Promise<PagedResponse<D, E>>
 
   private nextLink?: string
   public isDone: boolean = false
 
-  constructor(private client: AppStoreConnectAPI, firstPromise: Promise<ResponseType>) {
+  constructor(private client: Client, firstPromise: Promise<PagedResponse<D, E>>) {
     this.originalPromise = firstPromise
   }
 
-  async getNext(): Promise<ResponseType | undefined> {
+  async getNext(): Promise<PagedResponse<D, E> | undefined> {
     if (this.isDone) {
       return undefined
     }
 
-    const nextLinkCopy = this.nextLink;
-    if (!nextLinkCopy) {
-      const response = await this.originalPromise
-      this.nextLink = response?.links?.next
-      if (!this.nextLink) {
-        this.isDone = true;
-      }
+    const response = this.nextLink ?
+      await this.client.get({
+        security: [{ scheme: "bearer", type: "http" }],
+        url: this.nextLink
+      }) as unknown as PagedResponse<D, E> :
+      await this.originalPromise
 
-      return response;
+    if (response.error) {
+      console.warn(JSON.stringify(response.error, undefined, '  '))
     }
 
-    const clientResponse = await this.client.request({
-      url: nextLinkCopy
-    });
-
-    const clientJson = await clientResponse.json()  as unknown as ResponseType
-    this.nextLink = clientJson.links.next;
+    this.nextLink = toRelativePath(response.data?.links?.next);
     if (!this.nextLink) {
       this.isDone = true;
     }
 
-    return clientJson
+    return response
   }
 
-  async find<T>(transform: (x: ResponseType) => T | undefined, wait = 50): Promise<T | undefined> {
+  async find<T>(transform: (x: PagedResponse<D, E>) => T | undefined, wait = 250): Promise<T | undefined> {
     while (!this.isDone) {
       const response = await this.getNext()
       if (!response) {
@@ -56,8 +53,16 @@ export class PaginationHelper<ResponseType extends PagedResponse> {
       if (validatorResult) {
         return validatorResult;
       }
-      
+
       await sleep(wait);
     }
   }
+}
+
+function toRelativePath(url?: string) {
+  if (!url) return undefined;
+
+  const index = url.indexOf('/v1');
+  if (index === -1) throw new Error(`Unexpected URL format, no /v1 found: ${url}`);
+  return url.slice(index);
 }

@@ -1,25 +1,6 @@
-import {
-  AppStoreConnectAPI,
-  AppStoreConnectAPIOptions,
-} from "appstore-connect-sdk";
-import {
-  CiBuildRunCreateRequestDataTypeEnum,
-  CiBuildRunRelationshipsSourceBranchOrTagDataTypeEnum,
-  CiBuildRunRelationshipsWorkflowDataTypeEnum,
-  CiBuildRunsApi,
-  CiProductResponse,
-  CiProductsApi,
-  CiProductsGetCollectionFilterProductTypeEnum,
-  CiProductsGetCollectionIncludeEnum,
-  CiProductsResponse,
-  CiProductsWorkflowsGetToManyRelatedIncludeEnum,
-  CiWorkflowsResponse,
-  ScmGitReferencesResponse,
-  ScmRepositoriesApi,
-  ScmRepositoriesGetCollectionFieldsScmGitReferencesEnum,
-} from "appstore-connect-sdk/openapi";
-import { exponentialRetry, sleep } from "./utils.js";
+import { exponentialRetry } from "./utils.js";
 import { PaginationHelper } from "./pagination-helper.js";
+import { AppStoreConnectConfig, ciBuildRunsCreateInstance, CiProductResponse, ciProductsGetCollection, ciProductsGetInstance, CiProductsResponse, ciProductsWorkflowsGetToManyRelated, CiWorkflowsResponse, Client, createClient, ScmGitReferencesResponse, scmRepositoriesGitReferencesGetToManyRelated } from "appstore-connect-sdk";
 
 export interface CreateXCodeCloudBuildInput {
   bundleId: string;
@@ -27,182 +8,124 @@ export interface CreateXCodeCloudBuildInput {
   gitRef: string;
 }
 
-enum InitState {
-  Uninitialized,
-  Initializing,
-  Initialized,
-}
 export class AppStoreApi {
-  private client: AppStoreConnectAPI;
-  private ciProductsApi: CiProductsApi;
-  private ciBuildRunsApi: CiBuildRunsApi;
-  private scmRepositoriesApi: ScmRepositoriesApi;
-  private initState = InitState.Uninitialized;
+  private client: Client;
 
-  constructor(input: AppStoreConnectAPIOptions) {
-    this.client = new AppStoreConnectAPI(input);
-  }
-
-  async init() {
-    while (this.initState === InitState.Initializing) {
-      await sleep(100);
-    }
-
-    if (this.initState === InitState.Initialized) {
-      return;
-    }
-
-    this.initState = InitState.Initializing;
-    try {
-      this.ciProductsApi = await this.client.create(CiProductsApi);
-      this.ciBuildRunsApi = await this.client.create(CiBuildRunsApi);
-      this.scmRepositoriesApi = await this.client.create(ScmRepositoriesApi);
-      this.initState = InitState.Initialized;
-    }
-    catch (error) {
-      this.initState = InitState.Uninitialized;
-      throw error;
-    }
+  constructor(input: AppStoreConnectConfig) {
+    this.client = createClient(input);
   }
 
   async getProductById(productId: string) {
-    await this.init();
+    const product = await ciProductsGetInstance({
+      client: this.client,
+      path: { id: productId },
+      query: { include: ['primaryRepositories', 'bundleId'] }
+    })
 
-    return await exponentialRetry(
-      async () => {
-        const ciProductResponse =
-          await this.ciProductsApi.ciProductsGetInstance({
-            id: productId,
-            include: [
-              CiProductsGetCollectionIncludeEnum.PrimaryRepositories,
-              CiProductsGetCollectionIncludeEnum.BundleId,
-            ],
-          });
-
-        return ciProductResponse.data;
-      },
-      { identifier: "get-repository-by-name" }
-    );
+    return product.data
   }
 
   async getProductByBundleId(bundleId: string) {
-    await this.init();
+    const paginated = new PaginationHelper(this.client, ciProductsGetCollection({
+      client: this.client,
+      query: {
+        "filter[productType]": ['APP'],
+        include: ['primaryRepositories', 'bundleId']
+      }
+    }));
 
-    return await exponentialRetry(
-      async () => {
-        const paginated = new PaginationHelper(this.client, this.ciProductsApi.ciProductsGetCollection({
-          filterProductType: [
-            CiProductsGetCollectionFilterProductTypeEnum.App,
-          ],
-          include: [
-            CiProductsGetCollectionIncludeEnum.PrimaryRepositories,
-            CiProductsGetCollectionIncludeEnum.BundleId,
-          ],
-        }));
+    const productInfo = await paginated.find(x => findProductByBundleId(x, bundleId));
+    if (!productInfo) {
+      throw new Error(`Product for bundle id ${bundleId} could not be found.`);
+    }
 
-        const productInfo = await paginated.find(x => findProductByBundleId(x, bundleId));
-        if (!productInfo) {
-          throw new Error(`Product for bundle id ${bundleId} could not be found.`);
-        }
-
-        return productInfo;
-      },
-      { identifier: "get-repository-by-name" }
-    );
+    return productInfo;
   }
 
   async getGitReference(repositoryId: string, gitRefToFind: string) {
-    await this.init();
-
     // When the github action is triggered too soon after pushing a tag
     // It's possible that the xcode cloud repository is not yet updated with the tag
     // So we keep retrying until we find it.
-    return await exponentialRetry(
-      async () => {
-        const paginated = new PaginationHelper(this.client, this.scmRepositoriesApi.scmRepositoriesGitReferencesGetToManyRelated(
-          {
-            id: repositoryId,
-            fieldsScmGitReferences: [
-              ScmRepositoriesGetCollectionFieldsScmGitReferencesEnum.CanonicalName,
-            ],
-          }
-        ))
-
-        const gitReference = await paginated.find(x => findGitReference(x, gitRefToFind));
-        if (!gitReference) {
-          throw new Error(`Git reference for ref ${gitRefToFind} could not be found.`);
-        }
-
-        return gitReference;
-      },
+    const paginated = new PaginationHelper(this.client, scmRepositoriesGitReferencesGetToManyRelated(
       {
-        identifier: "get-git-reference",
+        client: this.client,
+        path: { id: repositoryId },
+        query: {
+          "fields[scmGitReferences]": ['canonicalName']
+        }
       }
-    );
+    ))
+
+    const gitReference = await paginated.find(x => findGitReference(x, gitRefToFind));
+    if (!gitReference) {
+      throw new Error(`Git reference for ref ${gitRefToFind} could not be found.`);
+    }
+
+    return gitReference;
   }
 
   async getWorkflowByName(productId: string, workflowName: string) {
-    await this.init();
-
-    return await exponentialRetry(
-      async () => {
-        const paginated = new PaginationHelper(this.client, this.ciProductsApi.ciProductsWorkflowsGetToManyRelated({
-          id: productId,
-          include: [
-            CiProductsWorkflowsGetToManyRelatedIncludeEnum.Repository,
-          ],
-        }));
-
-        const workflow = await paginated.find(x => findWorkflow(x, workflowName));
-        if (!workflow) {
-          throw new Error(`Workflow ${workflowName} not found`);
-        }
-
-        return workflow;
+    const paginated = new PaginationHelper(this.client, ciProductsWorkflowsGetToManyRelated({
+      client: this.client,
+      path: { id: productId },
+      query: {
+        include: ['repository']
       },
-      { identifier: "get-workflow-by-name" }
-    );
+    }));
+
+    const workflow = await paginated.find(x => findWorkflow(x, workflowName));
+    if (!workflow) {
+      throw new Error(`Workflow ${workflowName} not found`);
+    }
+
+    return workflow;
   }
 
   async createBuildRun(workflowId: string, gitRefId: string) {
-    await this.init();
-
-    return await exponentialRetry(
-      async () => {
-        const buildRun = await this.ciBuildRunsApi.ciBuildRunsCreateInstance({
-          ciBuildRunCreateRequest: {
-            data: {
-              type: CiBuildRunCreateRequestDataTypeEnum.CiBuildRuns,
-              relationships: {
-                workflow: {
-                  data: {
-                    id: workflowId,
-                    type: CiBuildRunRelationshipsWorkflowDataTypeEnum.CiWorkflows,
-                  },
-                },
-                sourceBranchOrTag: {
-                  data: {
-                    id: gitRefId,
-                    type: CiBuildRunRelationshipsSourceBranchOrTagDataTypeEnum.ScmGitReferences,
-                  },
-                },
-              },
+    const buildRun = await ciBuildRunsCreateInstance({
+      client: this.client,
+      body: {
+        data: {
+          type: 'ciBuildRuns',
+          relationships: {
+            workflow: {
+              data: {
+                id: workflowId,
+                type: 'ciWorkflows'
+              }
             },
-          },
-        });
+            sourceBranchOrTag: {
+              data: {
+                id: gitRefId,
+                type: 'scmGitReferences'
+              }
+            }
+          }
+        }
+      }
+    });
 
-        return buildRun;
-      },
-      { identifier: "create-build-run" }
-    );
+    if (buildRun.error) {
+      console.warn(buildRun.error);
+    }
+
+    return buildRun;
+  }
+
+  async cancelBuildRun(buildRunId: string) {
+    const result = await this.client.delete({
+      url: `/v1/ciBuildRuns/${buildRunId}`
+    })
+
+    return result;
   }
 }
 
 function findProductByBundleId(
-  products: CiProductsResponse,
+  products: { data?: CiProductsResponse },
   bundleId: string
 ) {
-  const product = products.data?.find(
+  const product = products.data?.data?.find(
     (tempProduct) => tempProduct.relationships?.bundleId?.data?.id === bundleId
   );
 
@@ -210,7 +133,7 @@ function findProductByBundleId(
 }
 
 export function assertRepositoryId(
-  productData: CiProductResponse["data"]
+  productData: CiProductResponse["data"],
 ): string {
   const repositoryInfo =
     productData.relationships?.primaryRepositories?.data?.find(
@@ -225,12 +148,12 @@ export function assertRepositoryId(
 }
 
 function findGitReference(
-  response: ScmGitReferencesResponse,
+  response: { data?: ScmGitReferencesResponse },
   gitRef: string
 ) {
-  const gitReference = response.data.find(
-    (reference) =>  {
-      return reference.attributes.canonicalName === gitRef
+  const gitReference = response.data?.data.find(
+    (reference) => {
+      return reference.attributes?.canonicalName === gitRef
     }
   );
 
@@ -242,11 +165,11 @@ function findGitReference(
 }
 
 function findWorkflow(
-  response: CiWorkflowsResponse,
+  response: { data?: CiWorkflowsResponse },
   workflowName: string
 ) {
-  const correctWorkflow = response.data.find(
-    (workflow) => workflow.attributes.name === workflowName
+  const correctWorkflow = response.data?.data.find(
+    (workflow) => workflow.attributes?.name === workflowName
   );
 
   return correctWorkflow;
