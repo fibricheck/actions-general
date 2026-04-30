@@ -54,8 +54,11 @@ runs:
           exit 1
         fi
         
-        if [ "${{ inputs.type }}" = "dev" ] && [ "$CURRENT_BRANCH" != "dev" ]; then
-          echo "Dev releases must be from dev branch"
+        if [ "${{ inputs.type }}" = "dev" ] && \
+           [ "$CURRENT_BRANCH" != "main" ] && \
+           [ "$CURRENT_BRANCH" != "master" ] && \
+           ! [[ "$CURRENT_BRANCH" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Dev releases must be from main, master, or a version branch (v*.*.*)"
           exit 1
         fi
 
