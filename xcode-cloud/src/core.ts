@@ -1,11 +1,9 @@
-import {
-  AppStoreConnectAPIOptions,
-} from "appstore-connect-sdk";
+import { AppStoreConnectConfig } from "appstore-connect-sdk";
 import { AppStoreApi, assertRepositoryId, CreateXCodeCloudBuildInput } from "./appstore-sdk.js";
 import * as core from "@actions/core";
 
 export async function startXCodeCloudBuild(
-  input: AppStoreConnectAPIOptions & CreateXCodeCloudBuildInput
+  input: AppStoreConnectConfig & CreateXCodeCloudBuildInput
 ) {
   core.debug(`Creating AppStore API...`);
   const { workflowName, gitRef, bundleId } = input;
@@ -36,13 +34,25 @@ export async function startXCodeCloudBuild(
     workflow.id,
     gitReference.id
   );
-  core.debug(`Build started, id: ${buildRun.data.id}, number: ${buildRun.data.attributes.number}`);
+  core.debug(`Build started, id: ${buildRun?.data?.data?.id}, number: ${buildRun?.data?.data?.attributes?.number}`);
 
   return {
     repositoryId,
     productId: product.id,
     workflowId: workflow.id,
-    buildId: buildRun.data.id,
-    buildNumber: buildRun.data.attributes.number,
+    buildId: buildRun?.data?.data?.id,
+    buildNumber: buildRun?.data?.data?.attributes?.number,
   };
+}
+
+export async function cancelXCodeCloudBuild(
+  input: AppStoreConnectConfig & { buildId: string }
+) {
+  core.debug(`Creating AppStore API...`);
+  const { buildId } = input;
+  const appStoreApi = new AppStoreApi(input);
+  core.debug(`AppStore API Created!`);
+
+  const result = await appStoreApi.cancelBuildRun(buildId)
+  return result.data;
 }
