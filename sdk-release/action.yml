@@ -19,11 +19,6 @@ inputs:
     required: false
     default: 'false'
 
-  override_version:
-    description: 'Skip version computation and use this version string directly (useful when the caller has already prepared the version, e.g. after updating a podspec)'
-    required: false
-    default: ''
-
   body:
     description: 'Release notes body. When provided, used as the release description instead of GitHub auto-generated notes.'
     required: false
@@ -112,16 +107,8 @@ runs:
       shell: bash
       run: |
         BASE_VERSION="${{ steps.parse_version.outputs.base_version }}"
-        OVERRIDE="${{ inputs.override_version }}"
 
-        if [ -n "$OVERRIDE" ]; then
-          if ! [[ "$OVERRIDE" =~ ^[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
-            echo "::error::Invalid override_version format '$OVERRIDE'. Must start with semver X.Y.Z"
-            exit 1
-          fi
-          FINAL_VERSION="$OVERRIDE"
-
-        elif [ "${{ inputs.type }}" = "prod" ]; then
+        if [ "${{ inputs.type }}" = "prod" ]; then
           FINAL_VERSION="$BASE_VERSION"
 
         elif [ "${{ inputs.type }}" = "dev" ]; then
