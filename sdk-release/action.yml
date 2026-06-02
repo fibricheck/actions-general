@@ -19,6 +19,16 @@ inputs:
     required: false
     default: 'false'
 
+  override_version:
+    description: 'Skip version computation and use this version string directly (useful when the caller has already prepared the version, e.g. after updating a podspec)'
+    required: false
+    default: ''
+
+  body:
+    description: 'Release notes body. When provided, used as the release description instead of GitHub auto-generated notes.'
+    required: false
+    default: ''
+
 outputs:
   tag:
     description: "The newly created tag"
@@ -102,10 +112,18 @@ runs:
       shell: bash
       run: |
         BASE_VERSION="${{ steps.parse_version.outputs.base_version }}"
-        
-        if [ "${{ inputs.type }}" = "prod" ]; then
+        OVERRIDE="${{ inputs.override_version }}"
+
+        if [ -n "$OVERRIDE" ]; then
+          if ! [[ "$OVERRIDE" =~ ^[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+            echo "::error::Invalid override_version format '$OVERRIDE'. Must start with semver X.Y.Z"
+            exit 1
+          fi
+          FINAL_VERSION="$OVERRIDE"
+
+        elif [ "${{ inputs.type }}" = "prod" ]; then
           FINAL_VERSION="$BASE_VERSION"
-          
+
         elif [ "${{ inputs.type }}" = "dev" ]; then
           # Find latest dev version
           EXISTING=$(git tag -l "v${BASE_VERSION}-dev.*" | sort -V | tail -1)
@@ -116,12 +134,12 @@ runs:
             DEV_VERSION=$((LAST_DEV_VERSION + 1))
           fi
           FINAL_VERSION="${BASE_VERSION}-dev.${DEV_VERSION}"
-          
+
         elif [ "${{ inputs.type }}" = "snapshot" ]; then
           COMMIT_HASH=$(git rev-parse --short HEAD)
           FINAL_VERSION="${BASE_VERSION}-snapshot.${COMMIT_HASH}"
         fi
-        
+
         # Check if tag already exists
         if git rev-parse "v$FINAL_VERSION" >/dev/null 2>&1; then
           echo "::error::Tag v$FINAL_VERSION already exists. Cannot create duplicate release."
@@ -142,15 +160,18 @@ runs:
     - name: Create GitHub Release
       if: ${{ inputs.dry_run != 'true' }}
       uses: actions/github-script@v7
+      env:
+        RELEASE_BODY: ${{ inputs.body }}
       with:
         github-token: ${{ inputs.token }}
         script: |
           const isPrerelease = '${{ inputs.type }}' !== 'prod';
+          const body = process.env.RELEASE_BODY;
           await github.rest.repos.createRelease({
             owner: context.repo.owner,
             repo: context.repo.repo,
             tag_name: 'v${{ steps.version.outputs.final_version }}',
             name: 'Release ${{ steps.version.outputs.final_version }}',
             prerelease: isPrerelease,
-            generate_release_notes: true
+            ...(body ? { body } : { generate_release_notes: true }),
           });
