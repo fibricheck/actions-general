@@ -2,12 +2,31 @@
 
 A collection of general use actions
 
+## Versioning
+
+All actions in this repo share one set of tags (`v1`, `v2`, `v3`, ...). Pin to the major tag in your workflows, for example:
+
+```yaml
+uses: fibricheck/actions-general/setup-node-env@v5
+```
+
+The major tag moves forward automatically as fixes and features land, so you get updates for free without ever touching your workflow file. If you'd rather hard-pin an exact version, patch tags like `v5.1` are still there for you x.
+
+### Releasing
+
+```bash
+git tag v5.2 <commit>
+git tag -f v5 <commit>
+git push origin v5.2
+git push -f origin v5
+```
+
 ## parse-tag
 <!-- start usage -->
 ```yaml
 - name: Parse Tag
   id: parse-tag
-  uses: fibricheck/actions-general/parse-tag@v1
+  uses: fibricheck/actions-general/parse-tag@v5
   with:
     # The tag to parse. For example, refs/tags/v2.11.0/eu/dev
     # required
@@ -42,7 +61,7 @@ A collection of general use actions
 ```yaml
 - name: Regex Match
   id: regex-match
-  uses: fibricheck/actions-general/regex-match@v1
+  uses: fibricheck/actions-general/regex-match@v5
   with:
     # The string to check with the regex
     # required
@@ -77,7 +96,7 @@ A collection of general use actions
 ```yaml
 - name: XCode Cloud
   id: xcode-cloud
-  uses: fibricheck/actions-general/xcode-cloud@v1
+  uses: fibricheck/actions-general/xcode-cloud@v5
   with:
     # AppStore Issuer ID
     # required
@@ -117,7 +136,7 @@ A collection of general use actions
 ```yaml
 - name: Parse SDK Version
   id: sdk-version-parse
-  uses: fibricheck/actions-general/sdk-version-parse@v1
+  uses: fibricheck/actions-general/sdk-version-parse@v5
   with:
     # The version string to parse (e.g., v2.13.0, 2.13.0-snapshot.abc1234, v2.13.0-dev.10)
     # required
@@ -147,7 +166,7 @@ A collection of general use actions
 ```yaml
 - name: Release SDK Version
   id: sdk-release
-  uses: fibricheck/actions-general/sdk-release@v1
+  uses: fibricheck/actions-general/sdk-release@v5
   with:
     # Release type (dev/prod/snapshot)
     # required
@@ -177,3 +196,43 @@ A collection of general use actions
 <!-- end usage -->
 
 - [Example](./sdk-release/example.yml)
+
+## setup-node-env
+
+<!-- start usage -->
+```yaml
+- name: Setup Node Environment
+  id: setup-node-env
+  uses: fibricheck/actions-general/setup-node-env@v5
+  with:
+    # Package manager to use. Allowed values: yarn, npm, pnpm.
+    # required
+    package-manager: ''
+    # Node.js version to install.
+    # optional (default: 22)
+    node-version: '22'
+    # pnpm version to install. Only used when package-manager is pnpm.
+    # If omitted, resolved from the "packageManager" field in package.json.
+    # optional (default: '')
+    pnpm-version: ''
+    # Path to the dependency lockfile used for caching.
+    # When omitted, dependency caching is disabled.
+    # optional (default: '')
+    cache-dependency-path: ''
+    # GitHub token for authenticating with GitHub Packages. When provided, dependencies are installed.
+    # optional (default: '')
+    github-token: ''
+
+  # Outputs:
+  #   package-manager: Resolved package manager name (yarn, npm, or pnpm)
+  #   pm-install: Command to install dependencies
+  #   pm-run: Command prefix for running package scripts
+- name: Echo
+  run: |
+    echo "package-manager: ${{ steps.setup-node-env.outputs.package-manager }}"
+    echo "pm-install: ${{ steps.setup-node-env.outputs.pm-install }}"
+    echo "pm-run: ${{ steps.setup-node-env.outputs.pm-run }}"
+```
+<!-- end usage -->
+
+- [Example](./setup-node-env/example.yml)

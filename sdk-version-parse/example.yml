@@ -10,7 +10,7 @@ jobs:
     steps:
       - name: SDK Version Parse
         id: sdk-version-parse
-        uses: fibricheck/actions-general/sdk-version-parse@v1
+        uses: fibricheck/actions-general/sdk-version-parse@v5
         with:
           version: 'v2.13.0-dev.10'
       

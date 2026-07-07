@@ -1,0 +1,22 @@
+name: Setup Node Environment Example
+
+on:
+  workflow_call:
+
+jobs:
+  setup-node-env-example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node Environment
+        id: setup-node-env
+        uses: fibricheck/actions-general/setup-node-env@v5
+        with:
+          package-manager: 'pnpm'
+          node-version: '22'
+          cache-dependency-path: 'pnpm-lock.yaml'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run lint
+        run: ${{ steps.setup-node-env.outputs.pm-run }} lint

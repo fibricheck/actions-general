@@ -1,0 +1,85 @@
+name: Setup Node Environment
+description: Validates the package manager, sets up pnpm if needed, installs Node.js, optionally configures dependency caching, and optionally installs dependencies. Exposes package-manager, pm-install, and pm-run as outputs.
+inputs:
+  package-manager:
+    description: 'Package manager to use. Allowed values: yarn, npm, pnpm.'
+    required: true
+  node-version:
+    description: 'Node.js version to install.'
+    required: false
+    default: '22'
+  pnpm-version:
+    description: 'pnpm version to install. Only used when package-manager is pnpm. If omitted, resolved from the "packageManager" field in package.json.'
+    required: false
+    default: ''
+  cache-dependency-path:
+    description: 'Path to the dependency lockfile used for caching. When omitted, dependency caching is disabled.'
+    required: false
+    default: ''
+  github-token:
+    description: 'GitHub token for authenticating with GitHub Packages. When provided, dependencies are installed.'
+    required: false
+    default: ''
+outputs:
+  package-manager:
+    description: 'Resolved package manager name (yarn, npm, or pnpm).'
+    value: ${{ steps.configure.outputs.package-manager }}
+  pm-install:
+    description: 'Command to install dependencies.'
+    value: ${{ steps.configure.outputs.pm-install }}
+  pm-run:
+    description: 'Command prefix for running package scripts.'
+    value: ${{ steps.configure.outputs.pm-run }}
+runs:
+  using: composite
+  steps:
+  - name: Validate and configure package manager
+    id: configure
+    shell: bash
+    run: |
+      case "${{ inputs.package-manager }}" in
+        yarn)
+          echo "package-manager=yarn" >> "$GITHUB_OUTPUT"
+          echo "pm-install=yarn --frozen-lockfile" >> "$GITHUB_OUTPUT"
+          echo "pm-run=yarn" >> "$GITHUB_OUTPUT"
+          ;;
+        npm)
+          echo "package-manager=npm" >> "$GITHUB_OUTPUT"
+          echo "pm-install=npm ci" >> "$GITHUB_OUTPUT"
+          echo "pm-run=npm run" >> "$GITHUB_OUTPUT"
+          ;;
+        pnpm)
+          echo "package-manager=pnpm" >> "$GITHUB_OUTPUT"
+          echo "pm-install=pnpm install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+          echo "pm-run=pnpm" >> "$GITHUB_OUTPUT"
+          ;;
+        *)
+          echo "::error::Unsupported package manager '${{ inputs.package-manager }}'. Allowed values: yarn, npm, pnpm."
+          exit 1
+          ;;
+      esac
+
+      if [[ -n "${{ inputs.cache-dependency-path }}" ]]; then
+        echo "dependency-cache=${{ inputs.package-manager }}" >> "$GITHUB_OUTPUT"
+      fi
+
+  - name: Setup pnpm
+    if: inputs.package-manager == 'pnpm'
+    uses: pnpm/action-setup@v4
+    with:
+      version: ${{ inputs.pnpm-version }}
+
+  - name: Setup Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: ${{ inputs.node-version }}
+      registry-url: 'https://npm.pkg.github.com'
+      cache: ${{ steps.configure.outputs.dependency-cache }}
+      cache-dependency-path: ${{ inputs.cache-dependency-path }}
+
+  - name: Install dependencies
+    if: inputs.github-token != ''
+    shell: bash
+    run: ${{ steps.configure.outputs.pm-install }}
+    env:
+      NODE_AUTH_TOKEN: ${{ inputs.github-token }}

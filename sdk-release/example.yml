@@ -11,7 +11,7 @@ jobs:
 
       - name: sdk-release-dev
         id: sdk-release-dev
-        uses: fibricheck/actions-general/sdk-release@v2
+        uses: fibricheck/actions-general/sdk-release@v5
         with:
           token: ${{ github.token }}
           type: dev

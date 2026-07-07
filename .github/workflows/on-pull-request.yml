@@ -7,3 +7,5 @@ jobs:
     uses: './.github/workflows/test-parse-tag.yml'
   on-pull-test-sdk-release:
     uses: './.github/workflows/test-sdk-release.yml'
+  on-pull-test-setup-node-env:
+    uses: './.github/workflows/test-setup-node-env.yml'

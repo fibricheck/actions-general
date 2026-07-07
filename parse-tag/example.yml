@@ -15,6 +15,6 @@ jobs:
     steps:
       - name: Parse Tag
         id: parse-tag
-        uses: fibricheck/actions-general/parse-tag@v2
+        uses: fibricheck/actions-general/parse-tag@v5
         with:
           tag: ${{ github.ref }}
