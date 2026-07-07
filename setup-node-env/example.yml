@@ -15,6 +15,7 @@ jobs:
         with:
           package-manager: 'pnpm'
           node-version: '22'
+          cache-dependency-path: 'pnpm-lock.yaml'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run lint

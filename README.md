@@ -211,6 +211,14 @@ git push -f origin v5
     # Node.js version to install.
     # optional (default: 22)
     node-version: '22'
+    # pnpm version to install. Only used when package-manager is pnpm.
+    # If omitted, resolved from the "packageManager" field in package.json.
+    # optional (default: '')
+    pnpm-version: ''
+    # Path to the dependency lockfile used for caching.
+    # When omitted, dependency caching is disabled.
+    # optional (default: '')
+    cache-dependency-path: ''
     # GitHub token for authenticating with GitHub Packages. When provided, dependencies are installed.
     # optional (default: '')
     github-token: ''

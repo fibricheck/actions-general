@@ -8,7 +8,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        package-manager: [npm, yarn, pnpm]
+        include:
+          - package-manager: npm
+            cache-dependency-path: regex-match/package-lock.json
+          - package-manager: yarn
+            cache-dependency-path: xcode-cloud/yarn.lock
+          - package-manager: pnpm
+            pnpm-version: '9'
     steps:
       - uses: actions/checkout@v4
 
@@ -17,6 +23,8 @@ jobs:
         uses: ./setup-node-env
         with:
           package-manager: ${{ matrix.package-manager }}
+          pnpm-version: ${{ matrix.pnpm-version }}
+          cache-dependency-path: ${{ matrix.cache-dependency-path }}
 
       - name: Validate outputs
         run: |

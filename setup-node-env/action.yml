@@ -1,5 +1,5 @@
 name: Setup Node Environment
-description: Validates the package manager, sets up pnpm if needed, installs Node.js, and optionally installs dependencies. Exposes package-manager, pm-install, and pm-run as outputs.
+description: Validates the package manager, sets up pnpm if needed, installs Node.js, optionally configures dependency caching, and optionally installs dependencies. Exposes package-manager, pm-install, and pm-run as outputs.
 inputs:
   package-manager:
     description: 'Package manager to use. Allowed values: yarn, npm, pnpm.'
@@ -8,6 +8,14 @@ inputs:
     description: 'Node.js version to install.'
     required: false
     default: '22'
+  pnpm-version:
+    description: 'pnpm version to install. Only used when package-manager is pnpm. If omitted, resolved from the "packageManager" field in package.json.'
+    required: false
+    default: ''
+  cache-dependency-path:
+    description: 'Path to the dependency lockfile used for caching. When omitted, dependency caching is disabled.'
+    required: false
+    default: ''
   github-token:
     description: 'GitHub token for authenticating with GitHub Packages. When provided, dependencies are installed.'
     required: false
@@ -51,16 +59,23 @@ runs:
           ;;
       esac
 
+      if [[ -n "${{ inputs.cache-dependency-path }}" ]]; then
+        echo "dependency-cache=${{ inputs.package-manager }}" >> "$GITHUB_OUTPUT"
+      fi
+
   - name: Setup pnpm
     if: inputs.package-manager == 'pnpm'
     uses: pnpm/action-setup@v4
+    with:
+      version: ${{ inputs.pnpm-version }}
 
   - name: Setup Node.js
     uses: actions/setup-node@v4
     with:
       node-version: ${{ inputs.node-version }}
       registry-url: 'https://npm.pkg.github.com'
-      cache: ${{ inputs.package-manager }}
+      cache: ${{ steps.configure.outputs.dependency-cache }}
+      cache-dependency-path: ${{ inputs.cache-dependency-path }}
 
   - name: Install dependencies
     if: inputs.github-token != ''
