@@ -1,0 +1,64 @@
+name: Test Setup Node Environment
+
+on:
+  workflow_call:
+
+jobs:
+  test-setup-node-env:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package-manager: [npm, yarn, pnpm]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup-node-env
+        id: setup-node-env
+        uses: ./setup-node-env
+        with:
+          package-manager: ${{ matrix.package-manager }}
+
+      - name: Validate outputs
+        run: |
+          failed=0
+
+          if [[ "${{ steps.setup-node-env.outputs.package-manager }}" != "${{ matrix.package-manager }}" ]]; then
+            echo "::error::expected package-manager '${{ matrix.package-manager }}', got '${{ steps.setup-node-env.outputs.package-manager }}'"
+            failed=1
+          fi
+
+          if [[ -z "${{ steps.setup-node-env.outputs.pm-install }}" ]]; then
+            echo "::error::pm-install output should not be empty"
+            failed=1
+          fi
+
+          if [[ -z "${{ steps.setup-node-env.outputs.pm-run }}" ]]; then
+            echo "::error::pm-run output should not be empty"
+            failed=1
+          fi
+
+          if [[ $failed -eq 1 ]]; then
+            exit 1
+          fi
+
+          echo "All validations passed!"
+
+  test-setup-node-env-invalid:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup-node-env with invalid package manager
+        id: setup-node-env
+        continue-on-error: true
+        uses: ./setup-node-env
+        with:
+          package-manager: bun
+
+      - name: Validate failure
+        run: |
+          if [[ "${{ steps.setup-node-env.outcome }}" != "failure" ]]; then
+            echo "::error::expected setup-node-env to fail for an unsupported package manager"
+            exit 1
+          fi
+          echo "Correctly failed for unsupported package manager"
