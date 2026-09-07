@@ -1,0 +1,27 @@
+name: Generate Build Manifest Example
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Build Manifest
+        id: generate-build-manifest
+        uses: fibricheck/actions-general/generate-build-manifest@v5
+        with:
+          component: 'blood-pressure-measurements'
+          version: '1.0.0'
+          repo: ${{ github.repository }}
+          commit-sha: ${{ github.sha }}
+          product-identifiers: 'blood-pressure-measurements-v1.0.0-eu-production,blood-pressure-measurements-v1.0.0-us-production'
+          build-config: ''
+          tooling: '{"node":"20"}'
+          s3-folder: 'schemas'
+
+      - run: |
+          echo "Manifest written to: ${{ steps.generate-build-manifest.outputs.manifest-path }}"

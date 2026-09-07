@@ -1,0 +1,24 @@
+name: Generate Deploy Manifest Example
+
+on:
+  workflow_call:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Deploy Manifest
+        id: generate-deploy-manifest
+        uses: fibricheck/actions-general/generate-deploy-manifest@v5
+        with:
+          component: 'blood-pressure-measurements'
+          version: '1.0.0'
+          target-environment: 'eu-production'
+          build-manifest-ref: 'manifests/build/blood-pressure-measurements-1.0.0.json'
+          s3-folder: 'schemas'
+
+      - run: |
+          echo "Manifest written to: ${{ steps.generate-deploy-manifest.outputs.manifest-path }}"
