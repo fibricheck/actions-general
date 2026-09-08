@@ -17,7 +17,7 @@ inputs:
       since the build manifest is expected to already be an immutable, trustworthy record on its own.
     required: true
   deployment-timestamp:
-    description: 'When the deployment happened, in YYYY-MM-DDTHH:MM:SSZ format. Defaults to now — pass this explicitly when recording a deployment after the fact (e.g. an app store release recorded manually).'
+    description: 'When the deployment happened, as YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ. Defaults to now. Pass this explicitly when recording a deployment after the fact (e.g. an app store release recorded manually). A date-only value is normalized to midnight UTC.'
     required: false
     default: ''
   deploy-config:
@@ -109,8 +109,10 @@ runs:
 
         TIMESTAMP="$INPUT_DEPLOYMENT_TIMESTAMP"
         [ -z "$TIMESTAMP" ] && TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        if ! [[ "$TIMESTAMP" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
-          echo "::error::deployment-timestamp must use YYYY-MM-DDTHH:MM:SSZ"
+        if [[ "$TIMESTAMP" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+          TIMESTAMP="${TIMESTAMP}T00:00:00Z"
+        elif ! [[ "$TIMESTAMP" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+          echo "::error::deployment-timestamp must use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ"
           exit 1
         fi
 

@@ -319,6 +319,12 @@ Builds a traceability manifest JSON for a release, writes it locally, and upload
     # Xcode/Swift/CocoaPods or Java/Gradle/AGP for mobile builds.
     # optional (default: '')
     tooling: '{"node":"20.19.4","packageManager":{"name":"yarn","version":"4.9.2"}}'
+    # When the build actually happened, as YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ.
+    # Defaults to now. Pass this explicitly when recording a build after
+    # the fact (e.g. backfilling a manifest for a build that predates this
+    # action). A date-only value is normalized to midnight UTC.
+    # optional (default: '')
+    build-timestamp: ''
     # Top-level folder within the manifests bucket: app, pages, schemas,
     # tasks, packages, or test. Required — every manifest is uploaded, there
     # is no local-only mode. Uploads always go to the shared FibriCheck
@@ -378,10 +384,11 @@ Builds a deployment traceability manifest JSON, writes it locally, and uploads i
     # its own.
     # required
     build-manifest-ref: 's3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-2026-09-07T100000Z.build-manifest.json'
-    # When the deployment happened, in YYYY-MM-DDTHH:MM:SSZ format. Defaults
-    # to now — pass this explicitly when recording a deployment after the
-    # fact (e.g. a deploy triggered manually, such as pressing "release" in
-    # an app store console).
+    # When the deployment happened, as YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ.
+    # Defaults to now. Pass this explicitly when recording a deployment
+    # after the fact (e.g. a deploy triggered manually, such as pressing
+    # "release" in an app store console). A date-only value is normalized
+    # to midnight UTC.
     # optional (default: '')
     deployment-timestamp: '2026-09-07T10:15:02Z'
     # Deploy-time configuration to embed as-is, same rules as
