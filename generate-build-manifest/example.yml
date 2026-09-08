@@ -1,0 +1,36 @@
+name: Generate Build Manifest Example
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to AWS for manifest publishing
+        uses: aws-actions/configure-aws-credentials@v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_MANIFEST_PUBLISHER_ROLE_ARN }}
+          aws-region: eu-central-1
+
+      - name: Generate Build Manifest
+        id: generate-build-manifest
+        uses: fibricheck/actions-general/generate-build-manifest@v5
+        with:
+          component: 'blood-pressure-measurements'
+          version: '1.0.0'
+          repo: ${{ github.repository }}
+          commit-sha: ${{ github.sha }}
+          product-identifiers: 'blood-pressure-measurements-v1.0.0-eu-production,blood-pressure-measurements-v1.0.0-us-production'
+          build-config: ''
+          tooling: '{"node":"20"}'
+          s3-folder: 'schemas'
+
+      - run: |
+          echo "Manifest written to: ${{ steps.generate-build-manifest.outputs.manifest-path }}"

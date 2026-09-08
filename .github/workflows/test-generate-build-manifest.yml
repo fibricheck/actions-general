@@ -1,0 +1,286 @@
+name: Test Generate Build Manifest
+
+on:
+  workflow_call:
+
+jobs:
+  test-generate-build-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mock aws CLI (S3 tests run without a real bucket/credentials)
+        run: |
+          mkdir -p "$RUNNER_TEMP/mock-bin"
+          cat > "$RUNNER_TEMP/mock-bin/aws" <<'MOCKEOF'
+          #!/bin/bash
+          echo "$*" >> "$RUNNER_TEMP/aws-calls.log"
+          if [[ "$*" == *"already-exists.build-manifest.json"* ]]; then
+            echo "PreconditionFailed: object already exists" >&2
+            exit 1
+          fi
+          exit 0
+          MOCKEOF
+          chmod +x "$RUNNER_TEMP/mock-bin/aws"
+          echo "$RUNNER_TEMP/mock-bin" >> "$GITHUB_PATH"
+
+      - name: Generate build manifest with structured configuration
+        id: generate-structured-config
+        uses: ./generate-build-manifest
+        with:
+          component: fibricheck-app
+          version: 2.16.0
+          repo: fibricheck/fibricheck_react_native
+          commit-sha: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+          build-number: '146'
+          build-id: '9876543210'
+          product-identifiers: fibricheck-app-v2.16.0-eu-prod,fibricheck-app-v2.16.0-us-prod
+          build-config: '{"region":"eu","FEATURE_ECG":true}'
+          tooling: '{"node":"20.19.4","xcode":"16.4","gradle":"8.13"}'
+          s3-folder: app
+
+      - name: manifest has all fields populated correctly
+        run: |
+          MANIFEST='${{ steps.generate-structured-config.outputs.manifest-json }}'
+          [ "$(echo "$MANIFEST" | jq -r '.component')" = "fibricheck-app" ]
+          [ "$(echo "$MANIFEST" | jq -r '.commit.sha')" = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" ]
+          [ "$(echo "$MANIFEST" | jq -r '.commit.tag')" = "null" ]
+          [ "$(echo "$MANIFEST" | jq -r '.manifestVersion')" = "1.0" ]
+          [ "$(echo "$MANIFEST" | jq -r '.buildNumber')" = "146" ]
+          [ "$(echo "$MANIFEST" | jq -r '.buildId')" = "9876543210" ]
+          [ "$(echo "$MANIFEST" | jq -c '.productIdentifiers')" = '["fibricheck-app-v2.16.0-eu-prod","fibricheck-app-v2.16.0-us-prod"]' ]
+          [ "$(echo "$MANIFEST" | jq -r '.buildConfig.region')" = "eu" ]
+          [ "$(echo "$MANIFEST" | jq -r '.buildConfig.FEATURE_ECG')" = "true" ]
+          [ "$(echo "$MANIFEST" | jq -r '.tooling.xcode')" = "16.4" ]
+          TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
+          [ -f "${{ steps.generate-structured-config.outputs.manifest-path }}" ]
+          [ "${{ steps.generate-structured-config.outputs.manifest-path }}" = "manifests/build/fibricheck-app-2.16.0-${TIMESTAMP}.json" ]
+          [ "${{ steps.generate-structured-config.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app-2.16.0-146-${TIMESTAMP}.build-manifest.json" ]
+
+      - name: Generate build manifest with raw-text configuration
+        id: generate-raw-text-config
+        uses: ./generate-build-manifest
+        with:
+          component: pages-portal
+          version: 1.0.0
+          repo: fibricheck/pages-portal
+          commit-sha: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+          s3-folder: pages
+          build-config: |
+            VITE_FEATURE_US=false
+            VITE_TARGET_HOST=https://api.example.com?token=abc=123
+
+      - name: raw-text build-config preserved literally
+        run: |
+          MANIFEST='${{ steps.generate-raw-text-config.outputs.manifest-json }}'
+          CONFIG=$(echo "$MANIFEST" | jq -r '.buildConfig')
+          echo "$CONFIG" | grep -q "VITE_FEATURE_US=false"
+          echo "$CONFIG" | grep -q "VITE_TARGET_HOST=https://api.example.com?token=abc=123"
+
+      - name: Generate build manifest without optional fields
+        id: generate-without-optional-fields
+        uses: ./generate-build-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: schemas
+
+      - name: optional fields default to null when omitted
+        run: |
+          MANIFEST='${{ steps.generate-without-optional-fields.outputs.manifest-json }}'
+          [ "$(echo "$MANIFEST" | jq -r '.buildConfig')" = "null" ]
+          [ "$(echo "$MANIFEST" | jq -r '.udi')" = "null" ]
+          [ "$(echo "$MANIFEST" | jq -r '.productIdentifiers | length')" = "0" ]
+          [ "$(echo "$MANIFEST" | jq -r '.buildNumber')" = "null" ]
+          [ "$(echo "$MANIFEST" | jq -r '.buildId')" = "null" ]
+          [ "$(echo "$MANIFEST" | jq -r '.tooling')" = "null" ]
+          TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
+          [ "${{ steps.generate-without-optional-fields.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-${TIMESTAMP}.build-manifest.json" ]
+          grep -q -- "--bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements-1.0.0-${TIMESTAMP}.build-manifest.json --body manifests/build/blood-pressure-measurements-1.0.0-${TIMESTAMP}.json --if-none-match \*" "$RUNNER_TEMP/aws-calls.log"
+
+      - name: Generate build manifest containing shell-like literal data
+        id: generate-literal-data
+        uses: ./generate-build-manifest
+        with:
+          component: "page's-component"
+          version: '1.0.0'
+          repo: fibricheck/pages-portal
+          commit-sha: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+          commit-tag: "release-'quoted'"
+          s3-folder: pages
+          build-config: |
+            LABEL=customer's portal
+            COMMAND=$(this-must-not-run)
+            TICKS=`this-must-not-run-either`
+
+      - name: quotes and shell-like text remain literal
+        env:
+          MANIFEST: ${{ steps.generate-literal-data.outputs.manifest-json }}
+        run: |
+          [ "$(jq -r '.component' <<< "$MANIFEST")" = "page's-component" ]
+          [ "$(jq -r '.commit.tag' <<< "$MANIFEST")" = "release-'quoted'" ]
+          jq -e '.buildConfig | contains("COMMAND=$(this-must-not-run)")' <<< "$MANIFEST"
+          jq -e '.buildConfig | contains("TICKS=`this-must-not-run-either`")' <<< "$MANIFEST"
+
+      - name: generate-invalid-tooling-should-fail
+        id: generate-invalid-tooling
+        continue-on-error: true
+        uses: ./generate-build-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: schemas
+          tooling: '["node","20"]'
+
+      - name: invalid tooling fails loudly
+        run: |
+          [ "${{ steps.generate-invalid-tooling.outcome }}" = "failure" ]
+
+      - name: generate-path-traversal-component-should-fail
+        id: generate-traversal
+        continue-on-error: true
+        uses: ./generate-build-manifest
+        with:
+          component: '../../etc/passwd'
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: schemas
+
+      - name: path-traversal component fails loudly
+        run: |
+          [ "${{ steps.generate-traversal.outcome }}" = "failure" ]
+
+      - name: generate-line-break-component-should-fail
+        id: generate-line-break
+        continue-on-error: true
+        uses: ./generate-build-manifest
+        with:
+          component: |-
+            invalid
+            component
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: schemas
+
+      - name: line-break component fails loudly
+        run: |
+          [ "${{ steps.generate-line-break.outcome }}" = "failure" ]
+
+      - name: generate-custom-s3-key
+        id: generate-custom-key
+        uses: ./generate-build-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: schemas
+          s3-key: schemas/blood-pressure-measurements/1.0.0.build-manifest.json
+
+      - name: custom s3-key overrides the folder-derived default
+        run: |
+          [ "${{ steps.generate-custom-key.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0.build-manifest.json" ]
+          grep -q -- "--bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements/1.0.0.build-manifest.json --body" "$RUNNER_TEMP/aws-calls.log"
+
+      - name: Existing build manifest is not overwritten
+        id: generate-existing-build-manifest
+        continue-on-error: true
+        uses: ./generate-build-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: schemas
+          s3-key: schemas/already-exists.build-manifest.json
+
+      - name: Existing build manifest fails loudly
+        run: |
+          [ "${{ steps.generate-existing-build-manifest.outcome }}" = "failure" ]
+
+      - name: generate-s3-key-line-break-should-fail
+        id: generate-s3-key-newline
+        continue-on-error: true
+        uses: ./generate-build-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: schemas
+          s3-key: |-
+            invalid
+            key
+
+      - name: s3-key line break fails loudly
+        run: |
+          [ "${{ steps.generate-s3-key-newline.outcome }}" = "failure" ]
+
+      - name: generate-s3-folder-with-build-number
+        id: generate-s3-folder-buildnum
+        uses: ./generate-build-manifest
+        with:
+          component: fibricheck-app-ios
+          version: 2.16.0
+          repo: fibricheck/fibricheck_react_native
+          commit-sha: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+          build-number: '146'
+          s3-folder: app
+
+      - name: s3-folder includes build-number in key
+        run: |
+          MANIFEST='${{ steps.generate-s3-folder-buildnum.outputs.manifest-json }}'
+          TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
+          [ "${{ steps.generate-s3-folder-buildnum.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app-ios-2.16.0-146-${TIMESTAMP}.build-manifest.json" ]
+
+      - name: generate-missing-s3-folder-should-fail
+        id: generate-missing-folder
+        continue-on-error: true
+        uses: ./generate-build-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: ''
+
+      - name: missing s3-folder fails loudly
+        run: |
+          [ "${{ steps.generate-missing-folder.outcome }}" = "failure" ]
+
+      - name: generate-invalid-s3-folder-should-fail
+        id: generate-bad-folder
+        continue-on-error: true
+        uses: ./generate-build-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: shema
+
+      - name: invalid s3-folder fails loudly
+        run: |
+          [ "${{ steps.generate-bad-folder.outcome }}" = "failure" ]
+
+      - name: generate-s3-folder-test
+        id: generate-s3-folder-test
+        uses: ./generate-build-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: test
+
+      - name: s3-folder value "test" is accepted
+        run: |
+          MANIFEST='${{ steps.generate-s3-folder-test.outputs.manifest-json }}'
+          TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
+          [ "${{ steps.generate-s3-folder-test.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/test/blood-pressure-measurements-1.0.0-${TIMESTAMP}.build-manifest.json" ]

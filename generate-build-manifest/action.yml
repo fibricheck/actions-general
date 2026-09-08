@@ -1,0 +1,218 @@
+name: 'Generate Build Manifest'
+description: 'Builds a traceability manifest JSON, writes it locally, and uploads it to the shared FibriCheck manifests bucket. Does not commit or push.'
+inputs:
+  component:
+    description: 'Name of the component or schema that was built'
+    required: true
+  version:
+    description: 'Version of the build (e.g. semver)'
+    required: true
+  repo:
+    description: 'Repository the build came from, owner/name'
+    required: true
+  commit-sha:
+    description: 'Commit sha the build was produced from'
+    required: true
+  commit-tag:
+    description: 'Git tag for the commit, if one exists'
+    required: false
+    default: ''
+  build-number:
+    description: 'Platform build number, when the component has one (e.g. a mobile app build)'
+    required: false
+    default: ''
+  build-id:
+    description: >
+      CI build identifier (e.g. a GitHub Actions run ID), supplied by the calling workflow — this
+      action does not read GitHub context itself. Best-effort only: GitHub's workflow-run retention
+      window (90 days as of 2026-10-01) means this can stop resolving to anything long before this
+      manifest's own retention period ends. commit-sha remains the durable reference; treat this as
+      a convenience lookup, not a guarantee.
+    required: false
+    default: ''
+  product-identifiers:
+    description: 'Comma-separated list of product identifiers this build produced (e.g. one per target environment)'
+    required: false
+    default: ''
+  udi:
+    description: 'Unique Device Identifier, if applicable'
+    required: false
+    default: ''
+  build-config:
+    description: >
+      Build-time configuration to embed as-is. Pass a JSON object/string when one already exists
+      (e.g. a config file read with `cat`); pass raw text otherwise (e.g. a multi-line KEY=value
+      block) and it will be embedded as a JSON string, unparsed.
+    required: false
+    default: ''
+  tooling:
+    description: 'JSON object containing the toolchain versions used for the build (e.g. Node, Xcode, Gradle)'
+    required: false
+    default: ''
+  s3-folder:
+    description: >
+      Top-level folder within the manifests bucket: app, pages, schemas, tasks, packages, or test.
+      Required — every manifest is uploaded. Uploads always go to the shared FibriCheck manifests bucket
+      (manifests.fibricheck.com). The key defaults to <s3-folder>/<component>-<version>[-<build-number>]-<build-timestamp>.build-manifest.json, or s3-key if set.
+      Uploads are create-only and fail if the selected key already exists.
+      Object Lock retention is applied by the bucket's own default retention rule, not by this
+      action — "test" is not exempt from it.
+    required: true
+  s3-key:
+    description: 'Object key to upload to within the manifests bucket. If set, used as-is instead of the s3-folder-derived default key — not combined with it. Must not already exist; the upload fails if it does.'
+    required: false
+    default: ''
+outputs:
+  manifest-json:
+    description: 'The generated manifest, as a JSON string'
+    value: ${{ steps.generate.outputs.manifest-json }}
+  manifest-path:
+    description: 'Path the manifest was written to'
+    value: ${{ steps.generate.outputs.manifest-path }}
+  s3-uri:
+    description: 'The s3://bucket/key URI the manifest was uploaded to'
+    value: ${{ steps.generate.outputs.s3-uri }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate
+      id: generate
+      shell: bash
+      env:
+        INPUT_COMPONENT: ${{ inputs.component }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_COMMIT_SHA: ${{ inputs.commit-sha }}
+        INPUT_COMMIT_TAG: ${{ inputs.commit-tag }}
+        INPUT_BUILD_NUMBER: ${{ inputs.build-number }}
+        INPUT_BUILD_ID: ${{ inputs.build-id }}
+        INPUT_PRODUCT_IDENTIFIERS: ${{ inputs.product-identifiers }}
+        INPUT_UDI: ${{ inputs.udi }}
+        INPUT_BUILD_CONFIG: ${{ inputs.build-config }}
+        INPUT_TOOLING: ${{ inputs.tooling }}
+        INPUT_S3_FOLDER: ${{ inputs.s3-folder }}
+        INPUT_S3_KEY: ${{ inputs.s3-key }}
+      run: |
+        set -euo pipefail
+
+        validate_no_path_traversal() {
+          local name="$1" value="$2"
+          case "$value" in
+            */*|*'\'*)
+              echo "::error::${name} must not contain '/' or '\\'"
+              exit 1
+              ;;
+            .|..)
+              echo "::error::${name} must not be '.' or '..'"
+              exit 1
+              ;;
+            *$'\n'*|*$'\r'*)
+              echo "::error::${name} must not contain line breaks"
+              exit 1
+              ;;
+          esac
+        }
+        validate_no_line_breaks() {
+          local name="$1" value="$2"
+          case "$value" in
+            *$'\n'*|*$'\r'*)
+              echo "::error::${name} must not contain line breaks"
+              exit 1
+              ;;
+          esac
+        }
+        validate_no_path_traversal "component" "$INPUT_COMPONENT"
+        validate_no_path_traversal "version" "$INPUT_VERSION"
+        [ -n "$INPUT_BUILD_NUMBER" ] && validate_no_path_traversal "build-number" "$INPUT_BUILD_NUMBER"
+        case "$INPUT_S3_FOLDER" in
+          app|pages|schemas|tasks|packages|test) ;;
+          *)
+            echo "::error::s3-folder must be one of: app, pages, schemas, tasks, packages, test — got: ${INPUT_S3_FOLDER}"
+            exit 1
+            ;;
+        esac
+        validate_no_line_breaks "s3-key" "$INPUT_S3_KEY"
+
+        TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        FILENAME_SAFE_TIMESTAMP=$(echo "$TIMESTAMP" | tr -d ':')
+        OUTPUT_PATH="manifests/build/${INPUT_COMPONENT}-${INPUT_VERSION}-${FILENAME_SAFE_TIMESTAMP}.json"
+        mkdir -p "$(dirname "$OUTPUT_PATH")"
+
+        COMMIT_TAG="$INPUT_COMMIT_TAG"
+        [ -z "$COMMIT_TAG" ] && COMMIT_TAG=null || COMMIT_TAG=$(jq -Rn --arg v "$COMMIT_TAG" '$v')
+
+        BUILD_NUMBER="$INPUT_BUILD_NUMBER"
+        [ -z "$BUILD_NUMBER" ] && BUILD_NUMBER=null || BUILD_NUMBER=$(jq -Rn --arg v "$BUILD_NUMBER" '$v')
+
+        BUILD_ID="$INPUT_BUILD_ID"
+        [ -z "$BUILD_ID" ] && BUILD_ID=null || BUILD_ID=$(jq -Rn --arg v "$BUILD_ID" '$v')
+
+        UDI="$INPUT_UDI"
+        [ -z "$UDI" ] && UDI=null || UDI=$(jq -Rn --arg v "$UDI" '$v')
+
+        PRODUCT_IDS=$(jq -Rn --arg value "$INPUT_PRODUCT_IDENTIFIERS" '$value | split(",") | map(select(length > 0))')
+
+        BUILD_CONFIG_INPUT="$INPUT_BUILD_CONFIG"
+        if [ -z "$BUILD_CONFIG_INPUT" ]; then
+          BUILD_CONFIG=null
+        elif echo "$BUILD_CONFIG_INPUT" | jq empty 2>/dev/null; then
+          BUILD_CONFIG="$BUILD_CONFIG_INPUT"
+        else
+          BUILD_CONFIG=$(printf '%s' "$BUILD_CONFIG_INPUT" | jq -Rs '.')
+        fi
+
+        if [ -z "$INPUT_TOOLING" ]; then
+          TOOLING=null
+        elif ! TOOLING=$(printf '%s' "$INPUT_TOOLING" | jq -ce 'if type == "object" then . else error("tooling must be a JSON object") end'); then
+          echo "::error::tooling must be a valid JSON object"
+          exit 1
+        fi
+
+        MANIFEST=$(jq -n \
+          --arg component "$INPUT_COMPONENT" \
+          --arg version "$INPUT_VERSION" \
+          --arg repo "$INPUT_REPO" \
+          --arg sha "$INPUT_COMMIT_SHA" \
+          --argjson tag "$COMMIT_TAG" \
+          --argjson buildNumber "$BUILD_NUMBER" \
+          --argjson buildId "$BUILD_ID" \
+          --argjson productIdentifiers "$PRODUCT_IDS" \
+          --arg buildTimestamp "$TIMESTAMP" \
+          --argjson udi "$UDI" \
+          --argjson buildConfig "$BUILD_CONFIG" \
+          --argjson tooling "$TOOLING" \
+          '{
+            manifestVersion: "1.0",
+            component: $component,
+            version: $version,
+            buildNumber: $buildNumber,
+            buildId: $buildId,
+            commit: { repo: $repo, sha: $sha, tag: $tag },
+            productIdentifiers: $productIdentifiers,
+            buildTimestamp: $buildTimestamp,
+            udi: $udi,
+            buildConfig: $buildConfig,
+            tooling: $tooling
+          }')
+
+        printf '%s\n' "$MANIFEST" > "$OUTPUT_PATH"
+
+        S3_BUCKET="manifests.fibricheck.com"
+
+        S3_KEY="$INPUT_S3_KEY"
+        if [ -z "$S3_KEY" ]; then
+          if [ -n "$INPUT_BUILD_NUMBER" ]; then
+            S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}-${INPUT_VERSION}-${INPUT_BUILD_NUMBER}-${FILENAME_SAFE_TIMESTAMP}.build-manifest.json"
+          else
+            S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}-${INPUT_VERSION}-${FILENAME_SAFE_TIMESTAMP}.build-manifest.json"
+          fi
+        fi
+
+        # Create-only upload: never create a newer object version under an existing manifest key.
+        aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" --if-none-match '*' >/dev/null
+        S3_URI="s3://${S3_BUCKET}/${S3_KEY}"
+
+        DELIMITER="manifest_$(date +%s)_$RANDOM"
+        printf 'manifest-path=%s\n' "$OUTPUT_PATH" >> "$GITHUB_OUTPUT"
+        printf 's3-uri=%s\n' "$S3_URI" >> "$GITHUB_OUTPUT"
+        printf 'manifest-json<<%s\n%s\n%s\n' "$DELIMITER" "$MANIFEST" "$DELIMITER" >> "$GITHUB_OUTPUT"

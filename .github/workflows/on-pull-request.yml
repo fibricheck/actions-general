@@ -9,3 +9,7 @@ jobs:
     uses: './.github/workflows/test-sdk-release.yml'
   on-pull-test-setup-node-env:
     uses: './.github/workflows/test-setup-node-env.yml'
+  on-pull-test-generate-build-manifest:
+    uses: './.github/workflows/test-generate-build-manifest.yml'
+  on-pull-test-generate-deploy-manifest:
+    uses: './.github/workflows/test-generate-deploy-manifest.yml'
