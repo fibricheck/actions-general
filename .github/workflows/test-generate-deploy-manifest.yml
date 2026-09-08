@@ -15,6 +15,10 @@ jobs:
           cat > "$RUNNER_TEMP/mock-bin/aws" <<'MOCKEOF'
           #!/bin/bash
           echo "$*" >> "$RUNNER_TEMP/aws-calls.log"
+          if [[ "$*" == *"already-exists.deploy-manifest.json"* ]]; then
+            echo "PreconditionFailed: object already exists" >&2
+            exit 1
+          fi
           exit 0
           MOCKEOF
           chmod +x "$RUNNER_TEMP/mock-bin/aws"
@@ -49,10 +53,12 @@ jobs:
           [ "$(echo "$MANIFEST" | jq -r '.targetEnvironment')" = "eu-production" ]
           [ "$(echo "$MANIFEST" | jq -r '.buildManifestRef')" = "${{ steps.generate-build.outputs.manifest-path }}" ]
           [ "$(echo "$MANIFEST" | jq -r '.deployConfig.rolloutPercentage')" = "100" ]
-          [ "$(echo "$MANIFEST" | jq -r '.deploymentTimestamp')" != "null" ]
+          TIMESTAMP=$(echo "$MANIFEST" | jq -r '.deploymentTimestamp' | tr -d ':')
+          [ -n "$TIMESTAMP" ]
           [ -f "${{ steps.generate-all-fields.outputs.manifest-path }}" ]
-          [ "${{ steps.generate-all-fields.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-eu-production.deploy-manifest.json" ]
-          grep -q -- "--bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements-1.0.0-eu-production.deploy-manifest.json --body" "$RUNNER_TEMP/aws-calls.log"
+          [ "${{ steps.generate-all-fields.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-eu-production-${TIMESTAMP}.deploy-manifest.json" ]
+          grep -q -- "--key schemas/blood-pressure-measurements-1.0.0-eu-production-${TIMESTAMP}.deploy-manifest.json --body" "$RUNNER_TEMP/aws-calls.log"
+          grep -q -- "--if-none-match \*" "$RUNNER_TEMP/aws-calls.log"
 
       - name: Generate deploy manifest with an explicit backdated timestamp
         id: generate-backdated
@@ -70,6 +76,7 @@ jobs:
           MANIFEST='${{ steps.generate-backdated.outputs.manifest-json }}'
           [ "$(echo "$MANIFEST" | jq -r '.deploymentTimestamp')" = "2026-08-01T00:00:00Z" ]
           [ "$(echo "$MANIFEST" | jq -r '.deployConfig')" = "null" ]
+          [ "${{ steps.generate-backdated.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-us-production-2026-08-01T000000Z.deploy-manifest.json" ]
 
       - name: Generate deploy manifest with an unresolved build reference
         id: generate-unresolved-build-ref
@@ -172,6 +179,22 @@ jobs:
           [ "${{ steps.generate-custom-key.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0-eu-production.deploy-manifest.json" ]
           grep -q -- "--bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements/1.0.0-eu-production.deploy-manifest.json --body" "$RUNNER_TEMP/aws-calls.log"
 
+      - name: Existing deploy manifest is not overwritten
+        id: generate-existing-deploy-manifest
+        continue-on-error: true
+        uses: ./generate-deploy-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          target-environment: eu-production
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
+          s3-folder: schemas
+          s3-key: schemas/already-exists.deploy-manifest.json
+
+      - name: Existing deploy manifest fails loudly
+        run: |
+          [ "${{ steps.generate-existing-deploy-manifest.outcome }}" = "failure" ]
+
       - name: generate-s3-key-line-break-should-fail
         id: generate-s3-key-newline
         continue-on-error: true
@@ -232,4 +255,6 @@ jobs:
 
       - name: s3-folder value "test" is accepted
         run: |
-          [ "${{ steps.generate-s3-folder-test.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/test/blood-pressure-measurements-1.0.0-eu-production.deploy-manifest.json" ]
+          MANIFEST='${{ steps.generate-s3-folder-test.outputs.manifest-json }}'
+          TIMESTAMP=$(echo "$MANIFEST" | jq -r '.deploymentTimestamp' | tr -d ':')
+          [ "${{ steps.generate-s3-folder-test.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/test/blood-pressure-measurements-1.0.0-eu-production-${TIMESTAMP}.deploy-manifest.json" ]

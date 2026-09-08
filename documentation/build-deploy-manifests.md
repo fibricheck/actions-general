@@ -8,7 +8,7 @@ Two tickets ask for traceability records on every schema release/deploy — comp
 
 A build manifest records that *something was produced*. A deploy manifest records that *a specific already-built artifact was put into service somewhere*. Whether that's 1:1 or 1:many depends entirely on how the consuming repo actually builds:
 
-- **`fibricheck-schemas`**: genuinely 1:many. No build-time config injection — the schema JSON produced by `release-schema.yml` is a single artifact that can be deployed to `eu-production` today and `us-production` next month without being rebuilt.
+- **`fibricheck-schemas`**: a released schema can be deployed to both `eu-production` and `us-production`. Each execution records the build/publishing event that supplied the schema and the successful deployment event. A later rollback to an older product version is a new publishing and deployment event, so it receives new timestamped manifests rather than reusing an earlier record.
 - **`fibricheck_react_native`**: effectively 1:1 per platform, but *not* strictly 1:1 overall — a version+region+platform combination can have *multiple build attempts* (e.g. a rebuild after an App Store rejection) but only ever *one* deployment, since region/environment config (`config.eu.prod.json` vs `config.us.prod.json`) is baked in at build time, making the EU build and the US build different artifacts from the start, not one artifact deployed twice. iOS and Android are two independent build artifacts with independent review timelines too, not variants of one build.
 
 The actions themselves (`generate-build-manifest`/`generate-deploy-manifest`) don't assume either shape — they just write independent files. The relationship is entirely a calling-workflow/naming-convention decision, and differs per repo.
@@ -52,18 +52,18 @@ app/
 ```
 # manifests.fibricheck.com (default, via s3-folder alone)
 app/
-  fibricheck-app-ios-2.16.0-146.build-manifest.json
-  fibricheck-app-ios-2.16.0-147.build-manifest.json     # rebuilt after App Review rejection
-  fibricheck-app-android-2.16.0-89.build-manifest.json
-  fibricheck-app-ios-2.16.0-eu-production.deploy-manifest.json
-  fibricheck-app-android-2.16.0-eu-production.deploy-manifest.json
+  fibricheck-app-ios-2.16.0-146-2026-09-01T095637Z.build-manifest.json
+  fibricheck-app-ios-2.16.0-147-2026-09-02T081403Z.build-manifest.json  # rebuilt after App Review rejection
+  fibricheck-app-android-2.16.0-89-2026-09-01T101122Z.build-manifest.json
+  fibricheck-app-ios-2.16.0-eu-production-2026-09-03T141502Z.deploy-manifest.json
+  fibricheck-app-android-2.16.0-eu-production-2026-09-03T143011Z.deploy-manifest.json
 ```
 
 A nested structure (grouped by version+region, platform as a subfolder) is still possible via an explicit `s3-key`, if `fibricheck_react_native` ends up wanting one to mirror the binary layout more closely — not yet decided; whoever wires up `android-build.yml`/the iOS pipeline should pick a convention and keep this doc in sync with it.
 
 - `component` already encodes platform (`fibricheck-app-ios`/`fibricheck-app-android`), so platform doesn't need a subfolder to stay unambiguous — it's in the filename either way.
-- Build manifest filenames follow the action's default (`<component>-<version>[-<build-number>]`), not the `FibriCheck-<version>-<buildNumber>-<region>-<type>` binary convention — the two live in different buckets, so filename parity with the `.ipa`/`.apk` isn't load-bearing. `commit.sha` (and `buildId`, best-effort) inside the manifest are what correlate a manifest to a specific build.
-- Deploy manifest filenames don't include a build number — which build number actually got deployed is still fully recoverable via the deploy manifest's `buildManifestRef`.
+- Build manifest filenames follow the action's default (`<component>-<version>[-<build-number>]-<build-timestamp>`), not the `FibriCheck-<version>-<buildNumber>-<region>-<type>` binary convention. The timestamp gives every build or rebuild its own record. `commit.sha` (and `buildId`, best-effort) inside the manifest correlate it to the source and CI run.
+- Deploy manifest filenames include their deployment timestamp but not a build number. This preserves every deployment event, including a rollback to an older product version; the build that was deployed remains recoverable through `buildManifestRef`.
 
 **Dev artifacts are entirely unaffected.** `.apk`/`.ipa` uploads for dev builds continue exactly as they work today — same bucket, same process. The only new, prod-gated thing is manifest generation into `manifests.fibricheck.com`; dev builds never get one.
 
@@ -112,7 +112,7 @@ Manifests are only generated for production builds (`type: prod`), not dev. Dev 
 ```json
 {
   "manifestVersion": "1.0",
-  "buildManifestRef": "s3://manifests.fibricheck.com/app/fibricheck-app-ios-2.16.0-146.build-manifest.json",
+  "buildManifestRef": "s3://manifests.fibricheck.com/app/fibricheck-app-ios-2.16.0-146-2026-09-01T095637Z.build-manifest.json",
   "component": "fibricheck-app-ios",
   "version": "2.16.0",
   "targetEnvironment": "eu-production",
@@ -136,11 +136,9 @@ Notes on individual fields:
 - **No `steps`, `approver`, or `outcome` fields.** `commit.sha` already makes the build process fully recoverable (check out that commit, read the workflow file as it existed then), so a hand-maintained steps list would only duplicate that. Approval belongs to the separate release process this manifest feeds into. Outcome is redundant — a deploy manifest only ever gets generated after a deploy actually succeeds, so its existence *is* the success signal.
 - **`deploymentTimestamp` isn't store-verified.** For a manual app-store release (see "Manual invocation" below) it's whatever the human running the workflow typed in or the moment they triggered it — not independently confirmed against App Store Connect / Play Console, since neither API reliably exposes a true "went live" time (see below). Treat it as "when someone recorded this deployment," not "when the store actually made it live."
 
-## Where they get built (`fibricheck-schemas`, still git-committed for now)
+## Where they get built (`fibricheck-schemas`)
 
-**Build manifest**: `release-schema.yml`, right after the existing "Record release SHA" step — `RELEASE_SHA` is already known there (that's the reason the two-commit sha-patch pattern exists), so no circularity. Committed alongside the existing sha-patch commit.
-
-**Deploy manifest**: `deploy-production.yml`, after `deploy-schema` succeeds. This workflow currently makes no git writes at all, so this is a genuinely new step.
+The production deployment workflow resolves the selected release's version and exact Git SHA. It then creates and uploads a timestamped build manifest before publishing the schema. After `deploy-schema` succeeds, it creates a separate timestamped deployment manifest that references that build manifest. A failed deployment can therefore leave a valid build/publishing record, but never a deployment record.
 
 **Dependency worth restating**: `fibricheck-schemas`'s sha-tracking (both `release.json`'s and the build manifest's `commit.sha`) only stays valid if release PRs are merged with "Create a merge commit" — squash/rebase mint a new hash, and with `delete_branch_on_merge: true` the original commit becomes unreachable and eventually garbage-collected. Still outstanding. This dependency does *not* apply to the S3-based `fibricheck_react_native` approach — an S3 object's integrity doesn't depend on git commit reachability the same way, though `commit.sha` inside the manifest is still only as trustworthy as that same merge-strategy guarantee if someone tries to check it out later.
 
@@ -150,9 +148,9 @@ Notes on individual fields:
 
 `generate-build-manifest` and `generate-deploy-manifest` (verb-first naming — "build-manifest"/"deploy-manifest" read as "a manifest of building/deploying a manifest"). Both composite/bash, tested against real scenarios (JSON `build-config`, raw-text `build-config` with an embedded `=`, all-empty optional fields, a `build-manifest-ref` pointing at a non-existent path, path-traversal/line-break rejection, S3 upload against a mocked `aws` CLI since CI has no real bucket or credentials), wired into `on-pull-request.yml` for `act`-based CI testing.
 
-Each takes structured inputs and **produces JSON as output** (file + step output), writes the manifest locally, and uploads it to `manifests.fibricheck.com`. `s3-folder` (`app`/`pages`/`schemas`/`tasks`/`packages`/`test`) is a **required** input on both actions — every call uploads, there is no local-file-only mode and no way to opt out. The bucket is hardcoded directly in the action's script; there is no `s3-bucket` input and no way to point either action at a different bucket. Since IAM already scopes the publisher role's credentials to `manifests.fibricheck.com` specifically, this isn't closing a security hole (a different bucket name would just get `AccessDenied`) — it's a simplicity call: one bucket, no override, no "why did this try to upload somewhere else" failure mode to debug. The local write path is likewise always computed internally (`manifests/build/<component>-<version>.json` / `manifests/deploy/<component>/<version>-<target-environment>-<timestamp>.json`) with no way to override it — it's just where the file lands before upload, nothing has ever needed a different one.
+Each takes structured inputs and **produces JSON as output** (file + step output), writes the manifest locally, and uploads it to `manifests.fibricheck.com`. `s3-folder` (`app`/`pages`/`schemas`/`tasks`/`packages`/`test`) is a **required** input on both actions — every call uploads, there is no local-file-only mode and no way to opt out. The bucket is hardcoded directly in the action's script; there is no `s3-bucket` input and no way to point either action at a different bucket. Since IAM already scopes the publisher role's credentials to `manifests.fibricheck.com` specifically, this isn't closing a security hole (a different bucket name would just get `AccessDenied`) — it's a simplicity call: one bucket, no override, no "why did this try to upload somewhere else" failure mode to debug. The local write path is likewise always computed internally (`manifests/build/<component>-<version>-<timestamp>.json` / `manifests/deploy/<component>/<version>-<target-environment>-<timestamp>.json`) with no way to override it — it's just where the file lands before upload, nothing has ever needed a different one.
 
-The default S3 key is `<s3-folder>/<component>-<version>[-<build-number>].build-manifest.json` for the build manifest and `<s3-folder>/<component>-<version>-<target-environment>.deploy-manifest.json` for the deploy manifest; an explicit `s3-key` overrides this. `generate-deploy-manifest`'s `build-manifest-ref` is recorded as-is — it doesn't read, fetch, or validate the thing it points to (see the field notes above).
+The default S3 key is `<s3-folder>/<component>-<version>[-<build-number>]-<build-timestamp>.build-manifest.json` for the build manifest and `<s3-folder>/<component>-<version>-<target-environment>-<deployment-timestamp>.deploy-manifest.json` for the deploy manifest; an explicit `s3-key` overrides this. Both uploads use an S3 create-only condition and fail instead of writing another object version when the selected key already exists. `generate-deploy-manifest`'s `build-manifest-ref` is recorded as-is — it doesn't read, fetch, or validate the thing it points to (see the field notes above).
 
 `build-config`/`deploy-config` auto-detect shape: if the input is valid JSON, it's embedded as-is (an object); otherwise it's wrapped as a JSON string, unparsed. Callers never need a separate conversion step for either case. `tooling` accepts a JSON object and fails when a non-object or invalid JSON value is supplied — intentionally separate from `build-config`: build configuration describes the product's behaviour, tooling describes the environment that produced it.
 
@@ -173,6 +171,6 @@ Fields used to construct the S3 key or local path (`component`, `version`, `targ
 
 ## Manual invocation (`fibricheck_react_native` deploy manifest)
 
-App Store / Play Store deployments happen outside GitHub entirely — no CI step observes "the release actually went live." `generate-deploy-manifest` needs to work with hand-typed inputs via a `workflow_dispatch` form for this case: `deployment-timestamp` is an explicit optional input, defaulting to "now" (the moment the human runs the workflow) rather than any store-verified release time — easy to misread as a confirmed release timestamp, so worth calling out. `build-manifest-ref` should be derived from `component`+`version`+`buildNumber` by the calling workflow (matching the S3 key convention above), not typed freehand by whoever triggers the dispatch.
+App Store / Play Store deployments happen outside GitHub entirely — no CI step observes "the release actually went live." `generate-deploy-manifest` needs to work with hand-typed inputs via a `workflow_dispatch` form for this case: `deployment-timestamp` is an explicit optional input, defaulting to "now" (the moment the human runs the workflow) rather than any store-verified release time — easy to misread as a confirmed release timestamp, so worth calling out. `build-manifest-ref` should come from the output retained by the corresponding build workflow, not be typed freehand by whoever triggers the dispatch.
 
 Neither the App Store Connect nor Google Play Developer API exposes a reliable "went live" timestamp — Apple's `earliestReleaseDate` is a scheduling constraint, not an actual release record, and Google Play's release status/rollout history lives in the Play Console UI, not as an explicit API field. A polling-based approximation (a scheduled workflow checking status periodically, triggering `generate-deploy-manifest` the moment it first observes "live"/"completed") would beat pure manual entry, but is meaningfully more infrastructure than what's built so far — a future improvement, not in scope yet. The `xcode-cloud` action in `actions-general` already holds App Store Connect API credentials for build-triggering, which may be reusable for this without new auth setup; not verified whether Play Store side has an equivalent reusable credential.

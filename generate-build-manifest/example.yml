@@ -6,9 +6,18 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Authenticate to AWS for manifest publishing
+        uses: aws-actions/configure-aws-credentials@v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_MANIFEST_PUBLISHER_ROLE_ARN }}
+          aws-region: eu-central-1
 
       - name: Generate Build Manifest
         id: generate-build-manifest

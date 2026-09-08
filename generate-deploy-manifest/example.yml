@@ -6,9 +6,18 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Authenticate to AWS for manifest publishing
+        uses: aws-actions/configure-aws-credentials@v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_MANIFEST_PUBLISHER_ROLE_ARN }}
+          aws-region: eu-central-1
 
       - name: Generate Deploy Manifest
         id: generate-deploy-manifest
@@ -17,7 +26,7 @@ jobs:
           component: 'blood-pressure-measurements'
           version: '1.0.0'
           target-environment: 'eu-production'
-          build-manifest-ref: 'manifests/build/blood-pressure-measurements-1.0.0.json'
+          build-manifest-ref: 's3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-2026-09-07T100000Z.build-manifest.json'
           s3-folder: 'schemas'
 
       - run: |

@@ -53,12 +53,13 @@ inputs:
     description: >
       Top-level folder within the manifests bucket: app, pages, schemas, tasks, packages, or test.
       Required — every manifest is uploaded. Uploads always go to the shared FibriCheck manifests bucket
-      (manifests.fibricheck.com). The key defaults to <s3-folder>/<component>-<version>[-<build-number>].build-manifest.json, or s3-key if set.
+      (manifests.fibricheck.com). The key defaults to <s3-folder>/<component>-<version>[-<build-number>]-<build-timestamp>.build-manifest.json, or s3-key if set.
+      Uploads are create-only and fail if the selected key already exists.
       Object Lock retention is applied by the bucket's own default retention rule, not by this
       action — "test" is not exempt from it.
     required: true
   s3-key:
-    description: 'Object key to upload to within the manifests bucket. If set, used as-is instead of the s3-folder-derived default key — not combined with it.'
+    description: 'Object key to upload to within the manifests bucket. If set, used as-is instead of the s3-folder-derived default key — not combined with it. Must not already exist; the upload fails if it does.'
     required: false
     default: ''
 outputs:
@@ -132,7 +133,9 @@ runs:
         esac
         validate_no_line_breaks "s3-key" "$INPUT_S3_KEY"
 
-        OUTPUT_PATH="manifests/build/${INPUT_COMPONENT}-${INPUT_VERSION}.json"
+        TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        FILENAME_SAFE_TIMESTAMP=$(echo "$TIMESTAMP" | tr -d ':')
+        OUTPUT_PATH="manifests/build/${INPUT_COMPONENT}-${INPUT_VERSION}-${FILENAME_SAFE_TIMESTAMP}.json"
         mkdir -p "$(dirname "$OUTPUT_PATH")"
 
         COMMIT_TAG="$INPUT_COMMIT_TAG"
@@ -174,7 +177,7 @@ runs:
           --argjson buildNumber "$BUILD_NUMBER" \
           --argjson buildId "$BUILD_ID" \
           --argjson productIdentifiers "$PRODUCT_IDS" \
-          --arg buildTimestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          --arg buildTimestamp "$TIMESTAMP" \
           --argjson udi "$UDI" \
           --argjson buildConfig "$BUILD_CONFIG" \
           --argjson tooling "$TOOLING" \
@@ -199,13 +202,14 @@ runs:
         S3_KEY="$INPUT_S3_KEY"
         if [ -z "$S3_KEY" ]; then
           if [ -n "$INPUT_BUILD_NUMBER" ]; then
-            S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}-${INPUT_VERSION}-${INPUT_BUILD_NUMBER}.build-manifest.json"
+            S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}-${INPUT_VERSION}-${INPUT_BUILD_NUMBER}-${FILENAME_SAFE_TIMESTAMP}.build-manifest.json"
           else
-            S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}-${INPUT_VERSION}.build-manifest.json"
+            S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}-${INPUT_VERSION}-${FILENAME_SAFE_TIMESTAMP}.build-manifest.json"
           fi
         fi
 
-        aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" >/dev/null
+        # Create-only upload: never create a newer object version under an existing manifest key.
+        aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" --if-none-match '*' >/dev/null
         S3_URI="s3://${S3_BUCKET}/${S3_KEY}"
 
         DELIMITER="manifest_$(date +%s)_$RANDOM"

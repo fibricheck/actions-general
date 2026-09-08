@@ -32,12 +32,13 @@ inputs:
       Required — every manifest is uploaded, there is no local-only mode. Uploads always go to the
       shared FibriCheck manifests bucket (manifests.fibricheck.com); there is no way to point this
       action at a different bucket. The key defaults to
-      <s3-folder>/<component>-<version>-<target-environment>.deploy-manifest.json, or s3-key if
-      set. Object Lock retention is applied by the bucket's own default retention rule, not by this
-      action — "test" is not exempt from it.
+      <s3-folder>/<component>-<version>-<target-environment>-<deployment-timestamp>.deploy-manifest.json,
+      or s3-key if set. Uploads are create-only and fail if the selected key already exists. Object
+      Lock retention is applied by the bucket's own default retention rule, not by this action —
+      "test" is not exempt from it.
     required: true
   s3-key:
-    description: 'Object key to upload to within the manifests bucket. If set, used as-is instead of the s3-folder-derived default key.'
+    description: 'Object key to upload to within the manifests bucket. If set, used as-is instead of the s3-folder-derived default key. Must not already exist! the upload fails if it does.'
     required: false
     default: ''
 outputs:
@@ -149,10 +150,11 @@ runs:
 
         S3_KEY="$INPUT_S3_KEY"
         if [ -z "$S3_KEY" ]; then
-          S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}-${INPUT_VERSION}-${INPUT_TARGET_ENVIRONMENT}.deploy-manifest.json"
+          S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}-${INPUT_VERSION}-${INPUT_TARGET_ENVIRONMENT}-${FILENAME_SAFE_TIMESTAMP}.deploy-manifest.json"
         fi
 
-        aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" >/dev/null
+        # Create-only upload: every deployment record must have its own unused key.
+        aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" --if-none-match '*' >/dev/null
         S3_URI="s3://${S3_BUCKET}/${S3_KEY}"
 
         DELIMITER="manifest_$(date +%s)_$RANDOM"

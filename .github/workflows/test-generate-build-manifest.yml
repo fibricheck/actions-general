@@ -15,6 +15,10 @@ jobs:
           cat > "$RUNNER_TEMP/mock-bin/aws" <<'MOCKEOF'
           #!/bin/bash
           echo "$*" >> "$RUNNER_TEMP/aws-calls.log"
+          if [[ "$*" == *"already-exists.build-manifest.json"* ]]; then
+            echo "PreconditionFailed: object already exists" >&2
+            exit 1
+          fi
           exit 0
           MOCKEOF
           chmod +x "$RUNNER_TEMP/mock-bin/aws"
@@ -48,9 +52,10 @@ jobs:
           [ "$(echo "$MANIFEST" | jq -r '.buildConfig.region')" = "eu" ]
           [ "$(echo "$MANIFEST" | jq -r '.buildConfig.FEATURE_ECG')" = "true" ]
           [ "$(echo "$MANIFEST" | jq -r '.tooling.xcode')" = "16.4" ]
+          TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
           [ -f "${{ steps.generate-structured-config.outputs.manifest-path }}" ]
-          [ "${{ steps.generate-structured-config.outputs.manifest-path }}" = "manifests/build/fibricheck-app-2.16.0.json" ]
-          [ "${{ steps.generate-structured-config.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app-2.16.0-146.build-manifest.json" ]
+          [ "${{ steps.generate-structured-config.outputs.manifest-path }}" = "manifests/build/fibricheck-app-2.16.0-${TIMESTAMP}.json" ]
+          [ "${{ steps.generate-structured-config.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app-2.16.0-146-${TIMESTAMP}.build-manifest.json" ]
 
       - name: Generate build manifest with raw-text configuration
         id: generate-raw-text-config
@@ -91,8 +96,9 @@ jobs:
           [ "$(echo "$MANIFEST" | jq -r '.buildNumber')" = "null" ]
           [ "$(echo "$MANIFEST" | jq -r '.buildId')" = "null" ]
           [ "$(echo "$MANIFEST" | jq -r '.tooling')" = "null" ]
-          [ "${{ steps.generate-without-optional-fields.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0.build-manifest.json" ]
-          grep -q -- "--bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements-1.0.0.build-manifest.json --body" "$RUNNER_TEMP/aws-calls.log"
+          TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
+          [ "${{ steps.generate-without-optional-fields.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-${TIMESTAMP}.build-manifest.json" ]
+          grep -q -- "--bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements-1.0.0-${TIMESTAMP}.build-manifest.json --body manifests/build/blood-pressure-measurements-1.0.0-${TIMESTAMP}.json --if-none-match \*" "$RUNNER_TEMP/aws-calls.log"
 
       - name: Generate build manifest containing shell-like literal data
         id: generate-literal-data
@@ -182,6 +188,22 @@ jobs:
           [ "${{ steps.generate-custom-key.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0.build-manifest.json" ]
           grep -q -- "--bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements/1.0.0.build-manifest.json --body" "$RUNNER_TEMP/aws-calls.log"
 
+      - name: Existing build manifest is not overwritten
+        id: generate-existing-build-manifest
+        continue-on-error: true
+        uses: ./generate-build-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: schemas
+          s3-key: schemas/already-exists.build-manifest.json
+
+      - name: Existing build manifest fails loudly
+        run: |
+          [ "${{ steps.generate-existing-build-manifest.outcome }}" = "failure" ]
+
       - name: generate-s3-key-line-break-should-fail
         id: generate-s3-key-newline
         continue-on-error: true
@@ -213,7 +235,9 @@ jobs:
 
       - name: s3-folder includes build-number in key
         run: |
-          [ "${{ steps.generate-s3-folder-buildnum.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app-ios-2.16.0-146.build-manifest.json" ]
+          MANIFEST='${{ steps.generate-s3-folder-buildnum.outputs.manifest-json }}'
+          TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
+          [ "${{ steps.generate-s3-folder-buildnum.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app-ios-2.16.0-146-${TIMESTAMP}.build-manifest.json" ]
 
       - name: generate-missing-s3-folder-should-fail
         id: generate-missing-folder
@@ -257,4 +281,6 @@ jobs:
 
       - name: s3-folder value "test" is accepted
         run: |
-          [ "${{ steps.generate-s3-folder-test.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/test/blood-pressure-measurements-1.0.0.build-manifest.json" ]
+          MANIFEST='${{ steps.generate-s3-folder-test.outputs.manifest-json }}'
+          TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
+          [ "${{ steps.generate-s3-folder-test.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/test/blood-pressure-measurements-1.0.0-${TIMESTAMP}.build-manifest.json" ]

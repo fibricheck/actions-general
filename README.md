@@ -248,9 +248,9 @@ permissions:
 
 steps:
   - name: Authenticate to AWS for manifest publishing
-    uses: aws-actions/configure-aws-credentials@v4
+    uses: aws-actions/configure-aws-credentials@v6.2.4
     with:
-      role-to-assume: ${{ vars.AWS_MANIFEST_PUBLISHING_ROLE_ARN }}
+      role-to-assume: ${{ vars.AWS_MANIFEST_PUBLISHER_ROLE_ARN }}
       aws-region: eu-central-1
 
   - name: Generate build manifest
@@ -326,15 +326,17 @@ Builds a traceability manifest JSON for a release, writes it locally, and upload
     # this action at a different bucket. The calling job must already have
     # AWS credentials configured (e.g. aws-actions/configure-aws-credentials)
     # — this action does not accept or configure credentials itself. Key
-    # defaults to <s3-folder>/<component>-<version>[-<build-number>].build-manifest.json,
-    # or s3-key if set. Object Lock retention is applied by the bucket's own
+    # defaults to <s3-folder>/<component>-<version>[-<build-number>]-<build-timestamp>.build-manifest.json,
+    # or s3-key if set. Uploads are create-only and fail if the chosen key
+    # already exists. Object Lock retention is applied by the bucket's own
     # default retention rule, not by this action — "test" is not exempt.
     # required
     s3-folder: 'schemas'
     # Object key to upload to within the manifests bucket. If set, used as-is
-    # instead of the s3-folder-derived default key.
+    # instead of the s3-folder-derived default key. Must not already exist!
+    # the upload fails if it does.
     # optional (default: '')
-    s3-key: 'schemas/blood-pressure-measurements-1.0.0.build-manifest.json'
+    s3-key: 'schemas/blood-pressure-measurements-1.0.0-2026-09-07T100000Z.build-manifest.json'
 
   # Outputs:
   #   manifest-json: The generated manifest, as a JSON string
@@ -375,7 +377,7 @@ Builds a deployment traceability manifest JSON, writes it locally, and uploads i
     # manifest is expected to already be an immutable, trustworthy record on
     # its own.
     # required
-    build-manifest-ref: 's3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0.build-manifest.json'
+    build-manifest-ref: 's3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-2026-09-07T100000Z.build-manifest.json'
     # When the deployment happened, in YYYY-MM-DDTHH:MM:SSZ format. Defaults
     # to now — pass this explicitly when recording a deployment after the
     # fact (e.g. a deploy triggered manually, such as pressing "release" in
@@ -394,15 +396,17 @@ Builds a deployment traceability manifest JSON, writes it locally, and uploads i
     # this action at a different bucket. The calling job must already have
     # AWS credentials configured (e.g. aws-actions/configure-aws-credentials)
     # — this action does not accept or configure credentials itself. Key
-    # defaults to <s3-folder>/<component>-<version>-<target-environment>.deploy-manifest.json,
-    # or s3-key if set. Object Lock retention is applied by the bucket's own
+    # defaults to <s3-folder>/<component>-<version>-<target-environment>-<deployment-timestamp>.deploy-manifest.json,
+    # or s3-key if set. Uploads are create-only and fail if the chosen key
+    # already exists. Object Lock retention is applied by the bucket's own
     # default retention rule, not by this action — "test" is not exempt.
     # required
     s3-folder: 'schemas'
     # Object key to upload to within the manifests bucket. If set, used as-is
-    # instead of the s3-folder-derived default key.
+    # instead of the s3-folder-derived default key. Must not already exist!
+    # the upload fails if it does.
     # optional (default: '')
-    s3-key: 'schemas/blood-pressure-measurements-1.0.0-eu-production.deploy-manifest.json'
+    s3-key: 'schemas/blood-pressure-measurements-1.0.0-eu-production-2026-09-07T101502Z.deploy-manifest.json'
 
   # Outputs:
   #   manifest-json: The generated manifest, as a JSON string
