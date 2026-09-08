@@ -78,6 +78,23 @@ jobs:
           [ "$(echo "$MANIFEST" | jq -r '.deployConfig')" = "null" ]
           [ "${{ steps.generate-backdated.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-us-production-2026-08-01T000000Z.deploy-manifest.json" ]
 
+      - name: Generate deploy manifest with a date-only deployment-timestamp
+        id: generate-date-only
+        uses: ./generate-deploy-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          target-environment: eu-production
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
+          deployment-timestamp: '2026-08-02'
+          s3-folder: schemas
+
+      - name: date-only deployment-timestamp is normalized to midnight UTC
+        run: |
+          MANIFEST='${{ steps.generate-date-only.outputs.manifest-json }}'
+          [ "$(echo "$MANIFEST" | jq -r '.deploymentTimestamp')" = "2026-08-02T00:00:00Z" ]
+          [ "${{ steps.generate-date-only.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-eu-production-2026-08-02T000000Z.deploy-manifest.json" ]
+
       - name: Generate deploy manifest with an unresolved build reference
         id: generate-unresolved-build-ref
         uses: ./generate-deploy-manifest

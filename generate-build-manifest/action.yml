@@ -49,6 +49,10 @@ inputs:
     description: 'JSON object containing the toolchain versions used for the build (e.g. Node, Xcode, Gradle)'
     required: false
     default: ''
+  build-timestamp:
+    description: 'When the build actually happened, as YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ. Defaults to now. Pass this explicitly when recording a build after the fact (e.g. backfilling a manifest for a build that predates this action). A date-only value is normalized to midnight UTC.'
+    required: false
+    default: ''
   s3-folder:
     description: >
       Top-level folder within the manifests bucket: app, pages, schemas, tasks, packages, or test.
@@ -90,6 +94,7 @@ runs:
         INPUT_UDI: ${{ inputs.udi }}
         INPUT_BUILD_CONFIG: ${{ inputs.build-config }}
         INPUT_TOOLING: ${{ inputs.tooling }}
+        INPUT_BUILD_TIMESTAMP: ${{ inputs.build-timestamp }}
         INPUT_S3_FOLDER: ${{ inputs.s3-folder }}
         INPUT_S3_KEY: ${{ inputs.s3-key }}
       run: |
@@ -133,7 +138,15 @@ runs:
         esac
         validate_no_line_breaks "s3-key" "$INPUT_S3_KEY"
 
-        TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        TIMESTAMP="$INPUT_BUILD_TIMESTAMP"
+        [ -z "$TIMESTAMP" ] && TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        if [[ "$TIMESTAMP" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+          TIMESTAMP="${TIMESTAMP}T00:00:00Z"
+        elif ! [[ "$TIMESTAMP" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+          echo "::error::build-timestamp must use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ"
+          exit 1
+        fi
+
         FILENAME_SAFE_TIMESTAMP=$(echo "$TIMESTAMP" | tr -d ':')
         OUTPUT_PATH="manifests/build/${INPUT_COMPONENT}-${INPUT_VERSION}-${FILENAME_SAFE_TIMESTAMP}.json"
         mkdir -p "$(dirname "$OUTPUT_PATH")"

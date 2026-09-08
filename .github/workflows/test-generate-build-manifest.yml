@@ -124,6 +124,56 @@ jobs:
           jq -e '.buildConfig | contains("COMMAND=$(this-must-not-run)")' <<< "$MANIFEST"
           jq -e '.buildConfig | contains("TICKS=`this-must-not-run-either`")' <<< "$MANIFEST"
 
+      - name: Generate build manifest with an explicit backdated build-timestamp
+        id: generate-backdated
+        uses: ./generate-build-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          build-timestamp: '2026-08-01T00:00:00Z'
+          s3-folder: schemas
+
+      - name: explicit build-timestamp is used as-is
+        run: |
+          MANIFEST='${{ steps.generate-backdated.outputs.manifest-json }}'
+          [ "$(echo "$MANIFEST" | jq -r '.buildTimestamp')" = "2026-08-01T00:00:00Z" ]
+          [ "${{ steps.generate-backdated.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-2026-08-01T000000Z.build-manifest.json" ]
+
+      - name: Generate build manifest with a date-only build-timestamp
+        id: generate-date-only
+        uses: ./generate-build-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          build-timestamp: '2026-08-01'
+          s3-folder: schemas
+
+      - name: date-only build-timestamp is normalized to midnight UTC
+        run: |
+          MANIFEST='${{ steps.generate-date-only.outputs.manifest-json }}'
+          [ "$(echo "$MANIFEST" | jq -r '.buildTimestamp')" = "2026-08-01T00:00:00Z" ]
+          [ "${{ steps.generate-date-only.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-2026-08-01T000000Z.build-manifest.json" ]
+
+      - name: generate-invalid-build-timestamp-should-fail
+        id: generate-invalid-timestamp
+        continue-on-error: true
+        uses: ./generate-build-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          repo: fibricheck/fibricheck-schemas
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          build-timestamp: '../../../../tmp/file'
+          s3-folder: schemas
+
+      - name: invalid build-timestamp fails loudly
+        run: |
+          [ "${{ steps.generate-invalid-timestamp.outcome }}" = "failure" ]
+
       - name: generate-invalid-tooling-should-fail
         id: generate-invalid-tooling
         continue-on-error: true
