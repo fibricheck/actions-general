@@ -7,7 +7,7 @@ jobs:
   test-generate-build-manifest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install mock aws CLI (S3 tests run without a real bucket/credentials)
         run: |
@@ -32,8 +32,9 @@ jobs:
           version: 2.16.0
           repo: fibricheck/fibricheck_react_native
           commit-sha: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
-          build-number: '146'
-          build-id: '9876543210'
+          build-number: "146"
+          target-environment: eu-production
+          build-id: "9876543210"
           product-identifiers: fibricheck-app-v2.16.0-eu-prod,fibricheck-app-v2.16.0-us-prod
           build-config: '{"region":"eu","FEATURE_ECG":true}'
           tooling: '{"node":"20.19.4","xcode":"16.4","gradle":"8.13"}'
@@ -47,6 +48,7 @@ jobs:
           [ "$(echo "$MANIFEST" | jq -r '.commit.tag')" = "null" ]
           [ "$(echo "$MANIFEST" | jq -r '.manifestVersion')" = "1.0" ]
           [ "$(echo "$MANIFEST" | jq -r '.buildNumber')" = "146" ]
+          [ "$(echo "$MANIFEST" | jq -r '.targetEnvironment')" = "eu-production" ]
           [ "$(echo "$MANIFEST" | jq -r '.buildId')" = "9876543210" ]
           [ "$(echo "$MANIFEST" | jq -c '.productIdentifiers')" = '["fibricheck-app-v2.16.0-eu-prod","fibricheck-app-v2.16.0-us-prod"]' ]
           [ "$(echo "$MANIFEST" | jq -r '.buildConfig.region')" = "eu" ]
@@ -55,7 +57,7 @@ jobs:
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
           [ -f "${{ steps.generate-structured-config.outputs.manifest-path }}" ]
           [ "${{ steps.generate-structured-config.outputs.manifest-path }}" = "manifests/build/fibricheck-app-2.16.0-${TIMESTAMP}.json" ]
-          [ "${{ steps.generate-structured-config.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app-2.16.0-146-${TIMESTAMP}.build-manifest.json" ]
+          [ "${{ steps.generate-structured-config.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app/2.16.0/eu-production.146.${TIMESTAMP}.build-manifest.json" ]
 
       - name: Generate build manifest with raw-text configuration
         id: generate-raw-text-config
@@ -94,18 +96,19 @@ jobs:
           [ "$(echo "$MANIFEST" | jq -r '.udi')" = "null" ]
           [ "$(echo "$MANIFEST" | jq -r '.productIdentifiers | length')" = "0" ]
           [ "$(echo "$MANIFEST" | jq -r '.buildNumber')" = "null" ]
+          [ "$(echo "$MANIFEST" | jq -r '.targetEnvironment')" = "null" ]
           [ "$(echo "$MANIFEST" | jq -r '.buildId')" = "null" ]
           [ "$(echo "$MANIFEST" | jq -r '.tooling')" = "null" ]
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
-          [ "${{ steps.generate-without-optional-fields.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-${TIMESTAMP}.build-manifest.json" ]
-          grep -q -- "--bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements-1.0.0-${TIMESTAMP}.build-manifest.json --body manifests/build/blood-pressure-measurements-1.0.0-${TIMESTAMP}.json --if-none-match \*" "$RUNNER_TEMP/aws-calls.log"
+          [ "${{ steps.generate-without-optional-fields.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/${TIMESTAMP}.build-manifest.json" ]
+          grep -q -- "--bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements/1.0.0/${TIMESTAMP}.build-manifest.json --body manifests/build/blood-pressure-measurements-1.0.0-${TIMESTAMP}.json --if-none-match \*" "$RUNNER_TEMP/aws-calls.log"
 
       - name: Generate build manifest containing shell-like literal data
         id: generate-literal-data
         uses: ./generate-build-manifest
         with:
           component: "page's-component"
-          version: '1.0.0'
+          version: "1.0.0"
           repo: fibricheck/pages-portal
           commit-sha: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
           commit-tag: "release-'quoted'"
@@ -132,14 +135,15 @@ jobs:
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          build-timestamp: '2026-08-01T00:00:00Z'
+          target-environment: eu-production
+          build-timestamp: "2026-08-01T00:00:00Z"
           s3-folder: schemas
 
       - name: explicit build-timestamp is used as-is
         run: |
           MANIFEST='${{ steps.generate-backdated.outputs.manifest-json }}'
           [ "$(echo "$MANIFEST" | jq -r '.buildTimestamp')" = "2026-08-01T00:00:00Z" ]
-          [ "${{ steps.generate-backdated.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-2026-08-01T000000Z.build-manifest.json" ]
+          [ "${{ steps.generate-backdated.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/eu-production.2026-08-01T000000Z.build-manifest.json" ]
 
       - name: Generate build manifest with a date-only build-timestamp
         id: generate-date-only
@@ -149,14 +153,14 @@ jobs:
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          build-timestamp: '2026-08-01'
+          build-timestamp: "2026-08-02"
           s3-folder: schemas
 
       - name: date-only build-timestamp is normalized to midnight UTC
         run: |
           MANIFEST='${{ steps.generate-date-only.outputs.manifest-json }}'
-          [ "$(echo "$MANIFEST" | jq -r '.buildTimestamp')" = "2026-08-01T00:00:00Z" ]
-          [ "${{ steps.generate-date-only.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-2026-08-01T000000Z.build-manifest.json" ]
+          [ "$(echo "$MANIFEST" | jq -r '.buildTimestamp')" = "2026-08-02T00:00:00Z" ]
+          [ "${{ steps.generate-date-only.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/2026-08-02T000000Z.build-manifest.json" ]
 
       - name: generate-invalid-build-timestamp-should-fail
         id: generate-invalid-timestamp
@@ -167,7 +171,7 @@ jobs:
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          build-timestamp: '../../../../tmp/file'
+          build-timestamp: "../../../../tmp/file"
           s3-folder: schemas
 
       - name: invalid build-timestamp fails loudly
@@ -195,7 +199,7 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
-          component: '../../etc/passwd'
+          component: "../../etc/passwd"
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
@@ -280,14 +284,14 @@ jobs:
           version: 2.16.0
           repo: fibricheck/fibricheck_react_native
           commit-sha: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
-          build-number: '146'
+          build-number: "146"
           s3-folder: app
 
       - name: s3-folder includes build-number in key
         run: |
           MANIFEST='${{ steps.generate-s3-folder-buildnum.outputs.manifest-json }}'
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
-          [ "${{ steps.generate-s3-folder-buildnum.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app-ios-2.16.0-146-${TIMESTAMP}.build-manifest.json" ]
+          [ "${{ steps.generate-s3-folder-buildnum.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app-ios/2.16.0/146.${TIMESTAMP}.build-manifest.json" ]
 
       - name: generate-missing-s3-folder-should-fail
         id: generate-missing-folder
@@ -298,7 +302,7 @@ jobs:
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: ''
+          s3-folder: ""
 
       - name: missing s3-folder fails loudly
         run: |
@@ -333,4 +337,4 @@ jobs:
         run: |
           MANIFEST='${{ steps.generate-s3-folder-test.outputs.manifest-json }}'
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
-          [ "${{ steps.generate-s3-folder-test.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/test/blood-pressure-measurements-1.0.0-${TIMESTAMP}.build-manifest.json" ]
+          [ "${{ steps.generate-s3-folder-test.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/test/blood-pressure-measurements/1.0.0/${TIMESTAMP}.build-manifest.json" ]

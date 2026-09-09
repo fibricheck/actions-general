@@ -10,6 +10,10 @@ inputs:
   target-environment:
     description: 'Environment this was deployed to (e.g. eu-production, us-prod)'
     required: true
+  build-number:
+    description: 'Platform build number, when the deployed component has one.'
+    required: false
+    default: ''
   build-manifest-ref:
     description: >
       Reference to the build manifest for this version — wherever it lives (an S3 URI, a repo path,
@@ -32,13 +36,13 @@ inputs:
       Required — every manifest is uploaded, there is no local-only mode. Uploads always go to the
       shared FibriCheck manifests bucket (manifests.fibricheck.com); there is no way to point this
       action at a different bucket. The key defaults to
-      <s3-folder>/<component>-<version>-<target-environment>-<deployment-timestamp>.deploy-manifest.json,
+      <s3-folder>/<component>/<version>/<target-environment>.[<build-number>.]<deployment-timestamp>.deploy-manifest.json,
       or s3-key if set. Uploads are create-only and fail if the selected key already exists. Object
       Lock retention is applied by the bucket's own default retention rule, not by this action —
       "test" is not exempt from it.
     required: true
   s3-key:
-    description: 'Object key to upload to within the manifests bucket. If set, used as-is instead of the s3-folder-derived default key. Must not already exist! the upload fails if it does.'
+    description: 'Object key to upload to within the manifests bucket. If set, used as-is instead of the s3-folder-derived default key. Must not already exist! The upload will fail if it does.'
     required: false
     default: ''
 outputs:
@@ -61,6 +65,7 @@ runs:
         INPUT_COMPONENT: ${{ inputs.component }}
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_TARGET_ENVIRONMENT: ${{ inputs.target-environment }}
+        INPUT_BUILD_NUMBER: ${{ inputs.build-number }}
         INPUT_BUILD_MANIFEST_REF: ${{ inputs.build-manifest-ref }}
         INPUT_DEPLOYMENT_TIMESTAMP: ${{ inputs.deployment-timestamp }}
         INPUT_DEPLOY_CONFIG: ${{ inputs.deploy-config }}
@@ -98,6 +103,9 @@ runs:
         validate_no_path_traversal "component" "$INPUT_COMPONENT"
         validate_no_path_traversal "version" "$INPUT_VERSION"
         validate_no_path_traversal "target-environment" "$INPUT_TARGET_ENVIRONMENT"
+        if [ -n "$INPUT_BUILD_NUMBER" ]; then
+          validate_no_path_traversal "build-number" "$INPUT_BUILD_NUMBER"
+        fi
         case "$INPUT_S3_FOLDER" in
           app|pages|schemas|tasks|packages|test) ;;
           *)
@@ -129,11 +137,15 @@ runs:
           DEPLOY_CONFIG=$(printf '%s' "$DEPLOY_CONFIG_INPUT" | jq -Rs '.')
         fi
 
+        BUILD_NUMBER="$INPUT_BUILD_NUMBER"
+        [ -z "$BUILD_NUMBER" ] && BUILD_NUMBER=null || BUILD_NUMBER=$(jq -Rn --arg v "$BUILD_NUMBER" '$v')
+
         MANIFEST=$(jq -n \
           --arg buildManifestRef "$INPUT_BUILD_MANIFEST_REF" \
           --arg component "$INPUT_COMPONENT" \
           --arg version "$INPUT_VERSION" \
           --arg targetEnvironment "$INPUT_TARGET_ENVIRONMENT" \
+          --argjson buildNumber "$BUILD_NUMBER" \
           --arg deploymentTimestamp "$TIMESTAMP" \
           --argjson deployConfig "$DEPLOY_CONFIG" \
           '{
@@ -142,6 +154,7 @@ runs:
             component: $component,
             version: $version,
             targetEnvironment: $targetEnvironment,
+            buildNumber: $buildNumber,
             deploymentTimestamp: $deploymentTimestamp,
             deployConfig: $deployConfig
           }')
@@ -152,7 +165,9 @@ runs:
 
         S3_KEY="$INPUT_S3_KEY"
         if [ -z "$S3_KEY" ]; then
-          S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}-${INPUT_VERSION}-${INPUT_TARGET_ENVIRONMENT}-${FILENAME_SAFE_TIMESTAMP}.deploy-manifest.json"
+          BUILD_NUMBER_SEGMENT=""
+          [ -n "$INPUT_BUILD_NUMBER" ] && BUILD_NUMBER_SEGMENT="${INPUT_BUILD_NUMBER}."
+          S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}/${INPUT_TARGET_ENVIRONMENT}.${BUILD_NUMBER_SEGMENT}${FILENAME_SAFE_TIMESTAMP}.deploy-manifest.json"
         fi
 
         # Create-only upload: every deployment record must have its own unused key.

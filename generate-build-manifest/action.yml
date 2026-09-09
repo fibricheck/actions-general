@@ -21,6 +21,10 @@ inputs:
     description: 'Platform build number, when the component has one (e.g. a mobile app build)'
     required: false
     default: ''
+  target-environment:
+    description: 'Environment this build was produced for, when applicable (e.g. eu-production)'
+    required: false
+    default: ''
   build-id:
     description: >
       CI build identifier (e.g. a GitHub Actions run ID), supplied by the calling workflow — this
@@ -57,7 +61,7 @@ inputs:
     description: >
       Top-level folder within the manifests bucket: app, pages, schemas, tasks, packages, or test.
       Required — every manifest is uploaded. Uploads always go to the shared FibriCheck manifests bucket
-      (manifests.fibricheck.com). The key defaults to <s3-folder>/<component>-<version>[-<build-number>]-<build-timestamp>.build-manifest.json, or s3-key if set.
+      (manifests.fibricheck.com). The key defaults to <s3-folder>/<component>/<version>/[<target-environment>.][<build-number>.]<build-timestamp>.build-manifest.json, or s3-key if set.
       Uploads are create-only and fail if the selected key already exists.
       Object Lock retention is applied by the bucket's own default retention rule, not by this
       action — "test" is not exempt from it.
@@ -89,6 +93,7 @@ runs:
         INPUT_COMMIT_SHA: ${{ inputs.commit-sha }}
         INPUT_COMMIT_TAG: ${{ inputs.commit-tag }}
         INPUT_BUILD_NUMBER: ${{ inputs.build-number }}
+        INPUT_TARGET_ENVIRONMENT: ${{ inputs.target-environment }}
         INPUT_BUILD_ID: ${{ inputs.build-id }}
         INPUT_PRODUCT_IDENTIFIERS: ${{ inputs.product-identifiers }}
         INPUT_UDI: ${{ inputs.udi }}
@@ -129,6 +134,7 @@ runs:
         validate_no_path_traversal "component" "$INPUT_COMPONENT"
         validate_no_path_traversal "version" "$INPUT_VERSION"
         [ -n "$INPUT_BUILD_NUMBER" ] && validate_no_path_traversal "build-number" "$INPUT_BUILD_NUMBER"
+        [ -n "$INPUT_TARGET_ENVIRONMENT" ] && validate_no_path_traversal "target-environment" "$INPUT_TARGET_ENVIRONMENT"
         case "$INPUT_S3_FOLDER" in
           app|pages|schemas|tasks|packages|test) ;;
           *)
@@ -156,6 +162,9 @@ runs:
 
         BUILD_NUMBER="$INPUT_BUILD_NUMBER"
         [ -z "$BUILD_NUMBER" ] && BUILD_NUMBER=null || BUILD_NUMBER=$(jq -Rn --arg v "$BUILD_NUMBER" '$v')
+
+        TARGET_ENVIRONMENT="$INPUT_TARGET_ENVIRONMENT"
+        [ -z "$TARGET_ENVIRONMENT" ] && TARGET_ENVIRONMENT=null || TARGET_ENVIRONMENT=$(jq -Rn --arg v "$TARGET_ENVIRONMENT" '$v')
 
         BUILD_ID="$INPUT_BUILD_ID"
         [ -z "$BUILD_ID" ] && BUILD_ID=null || BUILD_ID=$(jq -Rn --arg v "$BUILD_ID" '$v')
@@ -188,6 +197,7 @@ runs:
           --arg sha "$INPUT_COMMIT_SHA" \
           --argjson tag "$COMMIT_TAG" \
           --argjson buildNumber "$BUILD_NUMBER" \
+          --argjson targetEnvironment "$TARGET_ENVIRONMENT" \
           --argjson buildId "$BUILD_ID" \
           --argjson productIdentifiers "$PRODUCT_IDS" \
           --arg buildTimestamp "$TIMESTAMP" \
@@ -199,6 +209,7 @@ runs:
             component: $component,
             version: $version,
             buildNumber: $buildNumber,
+            targetEnvironment: $targetEnvironment,
             buildId: $buildId,
             commit: { repo: $repo, sha: $sha, tag: $tag },
             productIdentifiers: $productIdentifiers,
@@ -214,11 +225,10 @@ runs:
 
         S3_KEY="$INPUT_S3_KEY"
         if [ -z "$S3_KEY" ]; then
-          if [ -n "$INPUT_BUILD_NUMBER" ]; then
-            S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}-${INPUT_VERSION}-${INPUT_BUILD_NUMBER}-${FILENAME_SAFE_TIMESTAMP}.build-manifest.json"
-          else
-            S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}-${INPUT_VERSION}-${FILENAME_SAFE_TIMESTAMP}.build-manifest.json"
-          fi
+          FILENAME_PREFIX=""
+          [ -n "$INPUT_TARGET_ENVIRONMENT" ] && FILENAME_PREFIX="${FILENAME_PREFIX}${INPUT_TARGET_ENVIRONMENT}."
+          [ -n "$INPUT_BUILD_NUMBER" ] && FILENAME_PREFIX="${FILENAME_PREFIX}${INPUT_BUILD_NUMBER}."
+          S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}/${FILENAME_PREFIX}${FILENAME_SAFE_TIMESTAMP}.build-manifest.json"
         fi
 
         # Create-only upload: never create a newer object version under an existing manifest key.
