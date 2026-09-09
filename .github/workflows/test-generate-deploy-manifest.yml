@@ -7,7 +7,7 @@ jobs:
   test-generate-deploy-manifest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install mock aws CLI (S3 tests run without a real bucket/credentials)
         run: |
@@ -41,6 +41,7 @@ jobs:
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: eu-production
+          build-number: '146'
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
           deploy-config: '{"rolloutPercentage":100}'
           s3-folder: schemas
@@ -51,14 +52,33 @@ jobs:
           [ "$(echo "$MANIFEST" | jq -r '.component')" = "blood-pressure-measurements" ]
           [ "$(echo "$MANIFEST" | jq -r '.manifestVersion')" = "1.0" ]
           [ "$(echo "$MANIFEST" | jq -r '.targetEnvironment')" = "eu-production" ]
+          [ "$(echo "$MANIFEST" | jq -r '.buildNumber')" = "146" ]
           [ "$(echo "$MANIFEST" | jq -r '.buildManifestRef')" = "${{ steps.generate-build.outputs.manifest-path }}" ]
           [ "$(echo "$MANIFEST" | jq -r '.deployConfig.rolloutPercentage')" = "100" ]
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.deploymentTimestamp' | tr -d ':')
           [ -n "$TIMESTAMP" ]
           [ -f "${{ steps.generate-all-fields.outputs.manifest-path }}" ]
-          [ "${{ steps.generate-all-fields.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-eu-production-${TIMESTAMP}.deploy-manifest.json" ]
-          grep -q -- "--key schemas/blood-pressure-measurements-1.0.0-eu-production-${TIMESTAMP}.deploy-manifest.json --body" "$RUNNER_TEMP/aws-calls.log"
+          [ "${{ steps.generate-all-fields.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/eu-production.146.${TIMESTAMP}.deploy-manifest.json" ]
+          grep -q -- "--key schemas/blood-pressure-measurements/1.0.0/eu-production.146.${TIMESTAMP}.deploy-manifest.json --body" "$RUNNER_TEMP/aws-calls.log"
           grep -q -- "--if-none-match \*" "$RUNNER_TEMP/aws-calls.log"
+
+      - name: Generate deploy manifest with a build number
+        id: generate-with-build-number
+        uses: ./generate-deploy-manifest
+        with:
+          component: fibricheck-app-ios
+          version: 2.16.0
+          target-environment: eu-production
+          build-number: "146"
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
+          s3-folder: app
+
+      - name: build-number is recorded in the manifest and the filename
+        run: |
+          MANIFEST='${{ steps.generate-with-build-number.outputs.manifest-json }}'
+          [ "$(echo "$MANIFEST" | jq -r '.buildNumber')" = "146" ]
+          TIMESTAMP=$(echo "$MANIFEST" | jq -r '.deploymentTimestamp' | tr -d ':')
+          [ "${{ steps.generate-with-build-number.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app-ios/2.16.0/eu-production.146.${TIMESTAMP}.deploy-manifest.json" ]
 
       - name: Generate deploy manifest with an explicit backdated timestamp
         id: generate-backdated
@@ -68,7 +88,7 @@ jobs:
           version: 1.0.0
           target-environment: us-production
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
-          deployment-timestamp: '2026-08-01T00:00:00Z'
+          deployment-timestamp: "2026-08-01T00:00:00Z"
           s3-folder: schemas
 
       - name: explicit deployment-timestamp is used as-is
@@ -76,7 +96,7 @@ jobs:
           MANIFEST='${{ steps.generate-backdated.outputs.manifest-json }}'
           [ "$(echo "$MANIFEST" | jq -r '.deploymentTimestamp')" = "2026-08-01T00:00:00Z" ]
           [ "$(echo "$MANIFEST" | jq -r '.deployConfig')" = "null" ]
-          [ "${{ steps.generate-backdated.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-us-production-2026-08-01T000000Z.deploy-manifest.json" ]
+          [ "${{ steps.generate-backdated.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/us-production.2026-08-01T000000Z.deploy-manifest.json" ]
 
       - name: Generate deploy manifest with a date-only deployment-timestamp
         id: generate-date-only
@@ -86,14 +106,14 @@ jobs:
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
-          deployment-timestamp: '2026-08-02'
+          deployment-timestamp: "2026-08-02"
           s3-folder: schemas
 
       - name: date-only deployment-timestamp is normalized to midnight UTC
         run: |
           MANIFEST='${{ steps.generate-date-only.outputs.manifest-json }}'
           [ "$(echo "$MANIFEST" | jq -r '.deploymentTimestamp')" = "2026-08-02T00:00:00Z" ]
-          [ "${{ steps.generate-date-only.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-eu-production-2026-08-02T000000Z.deploy-manifest.json" ]
+          [ "${{ steps.generate-date-only.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/eu-production.2026-08-02T000000Z.deploy-manifest.json" ]
 
       - name: Generate deploy manifest with an unresolved build reference
         id: generate-unresolved-build-ref
@@ -137,7 +157,7 @@ jobs:
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
-          component: '../../etc/passwd'
+          component: "../../etc/passwd"
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: manifests/build/does-not-exist-9.9.9.json
@@ -146,6 +166,22 @@ jobs:
       - name: path-traversal component fails loudly
         run: |
           [ "${{ steps.generate-traversal.outcome }}" = "failure" ]
+
+      - name: generate-path-traversal-build-number-should-fail
+        id: generate-build-number-traversal
+        continue-on-error: true
+        uses: ./generate-deploy-manifest
+        with:
+          component: blood-pressure-measurements
+          version: 1.0.0
+          target-environment: eu-production
+          build-number: '../146'
+          build-manifest-ref: manifests/build/blood-pressure-measurements-1.0.0.json
+          s3-folder: schemas
+
+      - name: path-traversal build-number fails loudly
+        run: |
+          [ "${{ steps.generate-build-number-traversal.outcome }}" = "failure" ]
 
       - name: generate-invalid-timestamp-should-fail
         id: generate-invalid-timestamp
@@ -156,7 +192,7 @@ jobs:
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: manifests/build/blood-pressure-measurements-1.0.0.json
-          deployment-timestamp: '../../../../tmp/file'
+          deployment-timestamp: "../../../../tmp/file"
           s3-folder: schemas
 
       - name: invalid timestamp fails loudly
@@ -239,7 +275,7 @@ jobs:
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
-          s3-folder: ''
+          s3-folder: ""
 
       - name: missing s3-folder fails loudly
         run: |
@@ -274,4 +310,4 @@ jobs:
         run: |
           MANIFEST='${{ steps.generate-s3-folder-test.outputs.manifest-json }}'
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.deploymentTimestamp' | tr -d ':')
-          [ "${{ steps.generate-s3-folder-test.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/test/blood-pressure-measurements-1.0.0-eu-production-${TIMESTAMP}.deploy-manifest.json" ]
+          [ "${{ steps.generate-s3-folder-test.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/test/blood-pressure-measurements/1.0.0/eu-production.${TIMESTAMP}.deploy-manifest.json" ]

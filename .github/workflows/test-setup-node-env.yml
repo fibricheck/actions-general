@@ -16,7 +16,7 @@ jobs:
           - package-manager: pnpm
             pnpm-version: '9'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: setup-node-env
         id: setup-node-env
@@ -54,7 +54,7 @@ jobs:
   test-setup-node-env-invalid:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: setup-node-env with invalid package manager
         id: setup-node-env

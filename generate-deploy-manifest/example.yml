@@ -11,7 +11,7 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Authenticate to AWS for manifest publishing
         uses: aws-actions/configure-aws-credentials@v6.2.4
@@ -26,7 +26,8 @@ jobs:
           component: 'blood-pressure-measurements'
           version: '1.0.0'
           target-environment: 'eu-production'
-          build-manifest-ref: 's3://manifests.fibricheck.com/schemas/blood-pressure-measurements-1.0.0-2026-09-07T100000Z.build-manifest.json'
+          build-number: '146'
+          build-manifest-ref: 's3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/eu-production.146.2026-09-07T100000Z.build-manifest.json'
           s3-folder: 'schemas'
 
       - run: |
