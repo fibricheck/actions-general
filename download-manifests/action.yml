@@ -1,0 +1,133 @@
+name: 'Download Manifests'
+description: 'Downloads everything stored for a component version in the shared FibriCheck manifests bucket: its manifests and the files uploaded with them (see the files input of generate-build-manifest).'
+inputs:
+  component:
+    description: 'Name of the component or schema'
+    required: true
+  version:
+    description: 'Version (e.g. semver)'
+    required: true
+  s3-folder:
+    description: >
+      Top-level folder within the manifests bucket: app, pages, schemas, tasks, packages, or test. Everything under
+      <s3-folder>/<component>/<version>/ is downloaded.
+    required: true
+  path:
+    description: 'Local directory to download into. Defaults to manifests/download/<component>/<version>'
+    required: false
+    default: ''
+  fail-if-missing:
+    description: "Fail when nothing is stored for this version. When 'false', the found output is 'false' instead"
+    required: false
+    default: 'true'
+outputs:
+  found:
+    description: "'true' when anything was stored for this version and downloaded"
+    value: ${{ steps.download.outputs.found }}
+  path:
+    description: 'Local directory everything was downloaded into'
+    value: ${{ steps.download.outputs.path }}
+  files:
+    description: 'Local paths of the downloaded files, one per line'
+    value: ${{ steps.download.outputs.files }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Download
+      id: download
+      shell: bash
+      env:
+        INPUT_COMPONENT: ${{ inputs.component }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_S3_FOLDER: ${{ inputs.s3-folder }}
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_FAIL_IF_MISSING: ${{ inputs.fail-if-missing }}
+      run: |
+        set -euo pipefail
+
+        validate_no_path_traversal() {
+          local name="$1" value="$2"
+          case "$value" in
+            '')
+              echo "::error::${name} is required"
+              exit 1
+              ;;
+            */*|*'\'*)
+              echo "::error::${name} must not contain '/' or '\\'"
+              exit 1
+              ;;
+            .|..)
+              echo "::error::${name} must not be '.' or '..'"
+              exit 1
+              ;;
+            *$'\n'*|*$'\r'*)
+              echo "::error::${name} must not contain line breaks"
+              exit 1
+              ;;
+          esac
+        }
+        validate_no_path_traversal "component" "$INPUT_COMPONENT"
+        validate_no_path_traversal "version" "$INPUT_VERSION"
+        case "$INPUT_S3_FOLDER" in
+          app|pages|schemas|tasks|packages|test) ;;
+          *)
+            echo "::error::s3-folder must be one of: app, pages, schemas, tasks, packages, test — got: ${INPUT_S3_FOLDER}"
+            exit 1
+            ;;
+        esac
+        case "$INPUT_FAIL_IF_MISSING" in
+          true|false) ;;
+          *)
+            echo "::error::fail-if-missing must be 'true' or 'false' — got: ${INPUT_FAIL_IF_MISSING}"
+            exit 1
+            ;;
+        esac
+
+        S3_BUCKET="manifests.fibricheck.com"
+        PREFIX="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}"
+        DEST="${INPUT_PATH:-manifests/download/${INPUT_COMPONENT}/${INPUT_VERSION}}"
+        DEST="${DEST%/}"
+        printf 'path=%s\n' "$DEST" >> "$GITHUB_OUTPUT"
+
+        KEYS=$(aws s3api list-objects-v2 --bucket "$S3_BUCKET" --prefix "${PREFIX}/" \
+          --query 'Contents[].Key' --output text | tr '\t' '\n' | grep -vx 'None' || true)
+
+        if [ -z "$KEYS" ]; then
+          if [ "$INPUT_FAIL_IF_MISSING" = "true" ]; then
+            echo "::error::Nothing stored at s3://${S3_BUCKET}/${PREFIX}/"
+            exit 1
+          fi
+          echo "Nothing stored at s3://${S3_BUCKET}/${PREFIX}/"
+          printf 'found=false\n' >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Objects uploaded with a SHA256 checksum are verified against it
+        FILES=""
+        while IFS= read -r KEY; do
+          RELATIVE="${KEY#"${PREFIX}/"}"
+          case "/$RELATIVE/" in
+            *//*|*/../*|*/./*)
+              echo "::error::refusing to download ${KEY}: unsafe path"
+              exit 1
+              ;;
+          esac
+
+          TARGET="${DEST}/${RELATIVE}"
+          mkdir -p "$(dirname "$TARGET")"
+          EXPECTED=$(aws s3api get-object --bucket "$S3_BUCKET" --key "$KEY" --checksum-mode ENABLED \
+            --query ChecksumSHA256 --output text "$TARGET")
+          if [ -n "$EXPECTED" ] && [ "$EXPECTED" != "None" ]; then
+            ACTUAL=$(openssl dgst -sha256 -binary "$TARGET" | base64)
+            if [ "$ACTUAL" != "$EXPECTED" ]; then
+              echo "::error::checksum mismatch for s3://${S3_BUCKET}/${KEY}"
+              exit 1
+            fi
+          fi
+
+          FILES="${FILES}${TARGET}"$'\n'
+        done <<< "$KEYS"
+
+        DELIMITER="files_$(date +%s)_$RANDOM"
+        printf 'found=true\n' >> "$GITHUB_OUTPUT"
+        printf 'files<<%s\n%s%s\n' "$DELIMITER" "$FILES" "$DELIMITER" >> "$GITHUB_OUTPUT"

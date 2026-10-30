@@ -61,13 +61,23 @@ inputs:
     description: >
       Top-level folder within the manifests bucket: app, pages, schemas, tasks, packages, or test.
       Required — every manifest is uploaded. Uploads always go to the shared FibriCheck manifests bucket
-      (manifests.fibricheck.com). The key defaults to <s3-folder>/<component>/<version>/[<target-environment>.][<build-number>.]<build-timestamp>.build-manifest.json, or s3-key if set.
+      (manifests.fibricheck.com). The key defaults to <s3-folder>/<component>/<version>/[<target-environment>.][<build-number>.]<build-timestamp>.build-manifest.json,
+      or s3-key if set.
       Uploads are create-only and fail if the selected key already exists.
       Object Lock retention is applied by the bucket's own default retention rule, not by this
       action — "test" is not exempt from it.
     required: true
   s3-key:
     description: 'Object key to upload to within the manifests bucket. If set, used as-is instead of the s3-folder-derived default key — not combined with it. Must not already exist; the upload fails if it does.'
+    required: false
+    default: ''
+  files:
+    description: >
+      Files that belong to the build (e.g. archives, test results), one path per line, relative to the working
+      directory. A directory uploads all files in it. Each file is uploaded next to the manifest, keeping its relative
+      path: <manifest folder>/<path>. Files are uploaded before the manifest, so a manifest only exists once all of
+      its files are there. Uploads are create-only with a SHA256 checksum; a file that already exists with the same
+      checksum (a re-run after a partial upload) is accepted, one with a different checksum fails the upload.
     required: false
     default: ''
 outputs:
@@ -80,6 +90,9 @@ outputs:
   s3-uri:
     description: 'The s3://bucket/key URI the manifest was uploaded to'
     value: ${{ steps.generate.outputs.s3-uri }}
+  files-s3-uris:
+    description: 'The s3://bucket/key URIs the files were uploaded to, one per line'
+    value: ${{ steps.generate.outputs.files-s3-uris }}
 runs:
   using: 'composite'
   steps:
@@ -102,6 +115,7 @@ runs:
         INPUT_BUILD_TIMESTAMP: ${{ inputs.build-timestamp }}
         INPUT_S3_FOLDER: ${{ inputs.s3-folder }}
         INPUT_S3_KEY: ${{ inputs.s3-key }}
+        INPUT_FILES: ${{ inputs.files }}
       run: |
         set -euo pipefail
 
@@ -143,6 +157,36 @@ runs:
             ;;
         esac
         validate_no_line_breaks "s3-key" "$INPUT_S3_KEY"
+
+        # Collect the files to upload as paths relative to the working directory
+        FILES=()
+        while IFS= read -r ENTRY; do
+          # delete trailing and leading whitespace (ugh...)
+          ENTRY="${ENTRY#"${ENTRY%%[![:space:]]*}"}"
+          ENTRY="${ENTRY%"${ENTRY##*[![:space:]]}"}"
+          [ -z "$ENTRY" ] && continue
+          ENTRY="${ENTRY#./}"
+          case "/$ENTRY/" in
+            //*|*/../*|*/./*)
+              echo "::error::files must be relative paths without '.' or '..' segments — got: ${ENTRY}"
+              exit 1
+              ;;
+          esac
+          if [ -f "$ENTRY" ]; then
+            FILES+=("$ENTRY")
+          elif [ -d "$ENTRY" ]; then
+            while IFS= read -r -d '' FOUND; do
+              FILES+=("${FOUND#./}")
+            done < <(find "${ENTRY%/}" -type f -print0 | sort -z)
+          else
+            echo "::error::file not found: ${ENTRY}"
+            exit 1
+          fi
+        done <<< "$INPUT_FILES"
+        if [ -n "$(printf '%s\n' "${FILES[@]+"${FILES[@]}"}" | sort | uniq -d)" ]; then
+          echo "::error::files contains duplicate paths"
+          exit 1
+        fi
 
         TIMESTAMP="$INPUT_BUILD_TIMESTAMP"
         [ -z "$TIMESTAMP" ] && TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -231,6 +275,39 @@ runs:
           S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}/${FILENAME_PREFIX}${FILENAME_SAFE_TIMESTAMP}.build-manifest.json"
         fi
 
+        # Files are uploaded before the manifest, so a manifest is only created once all its files exist.
+        FILES_S3_URIS=""
+        if [ "${#FILES[@]}" -gt 0 ]; then
+          FILES_PREFIX="${S3_KEY%/*}"
+          for FILE in "${FILES[@]}"; do
+            FILE_KEY="${FILES_PREFIX}/${FILE}"
+            if [ "$FILE_KEY" = "$S3_KEY" ]; then
+              echo "::error::file ${FILE} would overwrite the manifest"
+              exit 1
+            fi
+            CHECKSUM=$(openssl dgst -sha256 -binary "$FILE" | base64)
+
+            # Create-only upload. When the file already exists (a re-run after a partial upload), it is only
+            # accepted if it has the same content.
+            if ! aws s3api put-object --bucket "$S3_BUCKET" --key "$FILE_KEY" --body "$FILE" \
+              --checksum-algorithm SHA256 --checksum-sha256 "$CHECKSUM" --if-none-match '*' >/dev/null 2>upload.err; then
+              if ! grep -q "PreconditionFailed" upload.err; then
+                cat upload.err >&2
+                exit 1
+              fi
+              EXISTING=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$FILE_KEY" --checksum-mode ENABLED \
+                --query ChecksumSHA256 --output text)
+              if [ "$EXISTING" != "$CHECKSUM" ]; then
+                echo "::error::s3://${S3_BUCKET}/${FILE_KEY} already exists with different content"
+                exit 1
+              fi
+              echo "s3://${S3_BUCKET}/${FILE_KEY} already exists with the same content"
+            fi
+            FILES_S3_URIS="${FILES_S3_URIS}s3://${S3_BUCKET}/${FILE_KEY}"$'\n'
+          done
+          rm -f upload.err
+        fi
+
         # Create-only upload: never create a newer object version under an existing manifest key.
         aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" --if-none-match '*' >/dev/null
         S3_URI="s3://${S3_BUCKET}/${S3_KEY}"
@@ -238,4 +315,5 @@ runs:
         DELIMITER="manifest_$(date +%s)_$RANDOM"
         printf 'manifest-path=%s\n' "$OUTPUT_PATH" >> "$GITHUB_OUTPUT"
         printf 's3-uri=%s\n' "$S3_URI" >> "$GITHUB_OUTPUT"
+        printf 'files-s3-uris<<%s\n%s%s\n' "$DELIMITER" "$FILES_S3_URIS" "$DELIMITER" >> "$GITHUB_OUTPUT"
         printf 'manifest-json<<%s\n%s\n%s\n' "$DELIMITER" "$MANIFEST" "$DELIMITER" >> "$GITHUB_OUTPUT"

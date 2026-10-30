@@ -1,0 +1,136 @@
+name: Test Download Manifests
+
+on:
+  workflow_call:
+
+jobs:
+  test-download-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install mock aws CLI backed by a local directory
+        run: |
+          BUCKET="$RUNNER_TEMP/mock-bucket"
+          PREFIX="$BUCKET/tasks/delete-user/1.1.7"
+          mkdir -p "$PREFIX/test-results"
+          echo '{"component":"delete-user","version":"1.1.7","commit":{"sha":"c16817c46c2e4d9c7966bb4991e109b7fca5ea9d"}}' > "$PREFIX/build-manifest.json"
+          echo zip > "$PREFIX/code.zip"
+          echo log > "$PREFIX/test-results/test-output.log"
+          echo '{}' > "$PREFIX/eu-production.2026-01-01T00-00-00Z.deploy-manifest.json"
+
+          mkdir -p "$RUNNER_TEMP/mock-bin"
+          cat > "$RUNNER_TEMP/mock-bin/aws" <<MOCKEOF
+          #!/bin/bash
+          BUCKET="$BUCKET"
+          MOCKEOF
+          cat >> "$RUNNER_TEMP/mock-bin/aws" <<'MOCKEOF'
+          key=""; prefix=""; prev=""
+          for a in "$@"; do
+            [ "$prev" = "--key" ] && key=$a
+            [ "$prev" = "--prefix" ] && prefix=$a
+            prev=$a
+          done
+          case "$2" in
+            head-object)
+              [ -f "$BUCKET/$key" ] || { echo "An error occurred (404) when calling the HeadObject operation: Not Found" >&2; exit 254; } ;;
+            list-objects-v2)
+              (cd "$BUCKET" && find "${prefix%/}" -type f | sort | paste -sd $'\t' -) ;;
+            get-object)
+              out="${@: -1}"
+              cp "$BUCKET/$key" "$out"
+              if [ -f "$RUNNER_TEMP/corrupt" ] && [[ "$key" == *code.zip ]]; then echo wrong; else openssl dgst -sha256 -binary "$out" | base64; fi ;;
+          esac
+          MOCKEOF
+          chmod +x "$RUNNER_TEMP/mock-bin/aws"
+          echo "$RUNNER_TEMP/mock-bin" >> "$GITHUB_PATH"
+
+      - name: download
+        id: download
+        uses: ./download-manifests
+        with:
+          component: delete-user
+          version: 1.1.7
+          s3-folder: tasks
+
+      - name: everything stored for the version is downloaded
+        run: |
+          DIR="manifests/download/delete-user/1.1.7"
+          [ "${{ steps.download.outputs.found }}" = "true" ]
+          [ "${{ steps.download.outputs.path }}" = "$DIR" ]
+          [ "$(cat "$DIR/code.zip")" = "zip" ]
+          [ "$(cat "$DIR/test-results/test-output.log")" = "log" ]
+          [ -f "$DIR/eu-production.2026-01-01T00-00-00Z.deploy-manifest.json" ]
+          FILES='${{ steps.download.outputs.files }}'
+          [ "$(echo "$FILES" | grep -c .)" = "4" ]
+          echo "$FILES" | grep -qx "$DIR/code.zip"
+
+      - name: download-to-custom-path
+        id: download-custom-path
+        uses: ./download-manifests
+        with:
+          component: delete-user
+          version: 1.1.7
+          s3-folder: tasks
+          path: release/
+
+      - name: custom path is used
+        run: |
+          [ "${{ steps.download-custom-path.outputs.path }}" = "release" ]
+          [ -f release/code.zip ]
+
+      - name: download-missing-without-failing
+        id: download-missing-soft
+        uses: ./download-manifests
+        with:
+          component: delete-user
+          version: 9.9.9
+          s3-folder: tasks
+          fail-if-missing: 'false'
+
+      - name: missing version reports found false
+        run: |
+          [ "${{ steps.download-missing-soft.outputs.found }}" = "false" ]
+
+      - name: download-missing-should-fail
+        id: download-missing
+        continue-on-error: true
+        uses: ./download-manifests
+        with:
+          component: delete-user
+          version: 9.9.9
+          s3-folder: tasks
+
+      - name: missing version fails loudly
+        run: |
+          [ "${{ steps.download-missing.outcome }}" = "failure" ]
+
+      - name: Corrupt the code.zip checksum
+        run: touch "$RUNNER_TEMP/corrupt"
+
+      - name: download-corrupt-should-fail
+        id: download-corrupt
+        continue-on-error: true
+        uses: ./download-manifests
+        with:
+          component: delete-user
+          version: 1.1.7
+          s3-folder: tasks
+          path: corrupt
+
+      - name: checksum mismatch fails loudly
+        run: |
+          [ "${{ steps.download-corrupt.outcome }}" = "failure" ]
+
+      - name: download-traversal-should-fail
+        id: download-traversal
+        continue-on-error: true
+        uses: ./download-manifests
+        with:
+          component: delete-user
+          version: ../../etc
+          s3-folder: tasks
+
+      - name: traversal fails loudly
+        run: |
+          [ "${{ steps.download-traversal.outcome }}" = "failure" ]

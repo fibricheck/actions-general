@@ -1,0 +1,29 @@
+name: Download Manifests Example
+
+on:
+  workflow_call:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Authenticate to AWS for manifest access
+        uses: aws-actions/configure-aws-credentials@v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_MANIFEST_PUBLISHER_ROLE_ARN }}
+          aws-region: eu-central-1
+
+      - name: Download Manifests
+        id: download-manifests
+        uses: fibricheck/actions-general/download-manifests@v5
+        with:
+          component: 'delete-user'
+          version: '1.1.7'
+          s3-folder: 'tasks'
+
+      - run: |
+          echo "Downloaded to: ${{ steps.download-manifests.outputs.path }}"

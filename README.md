@@ -239,7 +239,7 @@ git push -f origin v5
 
 ## AWS authentication for manifest actions
 
-`generate-build-manifest` and `generate-deploy-manifest` upload directly to the shared FibriCheck manifests bucket. AWS authentication must happen in the **calling repository**, immediately before invoking the manifest action:
+`generate-build-manifest`, `generate-deploy-manifest` and `download-manifests` access to the shared FibriCheck manifests bucket. AWS authentication must happen in the **calling repository**, immediately before invoking the manifest action:
 
 ```yaml
 permissions:
@@ -282,8 +282,9 @@ Builds a traceability manifest JSON for a release, writes it locally, and upload
     # Repository the build came from, owner/name
     # required
     repo: ${{ github.repository }}
-    # Commit sha the build was produced from
-    # required
+    # Commit sha the build was produced from. When set, the build manifest's
+    # commit.sha must match it
+    # optional (default: '')
     commit-sha: ${{ github.sha }}
     # Git tag for the commit, if one exists
     # optional (default: '')
@@ -347,11 +348,25 @@ Builds a traceability manifest JSON for a release, writes it locally, and upload
     # The upload will fail if it does.
     # optional (default: '')
     s3-key: 'schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T100000Z.build-manifest.json'
+    # Files that belong to the build (e.g. archives, test results), one path
+    # per line, relative to the working directory. A directory uploads all
+    # files in it. Each file is uploaded next to the manifest, keeping its
+    # relative path. Files are uploaded before the manifest, so a manifest
+    # only exists once all of its files are there. Uploads are create-only
+    # with a SHA256 checksum; a file that already exists with the same
+    # checksum (a re-run after a partial upload) is accepted, one with a
+    # different checksum fails the upload. Download them again with
+    # download-manifests.
+    # optional (default: '')
+    files: |
+      code.zip
+      test-results
 
   # Outputs:
   #   manifest-json: The generated manifest, as a JSON string
   #   manifest-path: Path the manifest was written to
   #   s3-uri: The s3://bucket/key it was uploaded to
+  #   files-s3-uris: The s3://bucket/key URIs of the files, one per line
 - name: Echo
   run: |
     echo "manifest-path: ${{ steps.generate-build-manifest.outputs.manifest-path }}"
@@ -361,6 +376,46 @@ Builds a traceability manifest JSON for a release, writes it locally, and upload
 The generated manifest can contain runtime-visible configuration and must not be printed to production logs. Pass it between steps through `manifest-path` or `manifest-json`; only log the path.
 
 - [Example](./generate-build-manifest/example.yml)
+
+## download-manifests
+
+Downloads everything stored under `s3://manifests.fibricheck.com/<s3-folder>/<component>/<version>/`: its manifests and the files uploaded with them (see `files` of `generate-build-manifest`). Files uploaded with a SHA256 checksum are verified against it. Requires `s3:ListBucket` on the prefix and `s3:GetObject` on its objects.
+
+<!-- start usage -->
+```yaml
+- name: Download Manifests
+  id: download-manifests
+  uses: fibricheck/actions-general/download-manifests@v5
+  with:
+    # Name of the component or schema
+    # required
+    component: 'delete-user'
+    # Version (e.g. semver)
+    # required
+    version: '1.1.7'
+    # Top-level folder within the manifests bucket: app, pages, schemas,
+    # tasks, packages, or test
+    # required
+    s3-folder: 'tasks'
+    # Local directory to download into
+    # optional (default: manifests/download/<component>/<version>)
+    path: ''
+    # Fail when nothing is stored for this version. When 'false', the found
+    # output is 'false' instead
+    # optional (default: 'true')
+    fail-if-missing: 'true'
+
+  # Outputs:
+  #   found: 'true' when anything was stored for this version and downloaded
+  #   path: Local directory everything was downloaded into
+  #   files: Local paths of the downloaded files, one per line
+- name: Echo
+  run: |
+    echo "path: ${{ steps.download-manifests.outputs.path }}"
+```
+<!-- end usage -->
+
+- [Example](./download-manifests/example.yml)
 
 ## generate-deploy-manifest
 

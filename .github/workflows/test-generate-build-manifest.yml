@@ -338,3 +338,84 @@ jobs:
           MANIFEST='${{ steps.generate-s3-folder-test.outputs.manifest-json }}'
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
           [ "${{ steps.generate-s3-folder-test.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/test/blood-pressure-measurements/1.0.0/${TIMESTAMP}.build-manifest.json" ]
+
+      - name: Create build files
+        run: |
+          mkdir -p build-files/test-results/sub
+          echo zip > build-files/code.zip
+          echo junit > build-files/test-results/junit.xml
+          echo log > build-files/test-results/sub/test-output.log
+
+      - name: generate-with-files
+        id: generate-with-files
+        uses: ./generate-build-manifest
+        with:
+          component: delete-user
+          version: 1.1.7
+          repo: fibricheck/taskmaster
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: tasks
+          files: |
+            build-files/code.zip
+            ./build-files/test-results/
+
+      - name: files are uploaded next to the manifest, before the manifest
+        run: |
+          PREFIX="tasks/delete-user/1.1.7"
+          [[ "${{ steps.generate-with-files.outputs.s3-uri }}" =~ ^s3://manifests\.fibricheck\.com/$PREFIX/[^/]+\.build-manifest\.json$ ]]
+          URIS='${{ steps.generate-with-files.outputs.files-s3-uris }}'
+          [ "$(echo "$URIS" | grep -c .)" = "3" ]
+          echo "$URIS" | grep -qx "s3://manifests.fibricheck.com/$PREFIX/build-files/code.zip"
+          echo "$URIS" | grep -qx "s3://manifests.fibricheck.com/$PREFIX/build-files/test-results/sub/test-output.log"
+          grep -q -- "--key $PREFIX/build-files/code.zip --body build-files/code.zip --checksum-algorithm SHA256 --checksum-sha256 .* --if-none-match \*" "$RUNNER_TEMP/aws-calls.log"
+          FILE_LINE=$(grep -n -- "--key $PREFIX/build-files/code.zip" "$RUNNER_TEMP/aws-calls.log" | cut -d: -f1)
+          MANIFEST_LINE=$(grep -n -- "--key $PREFIX/[^/ ]*\.build-manifest\.json" "$RUNNER_TEMP/aws-calls.log" | cut -d: -f1)
+          [ "$FILE_LINE" -lt "$MANIFEST_LINE" ]
+
+      - name: generate-with-files-and-custom-key
+        id: generate-with-files-custom-key
+        uses: ./generate-build-manifest
+        with:
+          component: delete-user
+          version: 1.1.7
+          repo: fibricheck/taskmaster
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: tasks
+          s3-key: tasks/delete-user/custom/build-manifest.json
+          files: build-files/code.zip
+
+      - name: files follow a custom s3-key
+        run: |
+          [ "${{ steps.generate-with-files-custom-key.outputs.files-s3-uris }}" = "s3://manifests.fibricheck.com/tasks/delete-user/custom/build-files/code.zip" ]
+
+      - name: generate-with-traversal-file-should-fail
+        id: generate-traversal-file
+        continue-on-error: true
+        uses: ./generate-build-manifest
+        with:
+          component: delete-user
+          version: 1.1.7
+          repo: fibricheck/taskmaster
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: tasks
+          files: ../build-files/code.zip
+
+      - name: traversal file fails loudly
+        run: |
+          [ "${{ steps.generate-traversal-file.outcome }}" = "failure" ]
+
+      - name: generate-with-missing-file-should-fail
+        id: generate-missing-file
+        continue-on-error: true
+        uses: ./generate-build-manifest
+        with:
+          component: delete-user
+          version: 1.1.7
+          repo: fibricheck/taskmaster
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          s3-folder: tasks
+          files: build-files/missing.zip
+
+      - name: missing file fails loudly
+        run: |
+          [ "${{ steps.generate-missing-file.outcome }}" = "failure" ]
