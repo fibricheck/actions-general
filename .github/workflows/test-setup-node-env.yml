@@ -10,7 +10,7 @@ jobs:
       matrix:
         include:
           - package-manager: npm
-            cache-dependency-path: regex-match/package-lock.json
+            cache-dependency-path: regex-match/yarn.lock
           - package-manager: yarn
             cache-dependency-path: xcode-cloud/yarn.lock
           - package-manager: pnpm
