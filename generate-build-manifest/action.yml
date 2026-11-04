@@ -61,7 +61,8 @@ inputs:
     description: >
       Top-level folder within the manifests bucket: app, pages, schemas, tasks, packages, or test.
       Required — every manifest is uploaded. Uploads always go to the shared FibriCheck manifests bucket
-      (manifests.fibricheck.com). The key defaults to <s3-folder>/<component>/<version>/[<target-environment>.][<build-number>.]<build-timestamp>.build-manifest.json, or s3-key if set.
+      (manifests.fibricheck.com). The key defaults to <s3-folder>/<component>/<version>/[<target-environment>.][<build-number>.]<build-timestamp>.build-manifest.json,
+      or s3-key if set.
       Uploads are create-only and fail if the selected key already exists.
       Object Lock retention is applied by the bucket's own default retention rule, not by this
       action — "test" is not exempt from it.
@@ -70,6 +71,23 @@ inputs:
     description: 'Object key to upload to within the manifests bucket. If set, used as-is instead of the s3-folder-derived default key — not combined with it. Must not already exist; the upload fails if it does.'
     required: false
     default: ''
+  files:
+    description: >
+      Files that belong to the build (e.g. archives, test results), one path per line, relative to the working
+      directory. A directory uploads all files in it. Each file is uploaded next to the manifest, keeping its relative
+      path: <manifest folder>/<path>. Files are uploaded before the manifest, so a manifest only exists once all of
+      its files are there. Uploads are create-only with a SHA256 checksum; a file that already exists with the same
+      checksum (a re-run after a partial upload) is accepted, one with a different checksum fails the upload (see
+      force-upload). Empty directories and files named *.build-manifest.json or *.deploy-manifest.json are rejected.
+      The re-run check reads the existing file, so the caller needs s3:GetObject next to s3:PutObject.
+    required: false
+    default: ''
+  force-upload:
+    description: >
+      'true' uploads the files even when they already exist, as a new object version. The manifest itself stays
+      create-only.
+    required: false
+    default: 'false'
 outputs:
   manifest-json:
     description: 'The generated manifest, as a JSON string'
@@ -80,6 +98,9 @@ outputs:
   s3-uri:
     description: 'The s3://bucket/key URI the manifest was uploaded to'
     value: ${{ steps.generate.outputs.s3-uri }}
+  files-s3-uris:
+    description: 'The s3://bucket/key URIs the files were uploaded to, one per line'
+    value: ${{ steps.generate.outputs.files-s3-uris }}
 runs:
   using: 'composite'
   steps:
@@ -102,12 +123,18 @@ runs:
         INPUT_BUILD_TIMESTAMP: ${{ inputs.build-timestamp }}
         INPUT_S3_FOLDER: ${{ inputs.s3-folder }}
         INPUT_S3_KEY: ${{ inputs.s3-key }}
+        INPUT_FILES: ${{ inputs.files }}
+        INPUT_FORCE_UPLOAD: ${{ inputs.force-upload }}
       run: |
         set -euo pipefail
 
         validate_no_path_traversal() {
           local name="$1" value="$2"
           case "$value" in
+            '')
+              echo "::error::${name} is required"
+              exit 1
+              ;;
             */*|*'\'*)
               echo "::error::${name} must not contain '/' or '\\'"
               exit 1
@@ -135,6 +162,13 @@ runs:
         validate_no_path_traversal "version" "$INPUT_VERSION"
         [ -n "$INPUT_BUILD_NUMBER" ] && validate_no_path_traversal "build-number" "$INPUT_BUILD_NUMBER"
         [ -n "$INPUT_TARGET_ENVIRONMENT" ] && validate_no_path_traversal "target-environment" "$INPUT_TARGET_ENVIRONMENT"
+        case "$INPUT_FORCE_UPLOAD" in
+          true|false) ;;
+          *)
+            echo "::error::force-upload must be 'true' or 'false' — got: ${INPUT_FORCE_UPLOAD}"
+            exit 1
+            ;;
+        esac
         case "$INPUT_S3_FOLDER" in
           app|pages|schemas|tasks|packages|test) ;;
           *)
@@ -143,6 +177,42 @@ runs:
             ;;
         esac
         validate_no_line_breaks "s3-key" "$INPUT_S3_KEY"
+
+        # Collect the files to upload as paths relative to the working directory
+        FILES=()
+        while IFS= read -r ENTRY; do
+          # delete trailing and leading whitespace (ugh...)
+          ENTRY="${ENTRY#"${ENTRY%%[![:space:]]*}"}"
+          ENTRY="${ENTRY%"${ENTRY##*[![:space:]]}"}"
+          [ -z "$ENTRY" ] && continue
+          ENTRY="${ENTRY#./}"
+          while [[ "$ENTRY" == ?*/ ]]; do ENTRY="${ENTRY%/}"; done
+          case "/$ENTRY/" in
+            *//*|*/../*|*/./*)
+              echo "::error::files must be relative paths without '.' or '..' segments — got: ${ENTRY}"
+              exit 1
+              ;;
+          esac
+          if [ -f "$ENTRY" ]; then
+            FILES+=("$ENTRY")
+          elif [ -d "$ENTRY" ]; then
+            COUNT_BEFORE=${#FILES[@]}
+            while IFS= read -r -d '' FOUND; do
+              FILES+=("${FOUND#./}")
+            done < <(find -L "$ENTRY" -type f -print0 | sort -z)
+            if [ "${#FILES[@]}" -eq "$COUNT_BEFORE" ]; then
+              echo "::error::directory contains no files: ${ENTRY}"
+              exit 1
+            fi
+          else
+            echo "::error::file not found: ${ENTRY}"
+            exit 1
+          fi
+        done <<< "$INPUT_FILES"
+        if [ -n "$(printf '%s\n' "${FILES[@]+"${FILES[@]}"}" | sort | uniq -d)" ]; then
+          echo "::error::files contains duplicate paths"
+          exit 1
+        fi
 
         TIMESTAMP="$INPUT_BUILD_TIMESTAMP"
         [ -z "$TIMESTAMP" ] && TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -231,6 +301,54 @@ runs:
           S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}/${FILENAME_PREFIX}${FILENAME_SAFE_TIMESTAMP}.build-manifest.json"
         fi
 
+        # Files are uploaded before the manifest, so a manifest is only created once all its files exist.
+        FILES_S3_URIS=""
+        if [ "${#FILES[@]}" -gt 0 ]; then
+          if [[ "$S3_KEY" != */* ]]; then
+            echo "::error::s3-key must contain a folder when files are given — got: ${S3_KEY}"
+            exit 1
+          fi
+          FILES_PREFIX="${S3_KEY%/*}"
+          # Checked before the first upload, so a rejected file never leaves earlier files behind
+          for FILE in "${FILES[@]}"; do
+            if [ "${FILES_PREFIX}/${FILE}" = "$S3_KEY" ] || [[ "$FILE" == *.build-manifest.json || "$FILE" == *.deploy-manifest.json ]]; then
+              echo "::error::file ${FILE} would be mistaken for a manifest"
+              exit 1
+            fi
+          done
+          UPLOAD_ERR=$(mktemp)
+          for FILE in "${FILES[@]}"; do
+            FILE_KEY="${FILES_PREFIX}/${FILE}"
+            CHECKSUM=$(openssl dgst -sha256 -binary "$FILE" | base64)
+
+            if [ "$INPUT_FORCE_UPLOAD" = "true" ]; then
+              aws s3api put-object --bucket "$S3_BUCKET" --key "$FILE_KEY" --body "$FILE" \
+                --checksum-algorithm SHA256 --checksum-sha256 "$CHECKSUM" >/dev/null
+              FILES_S3_URIS="${FILES_S3_URIS}s3://${S3_BUCKET}/${FILE_KEY}"$'\n'
+              continue
+            fi
+
+            # Create-only upload. When the file already exists (a re-run after a partial upload), it is only
+            # accepted if it has the same content.
+            if ! aws s3api put-object --bucket "$S3_BUCKET" --key "$FILE_KEY" --body "$FILE" \
+              --checksum-algorithm SHA256 --checksum-sha256 "$CHECKSUM" --if-none-match '*' >/dev/null 2>"$UPLOAD_ERR"; then
+              if ! grep -q "PreconditionFailed" "$UPLOAD_ERR"; then
+                cat "$UPLOAD_ERR" >&2
+                exit 1
+              fi
+              EXISTING=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$FILE_KEY" --checksum-mode ENABLED \
+                --query ChecksumSHA256 --output text)
+              if [ "$EXISTING" != "$CHECKSUM" ]; then
+                echo "::error::s3://${S3_BUCKET}/${FILE_KEY} already exists with different content"
+                exit 1
+              fi
+              echo "s3://${S3_BUCKET}/${FILE_KEY} already exists with the same content"
+            fi
+            FILES_S3_URIS="${FILES_S3_URIS}s3://${S3_BUCKET}/${FILE_KEY}"$'\n'
+          done
+          rm -f "$UPLOAD_ERR"
+        fi
+
         # Create-only upload: never create a newer object version under an existing manifest key.
         aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" --if-none-match '*' >/dev/null
         S3_URI="s3://${S3_BUCKET}/${S3_KEY}"
@@ -238,4 +356,5 @@ runs:
         DELIMITER="manifest_$(date +%s)_$RANDOM"
         printf 'manifest-path=%s\n' "$OUTPUT_PATH" >> "$GITHUB_OUTPUT"
         printf 's3-uri=%s\n' "$S3_URI" >> "$GITHUB_OUTPUT"
+        printf 'files-s3-uris<<%s\n%s%s\n' "$DELIMITER" "$FILES_S3_URIS" "$DELIMITER" >> "$GITHUB_OUTPUT"
         printf 'manifest-json<<%s\n%s\n%s\n' "$DELIMITER" "$MANIFEST" "$DELIMITER" >> "$GITHUB_OUTPUT"

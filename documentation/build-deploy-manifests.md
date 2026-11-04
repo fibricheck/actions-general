@@ -11,7 +11,7 @@ A build manifest records that *something was produced*. A deploy manifest record
 - **`fibricheck-schemas`**: a released schema can be deployed to both `eu-production` and `us-production`. Each execution records the build/publishing event that supplied the schema and the successful deployment event. A later rollback to an older product version is a new publishing and deployment event, so it receives new timestamped manifests rather than reusing an earlier record.
 - **`fibricheck_react_native`**: effectively 1:1 per platform, but *not* strictly 1:1 overall — a version+region+platform combination can have *multiple build attempts* (e.g. a rebuild after an App Store rejection) but only ever *one* deployment, since region/environment config (`config.eu.prod.json` vs `config.us.prod.json`) is baked in at build time, making the EU build and the US build different artifacts from the start, not one artifact deployed twice. iOS and Android are two independent build artifacts with independent review timelines too, not variants of one build.
 
-The actions themselves (`generate-build-manifest`/`generate-deploy-manifest`) don't assume either shape — they just write independent files. The relationship is entirely a calling-workflow/naming-convention decision, and differs per repo.
+The actions themselves (`generate-build-manifest`/`generate-deploy-manifest`, plus `download-manifests` for reading a version back) don't assume either shape — they just write independent files. The relationship is entirely a calling-workflow/naming-convention decision, and differs per repo.
 
 ## Storage: S3, not git
 
@@ -31,7 +31,7 @@ The verification procedure for a stored manifest stays intentionally simple: con
 - **Access**: Block all public access on, ACLs disabled (bucket owner enforced) — nothing in this bucket is ever public-read.
 - **Encryption**: SSE-S3 (default).
 - **Bucket-level default Object Lock retention**: this is the *only* place retention is configured — the actions themselves have no retention inputs, so every upload inherits whatever the bucket's default retention rule says, with no way to override it per call. Configured as `GOVERNANCE` mode, 10 years.
-- **IAM**: role `manifestPublishingPolicy` exists, trust policy scoped per-repo to each caller's actual verified production branch, permissions policy limited to `s3:PutObject`/`s3:PutObjectRetention` on the six folder prefixes. Nothing currently calls it.
+- **IAM**: role `manifestPublishingPolicy` exists, trust policy scoped per-repo to each caller's actual verified production branch, permissions policy limited to `s3:PutObject`/`s3:PutObjectRetention` on the six folder prefixes. Nothing currently calls it. A caller that uploads `files` with `generate-build-manifest` also needs `s3:GetObject` (the re-run check reads an existing file), and `download-manifests` needs `s3:ListBucket` and `s3:GetObject`; this policy grants neither.
 
 No S3 upload path exists for iOS at all yet (`.ipa` goes through `xcode-cloud`/App Store Connect only); if iOS manifests need to land in `manifests.fibricheck.com`, that upload path — and the credentials for it — still need to be built from scratch.
 
