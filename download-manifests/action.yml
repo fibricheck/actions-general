@@ -9,7 +9,7 @@ inputs:
     required: true
   s3-folder:
     description: >
-      Top-level folder within the manifests bucket: app, pages, schemas, tasks, packages, or test. Everything under
+      Top-level folder within the manifests bucket: app, pages, schemas, tasks, packages, test, or composites. Everything under
       <s3-folder>/<component>/<version>/ is downloaded.
     required: true
   path:
@@ -75,9 +75,9 @@ runs:
             ;;
         esac
         case "$INPUT_S3_FOLDER" in
-          app|pages|schemas|tasks|packages|test) ;;
+          app|pages|schemas|tasks|packages|test|composites) ;;
           *)
-            echo "::error::s3-folder must be one of: app, pages, schemas, tasks, packages, test — got: ${INPUT_S3_FOLDER}"
+            echo "::error::s3-folder must be one of: app, pages, schemas, tasks, packages, test, composites — got: ${INPUT_S3_FOLDER}"
             exit 1
             ;;
         esac

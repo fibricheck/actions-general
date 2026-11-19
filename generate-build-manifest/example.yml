@@ -28,7 +28,6 @@ jobs:
           repo: ${{ github.repository }}
           commit-sha: ${{ github.sha }}
           target-environment: 'eu-production'
-          product-identifiers: 'blood-pressure-measurements-v1.0.0-eu-production,blood-pressure-measurements-v1.0.0-us-production'
           build-config: ''
           tooling: '{"node":"20"}'
           s3-folder: 'schemas'

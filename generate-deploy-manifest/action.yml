@@ -24,6 +24,15 @@ inputs:
     description: 'When the deployment happened, as YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ. Defaults to now. Pass this explicitly when recording a deployment after the fact (e.g. an app store release recorded manually). A date-only value is normalized to midnight UTC.'
     required: false
     default: ''
+  component-manifests:
+    description: >
+      Comma-separated list of existing component deploy manifests this manifest combines, as
+      s3://manifests.fibricheck.com/<key> URIs (the s3-uri output of the action that created them).
+      Each one must be a deploy manifest and must exist; the action fails before uploading anything if
+      one does not. The existence check needs s3:GetObject on the referenced keys. s3-folder must be
+      composites when this is given.
+    required: false
+    default: ''
   deploy-config:
     description: >
       Deploy-time configuration to embed as-is, same rules as generate-build-manifest's build-config:
@@ -32,19 +41,16 @@ inputs:
     default: ''
   s3-folder:
     description: >
-      Top-level folder within the manifests bucket: app, pages, schemas, tasks, packages, or test.
+      Top-level folder within the manifests bucket: app, pages, schemas, tasks, packages, test, or composites.
+      composites is required when component-manifests is given, and not allowed otherwise.
       Required — every manifest is uploaded, there is no local-only mode. Uploads always go to the
       shared FibriCheck manifests bucket (manifests.fibricheck.com); there is no way to point this
       action at a different bucket. The key defaults to
-      <s3-folder>/<component>/<version>/<target-environment>.[<build-number>.]<deployment-timestamp>.deploy-manifest.json,
-      or s3-key if set. Uploads are create-only and fail if the selected key already exists. Object
+      <s3-folder>/<component>/<version>/<target-environment>.[<build-number>.]<deployment-timestamp>.deploy-manifest.json.
+      Uploads are create-only and fail if the key already exists. Object
       Lock retention is applied by the bucket's own default retention rule, not by this action —
       "test" is not exempt from it.
     required: true
-  s3-key:
-    description: 'Object key to upload to within the manifests bucket. If set, used as-is instead of the s3-folder-derived default key. Must not already exist! The upload will fail if it does.'
-    required: false
-    default: ''
 outputs:
   manifest-json:
     description: 'The generated manifest, as a JSON string'
@@ -68,9 +74,9 @@ runs:
         INPUT_BUILD_NUMBER: ${{ inputs.build-number }}
         INPUT_BUILD_MANIFEST_REF: ${{ inputs.build-manifest-ref }}
         INPUT_DEPLOYMENT_TIMESTAMP: ${{ inputs.deployment-timestamp }}
+        INPUT_COMPONENT_MANIFESTS: ${{ inputs.component-manifests }}
         INPUT_DEPLOY_CONFIG: ${{ inputs.deploy-config }}
         INPUT_S3_FOLDER: ${{ inputs.s3-folder }}
-        INPUT_S3_KEY: ${{ inputs.s3-key }}
       run: |
         set -euo pipefail
 
@@ -91,15 +97,6 @@ runs:
               ;;
           esac
         }
-        validate_no_line_breaks() {
-          local name="$1" value="$2"
-          case "$value" in
-            *$'\n'*|*$'\r'*)
-              echo "::error::${name} must not contain line breaks"
-              exit 1
-              ;;
-          esac
-        }
         validate_no_path_traversal "component" "$INPUT_COMPONENT"
         validate_no_path_traversal "version" "$INPUT_VERSION"
         validate_no_path_traversal "target-environment" "$INPUT_TARGET_ENVIRONMENT"
@@ -107,13 +104,49 @@ runs:
           validate_no_path_traversal "build-number" "$INPUT_BUILD_NUMBER"
         fi
         case "$INPUT_S3_FOLDER" in
-          app|pages|schemas|tasks|packages|test) ;;
+          app|pages|schemas|tasks|packages|test|composites) ;;
           *)
-            echo "::error::s3-folder must be one of: app, pages, schemas, tasks, packages, test — got: ${INPUT_S3_FOLDER}"
+            echo "::error::s3-folder must be one of: app, pages, schemas, tasks, packages, test, composites — got: ${INPUT_S3_FOLDER}"
             exit 1
             ;;
         esac
-        validate_no_line_breaks "s3-key" "$INPUT_S3_KEY"
+
+        S3_BUCKET="manifests.fibricheck.com"
+
+        COMPONENT_MANIFESTS=$(jq -Rn --arg value "$INPUT_COMPONENT_MANIFESTS" '$value | split(",") | map(select(length > 0))')
+
+        # Composite manifests live in the composites folder, and only there
+        if [ "$(jq 'length' <<< "$COMPONENT_MANIFESTS")" -gt 0 ] && [ "$INPUT_S3_FOLDER" != "composites" ]; then
+          echo "::error::s3-folder must be composites when component-manifests is given — got: ${INPUT_S3_FOLDER}"
+          exit 1
+        fi
+        if [ "$(jq 'length' <<< "$COMPONENT_MANIFESTS")" -eq 0 ] && [ "$INPUT_S3_FOLDER" = "composites" ]; then
+          echo "::error::s3-folder composites requires component-manifests"
+          exit 1
+        fi
+
+        # Every referenced component manifest must already exist, checked before anything is uploaded
+        HEAD_ERR=$(mktemp)
+        while IFS= read -r REF; do
+          KEY="${REF#"s3://${S3_BUCKET}/"}"
+          if [ "$KEY" = "$REF" ] || [ -z "$KEY" ]; then
+            echo "::error::component-manifests must be s3://${S3_BUCKET}/<key> URIs — got: ${REF}"
+            exit 1
+          fi
+          if [[ "${KEY##*/}" != *.deploy-manifest.json ]]; then
+            echo "::error::component-manifests must reference deploy manifests — got: ${REF}"
+            exit 1
+          fi
+          if ! aws s3api head-object --bucket "$S3_BUCKET" --key "$KEY" >/dev/null 2>"$HEAD_ERR"; then
+            if grep -q "(404)" "$HEAD_ERR"; then
+              echo "::error::component manifest does not exist: ${REF}"
+            else
+              cat "$HEAD_ERR" >&2
+            fi
+            exit 1
+          fi
+        done < <(jq -r '.[]' <<< "$COMPONENT_MANIFESTS")
+        rm -f "$HEAD_ERR"
 
         TIMESTAMP="$INPUT_DEPLOYMENT_TIMESTAMP"
         [ -z "$TIMESTAMP" ] && TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -147,6 +180,7 @@ runs:
           --arg targetEnvironment "$INPUT_TARGET_ENVIRONMENT" \
           --argjson buildNumber "$BUILD_NUMBER" \
           --arg deploymentTimestamp "$TIMESTAMP" \
+          --argjson componentManifests "$COMPONENT_MANIFESTS" \
           --argjson deployConfig "$DEPLOY_CONFIG" \
           '{
             manifestVersion: "1.0",
@@ -156,19 +190,15 @@ runs:
             targetEnvironment: $targetEnvironment,
             buildNumber: $buildNumber,
             deploymentTimestamp: $deploymentTimestamp,
+            componentManifests: $componentManifests,
             deployConfig: $deployConfig
           }')
 
         printf '%s\n' "$MANIFEST" > "$OUTPUT_PATH"
 
-        S3_BUCKET="manifests.fibricheck.com"
-
-        S3_KEY="$INPUT_S3_KEY"
-        if [ -z "$S3_KEY" ]; then
-          BUILD_NUMBER_SEGMENT=""
-          [ -n "$INPUT_BUILD_NUMBER" ] && BUILD_NUMBER_SEGMENT="${INPUT_BUILD_NUMBER}."
-          S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}/${INPUT_TARGET_ENVIRONMENT}.${BUILD_NUMBER_SEGMENT}${FILENAME_SAFE_TIMESTAMP}.deploy-manifest.json"
-        fi
+        BUILD_NUMBER_SEGMENT=""
+        [ -n "$INPUT_BUILD_NUMBER" ] && BUILD_NUMBER_SEGMENT="${INPUT_BUILD_NUMBER}."
+        S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}/${INPUT_TARGET_ENVIRONMENT}.${BUILD_NUMBER_SEGMENT}${FILENAME_SAFE_TIMESTAMP}.deploy-manifest.json"
 
         # Create-only upload: every deployment record must have its own unused key.
         aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" --if-none-match '*' >/dev/null
