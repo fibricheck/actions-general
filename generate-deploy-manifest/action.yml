@@ -36,15 +36,11 @@ inputs:
       Required — every manifest is uploaded, there is no local-only mode. Uploads always go to the
       shared FibriCheck manifests bucket (manifests.fibricheck.com); there is no way to point this
       action at a different bucket. The key defaults to
-      <s3-folder>/<component>/<version>/<target-environment>.[<build-number>.]<deployment-timestamp>.deploy-manifest.json,
-      or s3-key if set. Uploads are create-only and fail if the selected key already exists. Object
+      <s3-folder>/<component>/<version>/<target-environment>.[<build-number>.]<deployment-timestamp>.deploy-manifest.json.
+      Uploads are create-only and fail if the key already exists. Object
       Lock retention is applied by the bucket's own default retention rule, not by this action —
       "test" is not exempt from it.
     required: true
-  s3-key:
-    description: 'Object key to upload to within the manifests bucket. If set, used as-is instead of the s3-folder-derived default key. Must not already exist! The upload will fail if it does.'
-    required: false
-    default: ''
 outputs:
   manifest-json:
     description: 'The generated manifest, as a JSON string'
@@ -70,7 +66,6 @@ runs:
         INPUT_DEPLOYMENT_TIMESTAMP: ${{ inputs.deployment-timestamp }}
         INPUT_DEPLOY_CONFIG: ${{ inputs.deploy-config }}
         INPUT_S3_FOLDER: ${{ inputs.s3-folder }}
-        INPUT_S3_KEY: ${{ inputs.s3-key }}
       run: |
         set -euo pipefail
 
@@ -91,15 +86,6 @@ runs:
               ;;
           esac
         }
-        validate_no_line_breaks() {
-          local name="$1" value="$2"
-          case "$value" in
-            *$'\n'*|*$'\r'*)
-              echo "::error::${name} must not contain line breaks"
-              exit 1
-              ;;
-          esac
-        }
         validate_no_path_traversal "component" "$INPUT_COMPONENT"
         validate_no_path_traversal "version" "$INPUT_VERSION"
         validate_no_path_traversal "target-environment" "$INPUT_TARGET_ENVIRONMENT"
@@ -113,7 +99,6 @@ runs:
             exit 1
             ;;
         esac
-        validate_no_line_breaks "s3-key" "$INPUT_S3_KEY"
 
         TIMESTAMP="$INPUT_DEPLOYMENT_TIMESTAMP"
         [ -z "$TIMESTAMP" ] && TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -163,12 +148,9 @@ runs:
 
         S3_BUCKET="manifests.fibricheck.com"
 
-        S3_KEY="$INPUT_S3_KEY"
-        if [ -z "$S3_KEY" ]; then
-          BUILD_NUMBER_SEGMENT=""
-          [ -n "$INPUT_BUILD_NUMBER" ] && BUILD_NUMBER_SEGMENT="${INPUT_BUILD_NUMBER}."
-          S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}/${INPUT_TARGET_ENVIRONMENT}.${BUILD_NUMBER_SEGMENT}${FILENAME_SAFE_TIMESTAMP}.deploy-manifest.json"
-        fi
+        BUILD_NUMBER_SEGMENT=""
+        [ -n "$INPUT_BUILD_NUMBER" ] && BUILD_NUMBER_SEGMENT="${INPUT_BUILD_NUMBER}."
+        S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}/${INPUT_TARGET_ENVIRONMENT}.${BUILD_NUMBER_SEGMENT}${FILENAME_SAFE_TIMESTAMP}.deploy-manifest.json"
 
         # Create-only upload: every deployment record must have its own unused key.
         aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" --if-none-match '*' >/dev/null

@@ -15,7 +15,7 @@ jobs:
           cat > "$RUNNER_TEMP/mock-bin/aws" <<'MOCKEOF'
           #!/bin/bash
           echo "$*" >> "$RUNNER_TEMP/aws-calls.log"
-          if [[ "$*" == *"already-exists.deploy-manifest.json"* ]]; then
+          if [[ "$*" == *"/already-exists/"*".deploy-manifest.json"* ]]; then
             echo "PreconditionFailed: object already exists" >&2
             exit 1
           fi
@@ -216,55 +216,20 @@ jobs:
         run: |
           [ "${{ steps.generate-line-break.outcome }}" = "failure" ]
 
-      - name: generate-custom-s3-key
-        id: generate-custom-key
-        uses: ./generate-deploy-manifest
-        with:
-          component: blood-pressure-measurements
-          version: 1.0.0
-          target-environment: eu-production
-          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
-          s3-folder: schemas
-          s3-key: schemas/blood-pressure-measurements/1.0.0-eu-production.deploy-manifest.json
-
-      - name: custom s3-key overrides the folder-derived default
-        run: |
-          [ "${{ steps.generate-custom-key.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0-eu-production.deploy-manifest.json" ]
-          grep -q -- "--bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements/1.0.0-eu-production.deploy-manifest.json --body" "$RUNNER_TEMP/aws-calls.log"
-
       - name: Existing deploy manifest is not overwritten
         id: generate-existing-deploy-manifest
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
-          component: blood-pressure-measurements
+          component: already-exists
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
           s3-folder: schemas
-          s3-key: schemas/already-exists.deploy-manifest.json
 
       - name: Existing deploy manifest fails loudly
         run: |
           [ "${{ steps.generate-existing-deploy-manifest.outcome }}" = "failure" ]
-
-      - name: generate-s3-key-line-break-should-fail
-        id: generate-s3-key-newline
-        continue-on-error: true
-        uses: ./generate-deploy-manifest
-        with:
-          component: blood-pressure-measurements
-          version: 1.0.0
-          target-environment: eu-production
-          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
-          s3-folder: schemas
-          s3-key: |-
-            invalid
-            key
-
-      - name: s3-key line break fails loudly
-        run: |
-          [ "${{ steps.generate-s3-key-newline.outcome }}" = "failure" ]
 
       - name: generate-missing-s3-folder-should-fail
         id: generate-missing-folder

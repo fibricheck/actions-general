@@ -279,11 +279,13 @@ Builds a traceability manifest JSON for a release, writes it locally, and upload
     # Version of the build (e.g. semver)
     # required
     version: '1.0.0'
-    # Repository the build came from, owner/name
-    # required
+    # Repository the build came from, owner/name. Required when commit-sha is
+    # given
+    # optional (default: '')
     repo: ${{ github.repository }}
-    # Commit sha the build was produced from
-    # required
+    # Commit sha the build was produced from. Required unless
+    # component-manifests is given
+    # optional (default: '')
     commit-sha: ${{ github.sha }}
     # Git tag for the commit, if one exists
     # optional (default: '')
@@ -303,11 +305,19 @@ Builds a traceability manifest JSON for a release, writes it locally, and upload
     # manifest's own retention period ends. commit-sha remains the durable
     # reference; treat this as a convenience lookup, not a guarantee.
     # optional (default: '')
-    build-id: ${{ github.run_id }}
-    # Comma-separated list of product identifiers this build produced
-    # (e.g. one per target environment)
+    ci-reference: ${{ github.run_id }}
+    # Comma-separated list of references to the build outputs: names of local
+    # files, or Docker image references on ECR
     # optional (default: '')
-    product-identifiers: 'blood-pressure-measurements-v1.0.0-eu-production,blood-pressure-measurements-v1.0.0-us-production'
+    build-output-references: ''
+    # Comma-separated list of existing component build manifests this
+    # manifest combines, as s3://manifests.fibricheck.com/<key> URIs (the
+    # s3-uri output of the action that created them). Each one must be a build
+    # manifest and must exist; the action fails
+    # before uploading anything if one does not. The existence check needs
+    # s3:GetObject on the referenced keys.
+    # optional (default: '')
+    component-manifests: ''
     # Unique Device Identifier, if applicable
     # optional (default: '')
     udi: '(01)00860001234567(21)A1B2C3'
@@ -336,17 +346,11 @@ Builds a traceability manifest JSON for a release, writes it locally, and upload
     # this action at a different bucket. The calling job must already have
     # AWS credentials configured (e.g. aws-actions/configure-aws-credentials)
     # — this action does not accept or configure credentials itself. Key
-    # defaults to <s3-folder>/<component>/<version>/[<target-environment>.][<build-number>.]<build-timestamp>.build-manifest.json,
-    # or s3-key if set. Uploads are create-only and fail if the chosen key
-    # already exists. Object Lock retention is applied by the bucket's own
+    # defaults to <s3-folder>/<component>/<version>[-<build-number>]/[<target-environment>.]build-manifest.json.
+    # Uploads are create-only and fail if the key already exists. Object Lock retention is applied by the bucket's own
     # default retention rule, not by this action — "test" is not exempt.
     # required
     s3-folder: 'schemas'
-    # Object key to upload to within the manifests bucket. If set, used as-is
-    # instead of the s3-folder-derived default key. Must not already exist!
-    # The upload will fail if it does.
-    # optional (default: '')
-    s3-key: 'schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T100000Z.build-manifest.json'
     # Files that belong to the build (e.g. archives, test results), one path
     # per line, relative to the working directory. A directory uploads all
     # files in it. Each file is uploaded next to the manifest, keeping its
@@ -355,8 +359,8 @@ Builds a traceability manifest JSON for a release, writes it locally, and upload
     # with a SHA256 checksum; a file that already exists with the same
     # checksum (a re-run after a partial upload) is accepted, one with a
     # different checksum fails the upload (see force-upload). Empty
-    # directories and files named *.build-manifest.json or
-    # *.deploy-manifest.json are rejected. The re-run check reads the existing
+    # directories and files named [*.]build-manifest.json or
+    # [*.]deploy-manifest.json are rejected. The re-run check reads the existing
     # file, so the caller needs s3:GetObject next to s3:PutObject. Download
     # them again with download-manifests.
     # optional (default: '')
@@ -451,7 +455,7 @@ Builds a deployment traceability manifest JSON, writes it locally, and uploads i
     # manifest is expected to already be an immutable, trustworthy record on
     # its own.
     # required
-    build-manifest-ref: 's3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/eu-production.146.2026-09-07T100000Z.build-manifest.json'
+    build-manifest-ref: 's3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0-146/eu-production.build-manifest.json'
     # When the deployment happened, as YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ.
     # Defaults to now. Pass this explicitly when recording a deployment
     # after the fact (e.g. a deploy triggered manually, such as pressing
@@ -471,17 +475,11 @@ Builds a deployment traceability manifest JSON, writes it locally, and uploads i
     # this action at a different bucket. The calling job must already have
     # AWS credentials configured (e.g. aws-actions/configure-aws-credentials)
     # — this action does not accept or configure credentials itself. Key
-    # defaults to <s3-folder>/<component>/<version>/<target-environment>.[<build-number>.]<deployment-timestamp>.deploy-manifest.json,
-    # or s3-key if set. Uploads are create-only and fail if the chosen key
-    # already exists. Object Lock retention is applied by the bucket's own
+    # defaults to <s3-folder>/<component>/<version>/<target-environment>.[<build-number>.]<deployment-timestamp>.deploy-manifest.json.
+    # Uploads are create-only and fail if the key already exists. Object Lock retention is applied by the bucket's own
     # default retention rule, not by this action — "test" is not exempt.
     # required
     s3-folder: 'schemas'
-    # Object key to upload to within the manifests bucket. If set, used as-is
-    # instead of the s3-folder-derived default key. Must not already exist!
-    # The upload will fail if it does.
-    # optional (default: '')
-    s3-key: 'schemas/blood-pressure-measurements/1.0.0/eu-production.146.2026-09-07T101502Z.deploy-manifest.json'
 
   # Outputs:
   #   manifest-json: The generated manifest, as a JSON string
