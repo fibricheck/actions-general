@@ -33,23 +33,25 @@ jobs:
         id: generate-build
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: schemas
+          folder: schemas
 
       - name: Generate deploy manifest with all fields
         id: generate-all-fields
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: eu-production
           build-number: '146'
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
           deploy-config: '{"rolloutPercentage":100}'
-          s3-folder: schemas
+          folder: schemas
 
       - name: manifest has all fields populated correctly
         run: |
@@ -64,7 +66,7 @@ jobs:
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.deploymentTimestamp' | tr -d ':')
           [ -n "$TIMESTAMP" ]
           [ -f "${{ steps.generate-all-fields.outputs.manifest-path }}" ]
-          [ "${{ steps.generate-all-fields.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/eu-production.146.${TIMESTAMP}.deploy-manifest.json" ]
+          [ "${{ steps.generate-all-fields.outputs.manifest-ref }}" = "schemas/blood-pressure-measurements/1.0.0/eu-production.146.${TIMESTAMP}.deploy-manifest.json" ]
           grep -q -- "--key schemas/blood-pressure-measurements/1.0.0/eu-production.146.${TIMESTAMP}.deploy-manifest.json --body" "$RUNNER_TEMP/aws-calls.log"
           grep -q -- "--if-none-match \*" "$RUNNER_TEMP/aws-calls.log"
 
@@ -72,64 +74,68 @@ jobs:
         id: generate-with-build-number
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: fibricheck-app-ios
           version: 2.16.0
           target-environment: eu-production
           build-number: "146"
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
-          s3-folder: app
+          folder: app
 
       - name: build-number is recorded in the manifest and the filename
         run: |
           MANIFEST='${{ steps.generate-with-build-number.outputs.manifest-json }}'
           [ "$(echo "$MANIFEST" | jq -r '.buildNumber')" = "146" ]
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.deploymentTimestamp' | tr -d ':')
-          [ "${{ steps.generate-with-build-number.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app-ios/2.16.0/eu-production.146.${TIMESTAMP}.deploy-manifest.json" ]
+          [ "${{ steps.generate-with-build-number.outputs.manifest-ref }}" = "app/fibricheck-app-ios/2.16.0/eu-production.146.${TIMESTAMP}.deploy-manifest.json" ]
 
       - name: Generate deploy manifest with an explicit backdated timestamp
         id: generate-backdated
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: us-production
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
           deployment-timestamp: "2026-08-01T00:00:00Z"
-          s3-folder: schemas
+          folder: schemas
 
       - name: explicit deployment-timestamp is used as-is
         run: |
           MANIFEST='${{ steps.generate-backdated.outputs.manifest-json }}'
           [ "$(echo "$MANIFEST" | jq -r '.deploymentTimestamp')" = "2026-08-01T00:00:00Z" ]
           [ "$(echo "$MANIFEST" | jq -r '.deployConfig')" = "null" ]
-          [ "${{ steps.generate-backdated.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/us-production.2026-08-01T000000Z.deploy-manifest.json" ]
+          [ "${{ steps.generate-backdated.outputs.manifest-ref }}" = "schemas/blood-pressure-measurements/1.0.0/us-production.2026-08-01T000000Z.deploy-manifest.json" ]
 
       - name: Generate deploy manifest with a date-only deployment-timestamp
         id: generate-date-only
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
           deployment-timestamp: "2026-08-02"
-          s3-folder: schemas
+          folder: schemas
 
       - name: date-only deployment-timestamp is normalized to midnight UTC
         run: |
           MANIFEST='${{ steps.generate-date-only.outputs.manifest-json }}'
           [ "$(echo "$MANIFEST" | jq -r '.deploymentTimestamp')" = "2026-08-02T00:00:00Z" ]
-          [ "${{ steps.generate-date-only.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/eu-production.2026-08-02T000000Z.deploy-manifest.json" ]
+          [ "${{ steps.generate-date-only.outputs.manifest-ref }}" = "schemas/blood-pressure-measurements/1.0.0/eu-production.2026-08-02T000000Z.deploy-manifest.json" ]
 
       - name: Generate deploy manifest with an unresolved build reference
         id: generate-unresolved-build-ref
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: does-not-exist
           version: 9.9.9
           target-environment: eu-production
           build-manifest-ref: manifests/build/does-not-exist-9.9.9.json
-          s3-folder: schemas
+          folder: schemas
 
       - name: build-manifest-ref recorded as-is, not validated
         run: |
@@ -140,11 +146,12 @@ jobs:
         id: generate-literal-data
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: "page's-component"
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: "s3://builds.example/page's-build.json?value=$(literal)"
-          s3-folder: pages
+          folder: pages
           deploy-config: |
             NOTE=customer's deployment
             COMMAND=$(this-must-not-run)
@@ -163,11 +170,12 @@ jobs:
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: "../../etc/passwd"
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: manifests/build/does-not-exist-9.9.9.json
-          s3-folder: schemas
+          folder: schemas
 
       - name: path-traversal component fails loudly
         run: |
@@ -178,12 +186,13 @@ jobs:
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: eu-production
           build-number: '../146'
           build-manifest-ref: manifests/build/blood-pressure-measurements-1.0.0.json
-          s3-folder: schemas
+          folder: schemas
 
       - name: path-traversal build-number fails loudly
         run: |
@@ -194,12 +203,13 @@ jobs:
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: manifests/build/blood-pressure-measurements-1.0.0.json
           deployment-timestamp: "../../../../tmp/file"
-          s3-folder: schemas
+          folder: schemas
 
       - name: invalid timestamp fails loudly
         run: |
@@ -210,13 +220,14 @@ jobs:
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: |-
             invalid
             component
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: manifests/build/blood-pressure-measurements-1.0.0.json
-          s3-folder: schemas
+          folder: schemas
 
       - name: line-break component fails loudly
         run: |
@@ -227,93 +238,99 @@ jobs:
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: already-exists
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
-          s3-folder: schemas
+          folder: schemas
 
       - name: Existing deploy manifest fails loudly
         run: |
           [ "${{ steps.generate-existing-deploy-manifest.outcome }}" = "failure" ]
 
-      - name: generate-missing-s3-folder-should-fail
+      - name: generate-missing-folder-should-fail
         id: generate-missing-folder
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
-          s3-folder: ""
+          folder: ""
 
-      - name: missing s3-folder fails loudly
+      - name: missing folder fails loudly
         run: |
           [ "${{ steps.generate-missing-folder.outcome }}" = "failure" ]
 
-      - name: generate-invalid-s3-folder-should-fail
+      - name: generate-invalid-folder-should-fail
         id: generate-bad-folder
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
-          s3-folder: shema
+          folder: shema
 
-      - name: invalid s3-folder fails loudly
+      - name: invalid folder fails loudly
         run: |
           [ "${{ steps.generate-bad-folder.outcome }}" = "failure" ]
 
-      - name: generate-s3-folder-test
-        id: generate-s3-folder-test
+      - name: generate-folder-test
+        id: generate-folder-test
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: eu-production
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
-          s3-folder: test
+          folder: test
 
-      - name: s3-folder value "test" is accepted
+      - name: folder value "test" is accepted
         run: |
-          MANIFEST='${{ steps.generate-s3-folder-test.outputs.manifest-json }}'
+          MANIFEST='${{ steps.generate-folder-test.outputs.manifest-json }}'
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.deploymentTimestamp' | tr -d ':')
-          [ "${{ steps.generate-s3-folder-test.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/test/blood-pressure-measurements/1.0.0/eu-production.${TIMESTAMP}.deploy-manifest.json" ]
+          [ "${{ steps.generate-folder-test.outputs.manifest-ref }}" = "test/blood-pressure-measurements/1.0.0/eu-production.${TIMESTAMP}.deploy-manifest.json" ]
 
       - name: generate-composite
         id: generate-composite
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: fibricheck-platform
           version: 3.0.0
           target-environment: eu-production
-          build-manifest-ref: s3://manifests.fibricheck.com/composites/fibricheck-platform/3.0.0/build-manifest.json
-          s3-folder: composites
-          component-manifests: s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json,s3://manifests.fibricheck.com/app/fibricheck-app-ios/2.16.0/eu-production.146.2026-09-03T141502Z.deploy-manifest.json
+          build-manifest-ref: composites/fibricheck-platform/3.0.0/build-manifest.json
+          folder: composites
+          component-manifests: schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json,app/fibricheck-app-ios/2.16.0/eu-production.146.2026-09-03T141502Z.deploy-manifest.json
 
       - name: composite lists its component manifests, checks each exists, and is uploaded to composites
         run: |
           MANIFEST='${{ steps.generate-composite.outputs.manifest-json }}'
-          [ "$(echo "$MANIFEST" | jq -c '.componentManifests')" = '["s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json","s3://manifests.fibricheck.com/app/fibricheck-app-ios/2.16.0/eu-production.146.2026-09-03T141502Z.deploy-manifest.json"]' ]
+          [ "$(echo "$MANIFEST" | jq -c '.componentManifests')" = '["schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json","app/fibricheck-app-ios/2.16.0/eu-production.146.2026-09-03T141502Z.deploy-manifest.json"]' ]
           grep -q -- "head-object --bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json" "$RUNNER_TEMP/aws-calls.log"
           grep -q -- "head-object --bucket manifests.fibricheck.com --key app/fibricheck-app-ios/2.16.0/eu-production.146.2026-09-03T141502Z.deploy-manifest.json" "$RUNNER_TEMP/aws-calls.log"
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.deploymentTimestamp' | tr -d ':')
-          [ "${{ steps.generate-composite.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/composites/fibricheck-platform/3.0.0/eu-production.${TIMESTAMP}.deploy-manifest.json" ]
+          [ "${{ steps.generate-composite.outputs.manifest-ref }}" = "composites/fibricheck-platform/3.0.0/eu-production.${TIMESTAMP}.deploy-manifest.json" ]
 
       - name: generate-composite-with-missing-component-should-fail
         id: generate-composite-missing
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: composite-missing
           version: 3.0.0
           target-environment: eu-production
-          build-manifest-ref: s3://manifests.fibricheck.com/composites/composite-missing/3.0.0/build-manifest.json
-          s3-folder: composites
-          component-manifests: s3://manifests.fibricheck.com/schemas/missing-component/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json
+          build-manifest-ref: composites/composite-missing/3.0.0/build-manifest.json
+          folder: composites
+          component-manifests: schemas/missing-component/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json
 
       - name: a missing component manifest fails, and nothing is uploaded
         run: |
@@ -325,12 +342,13 @@ jobs:
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: composite-build-manifest
           version: 3.0.0
           target-environment: eu-production
-          build-manifest-ref: s3://manifests.fibricheck.com/composites/composite-build-manifest/3.0.0/build-manifest.json
-          s3-folder: composites
-          component-manifests: s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/build-manifest.json
+          build-manifest-ref: composites/composite-build-manifest/3.0.0/build-manifest.json
+          folder: composites
+          component-manifests: schemas/blood-pressure-measurements/1.0.0/build-manifest.json
 
       - name: a component manifest that is not a deploy manifest fails, and nothing is checked or uploaded
         run: |
@@ -338,34 +356,36 @@ jobs:
           ! grep -q -- "head-object .*--key schemas/blood-pressure-measurements/1.0.0/build-manifest.json" "$RUNNER_TEMP/aws-calls.log"
           ! grep -q -- "--key composites/composite-build-manifest/" "$RUNNER_TEMP/aws-calls.log"
 
-      - name: generate-composite-with-other-bucket-should-fail
-        id: generate-composite-other-bucket
+      - name: generate-composite-with-uri-should-fail
+        id: generate-composite-uri
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
-          component: composite-other-bucket
+          role-arn: ''
+          component: composite-uri
           version: 3.0.0
           target-environment: eu-production
-          build-manifest-ref: s3://manifests.fibricheck.com/composites/composite-other-bucket/3.0.0/build-manifest.json
-          s3-folder: composites
-          component-manifests: s3://some-other-bucket/schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json
+          build-manifest-ref: composites/composite-uri/3.0.0/build-manifest.json
+          folder: composites
+          component-manifests: s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json
 
       - name: a component manifest outside the manifests bucket fails, and nothing is uploaded
         run: |
-          [ "${{ steps.generate-composite-other-bucket.outcome }}" = "failure" ]
-          ! grep -q -- "--key composites/composite-other-bucket/" "$RUNNER_TEMP/aws-calls.log"
+          [ "${{ steps.generate-composite-uri.outcome }}" = "failure" ]
+          ! grep -q -- "--key composites/composite-uri/" "$RUNNER_TEMP/aws-calls.log"
 
       - name: generate-composite-outside-composites-folder-should-fail
         id: generate-composite-wrong-folder
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: composite-wrong-folder
           version: 3.0.0
           target-environment: eu-production
-          build-manifest-ref: s3://manifests.fibricheck.com/composites/composite-wrong-folder/3.0.0/build-manifest.json
-          s3-folder: test
-          component-manifests: s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json
+          build-manifest-ref: composites/composite-wrong-folder/3.0.0/build-manifest.json
+          folder: test
+          component-manifests: schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json
 
       - name: a composite outside the composites folder fails, and nothing is uploaded
         run: |
@@ -377,11 +397,12 @@ jobs:
         continue-on-error: true
         uses: ./generate-deploy-manifest
         with:
+          role-arn: ''
           component: regular-in-composite
           version: 3.0.0
           target-environment: eu-production
           build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
-          s3-folder: composites
+          folder: composites
 
       - name: a regular deploy manifest in the composites folder fails, and nothing is uploaded
         run: |

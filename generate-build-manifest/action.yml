@@ -1,5 +1,5 @@
 name: 'Generate Build Manifest'
-description: 'Builds a traceability manifest JSON, writes it locally, and uploads it to the shared FibriCheck manifests bucket. Does not commit or push.'
+description: 'Builds a traceability manifest JSON, writes it locally, and stores it in the shared FibriCheck manifests store. Does not commit or push.'
 inputs:
   component:
     description: 'Name of the component or schema that was built'
@@ -42,10 +42,10 @@ inputs:
     default: ''
   component-manifests:
     description: >
-      Comma-separated list of existing component build manifests this manifest combines, as
-      s3://manifests.fibricheck.com/<key> URIs (the s3-uri output of the action that created them).
-      Each one must be a build manifest and must exist; the action fails before uploading anything if one does not. The existence
-      check needs s3:GetObject on the referenced keys.
+      Comma-separated list of existing component build manifests this manifest combines, as manifest
+      references (the manifest-ref output of the action that created them, e.g.
+      tasks/delete-user/1.1.7/build-manifest.json). Each one must be a build manifest and must exist; the
+      action fails before uploading anything if one does not.
     required: false
     default: ''
   udi:
@@ -67,14 +67,14 @@ inputs:
     description: 'When the build actually happened, as YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ. Defaults to now. Pass this explicitly when recording a build after the fact (e.g. backfilling a manifest for a build that predates this action). A date-only value is normalized to midnight UTC.'
     required: false
     default: ''
-  s3-folder:
+  folder:
     description: >
-      Top-level folder within the manifests bucket: app, pages, schemas, tasks, packages, test, or composites.
+      Top-level folder within the manifests store: app, pages, schemas, tasks, packages, test, or composites.
       composites is required when component-manifests is given, and not allowed otherwise.
-      Required — every manifest is uploaded. Uploads always go to the shared FibriCheck manifests bucket
-      (manifests.fibricheck.com). The key defaults to <s3-folder>/<component>/<version>[-<build-number>]/[<target-environment>.]build-manifest.json.
-      Uploads are create-only and fail if the key already exists.
-      Object Lock retention is applied by the bucket's own default retention rule, not by this
+      Required — every manifest is stored. The manifest is stored as
+      <folder>/<component>/<version>[-<build-number>]/[<target-environment>.]build-manifest.json.
+      Storing is create-only and fails if the manifest already exists.
+      Retention is applied by the store's own default retention rule, not by this
       action — "test" is not exempt from it.
     required: true
   files:
@@ -85,7 +85,6 @@ inputs:
       its files are there. Uploads are create-only with a SHA256 checksum; a file that already exists with the same
       checksum (a re-run after a partial upload) is accepted, one with a different checksum fails the upload (see
       force-upload). Empty directories and files named [*.]build-manifest.json or [*.]deploy-manifest.json are rejected.
-      The re-run check reads the existing file, so the caller needs s3:GetObject next to s3:PutObject.
     required: false
     default: ''
   force-upload:
@@ -94,6 +93,14 @@ inputs:
       create-only.
     required: false
     default: 'false'
+  role-arn:
+    description: >
+      IAM role assumed through GitHub OIDC to access the manifests store. The calling job needs the
+      id-token: write permission. The credentials are only used by this action and never replace AWS
+      credentials configured elsewhere in the job. Set to '' to skip authentication and use the AWS
+      credentials already configured in the job instead.
+    required: false
+    default: 'arn:aws:iam::964503429135:role/github-manifests'
 outputs:
   manifest-json:
     description: 'The generated manifest, as a JSON string'
@@ -101,15 +108,32 @@ outputs:
   manifest-path:
     description: 'Path the manifest was written to'
     value: ${{ steps.generate.outputs.manifest-path }}
-  s3-uri:
-    description: 'The s3://bucket/key URI the manifest was uploaded to'
-    value: ${{ steps.generate.outputs.s3-uri }}
-  files-s3-uris:
-    description: 'The s3://bucket/key URIs the files were uploaded to, one per line'
-    value: ${{ steps.generate.outputs.files-s3-uris }}
+  manifest-ref:
+    description: 'Reference to the stored manifest, e.g. tasks/delete-user/1.1.7/build-manifest.json'
+    value: ${{ steps.generate.outputs.manifest-ref }}
+  file-refs:
+    description: 'References to the stored files, one per line'
+    value: ${{ steps.generate.outputs.file-refs }}
 runs:
   using: 'composite'
   steps:
+    - name: Check OIDC permission
+      if: inputs.role-arn != ''
+      shell: bash
+      run: |
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+          echo "::error::the calling job needs the id-token: write permission to authenticate to AWS"
+          exit 1
+        fi
+    - name: Authenticate to AWS
+      id: aws-auth
+      if: inputs.role-arn != ''
+      uses: aws-actions/configure-aws-credentials@v6.2.4
+      with:
+        role-to-assume: ${{ inputs.role-arn }}
+        aws-region: eu-central-1
+        output-credentials: true
+        output-env-credentials: false
     - name: Generate
       id: generate
       shell: bash
@@ -128,11 +152,23 @@ runs:
         INPUT_BUILD_CONFIG: ${{ inputs.build-config }}
         INPUT_TOOLING: ${{ inputs.tooling }}
         INPUT_BUILD_TIMESTAMP: ${{ inputs.build-timestamp }}
-        INPUT_S3_FOLDER: ${{ inputs.s3-folder }}
+        INPUT_FOLDER: ${{ inputs.folder }}
         INPUT_FILES: ${{ inputs.files }}
         INPUT_FORCE_UPLOAD: ${{ inputs.force-upload }}
+        MANIFESTS_AWS_ACCESS_KEY_ID: ${{ steps.aws-auth.outputs.aws-access-key-id }}
+        MANIFESTS_AWS_SECRET_ACCESS_KEY: ${{ steps.aws-auth.outputs.aws-secret-access-key }}
+        MANIFESTS_AWS_SESSION_TOKEN: ${{ steps.aws-auth.outputs.aws-session-token }}
       run: |
         set -euo pipefail
+
+        # The manifests role's credentials apply to this step only, other AWS credentials in the job are left as they are
+        if [ -n "$MANIFESTS_AWS_ACCESS_KEY_ID" ]; then
+          unset AWS_PROFILE AWS_DEFAULT_PROFILE
+          export AWS_ACCESS_KEY_ID="$MANIFESTS_AWS_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$MANIFESTS_AWS_SECRET_ACCESS_KEY"
+          export AWS_SESSION_TOKEN="$MANIFESTS_AWS_SESSION_TOKEN"
+          export AWS_REGION="eu-central-1"
+        fi
 
         validate_no_path_traversal() {
           local name="$1" value="$2"
@@ -166,10 +202,10 @@ runs:
             exit 1
             ;;
         esac
-        case "$INPUT_S3_FOLDER" in
+        case "$INPUT_FOLDER" in
           app|pages|schemas|tasks|packages|test|composites) ;;
           *)
-            echo "::error::s3-folder must be one of: app, pages, schemas, tasks, packages, test, composites — got: ${INPUT_S3_FOLDER}"
+            echo "::error::folder must be one of: app, pages, schemas, tasks, packages, test, composites — got: ${INPUT_FOLDER}"
             exit 1
             ;;
         esac
@@ -226,22 +262,24 @@ runs:
         fi
 
         # Composite manifests live in the composites folder, and only there
-        if [ "$(jq 'length' <<< "$COMPONENT_MANIFESTS")" -gt 0 ] && [ "$INPUT_S3_FOLDER" != "composites" ]; then
-          echo "::error::s3-folder must be composites when component-manifests is given — got: ${INPUT_S3_FOLDER}"
+        if [ "$(jq 'length' <<< "$COMPONENT_MANIFESTS")" -gt 0 ] && [ "$INPUT_FOLDER" != "composites" ]; then
+          echo "::error::folder must be composites when component-manifests is given — got: ${INPUT_FOLDER}"
           exit 1
         fi
-        if [ "$(jq 'length' <<< "$COMPONENT_MANIFESTS")" -eq 0 ] && [ "$INPUT_S3_FOLDER" = "composites" ]; then
-          echo "::error::s3-folder composites requires component-manifests"
+        if [ "$(jq 'length' <<< "$COMPONENT_MANIFESTS")" -eq 0 ] && [ "$INPUT_FOLDER" = "composites" ]; then
+          echo "::error::folder composites requires component-manifests"
           exit 1
         fi
 
         HEAD_ERR=$(mktemp)
         while IFS= read -r REF; do
-          KEY="${REF#"s3://${S3_BUCKET}/"}"
-          if [ "$KEY" = "$REF" ] || [ -z "$KEY" ]; then
-            echo "::error::component-manifests must be s3://${S3_BUCKET}/<key> URIs — got: ${REF}"
-            exit 1
-          fi
+          KEY="$REF"
+          case "/$KEY/" in
+            *//*|*/../*|*/./*)
+              echo "::error::component-manifests must be manifest references (the manifest-ref output of the action that created them) — got: ${REF}"
+              exit 1
+              ;;
+          esac
           if [[ ".${KEY##*/}" != *.build-manifest.json ]]; then
             echo "::error::component-manifests must reference build manifests — got: ${REF}"
             exit 1
@@ -346,10 +384,10 @@ runs:
         [ -n "$INPUT_BUILD_NUMBER" ] && VERSION_FOLDER="${VERSION_FOLDER}-${INPUT_BUILD_NUMBER}"
         FILENAME_PREFIX=""
         [ -n "$INPUT_TARGET_ENVIRONMENT" ] && FILENAME_PREFIX="${INPUT_TARGET_ENVIRONMENT}."
-        S3_KEY="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}/${VERSION_FOLDER}/${FILENAME_PREFIX}build-manifest.json"
+        S3_KEY="${INPUT_FOLDER}/${INPUT_COMPONENT}/${VERSION_FOLDER}/${FILENAME_PREFIX}build-manifest.json"
 
         # Files are uploaded before the manifest, so a manifest is only created once all its files exist.
-        FILES_S3_URIS=""
+        FILE_REFS=""
         if [ "${#FILES[@]}" -gt 0 ]; then
           FILES_PREFIX="${S3_KEY%/*}"
           # Checked before the first upload, so a rejected file never leaves earlier files behind
@@ -367,7 +405,7 @@ runs:
             if [ "$INPUT_FORCE_UPLOAD" = "true" ]; then
               aws s3api put-object --bucket "$S3_BUCKET" --key "$FILE_KEY" --body "$FILE" \
                 --checksum-algorithm SHA256 --checksum-sha256 "$CHECKSUM" >/dev/null
-              FILES_S3_URIS="${FILES_S3_URIS}s3://${S3_BUCKET}/${FILE_KEY}"$'\n'
+              FILE_REFS="${FILE_REFS}${FILE_KEY}"$'\n'
               continue
             fi
 
@@ -382,22 +420,21 @@ runs:
               EXISTING=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$FILE_KEY" --checksum-mode ENABLED \
                 --query ChecksumSHA256 --output text)
               if [ "$EXISTING" != "$CHECKSUM" ]; then
-                echo "::error::s3://${S3_BUCKET}/${FILE_KEY} already exists with different content"
+                echo "::error::${FILE_KEY} already exists with different content"
                 exit 1
               fi
-              echo "s3://${S3_BUCKET}/${FILE_KEY} already exists with the same content"
+              echo "${FILE_KEY} already exists with the same content"
             fi
-            FILES_S3_URIS="${FILES_S3_URIS}s3://${S3_BUCKET}/${FILE_KEY}"$'\n'
+            FILE_REFS="${FILE_REFS}${FILE_KEY}"$'\n'
           done
           rm -f "$UPLOAD_ERR"
         fi
 
         # Create-only upload: never create a newer object version under an existing manifest key.
         aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" --if-none-match '*' >/dev/null
-        S3_URI="s3://${S3_BUCKET}/${S3_KEY}"
 
         DELIMITER="manifest_$(date +%s)_$RANDOM"
         printf 'manifest-path=%s\n' "$OUTPUT_PATH" >> "$GITHUB_OUTPUT"
-        printf 's3-uri=%s\n' "$S3_URI" >> "$GITHUB_OUTPUT"
-        printf 'files-s3-uris<<%s\n%s%s\n' "$DELIMITER" "$FILES_S3_URIS" "$DELIMITER" >> "$GITHUB_OUTPUT"
+        printf 'manifest-ref=%s\n' "$S3_KEY" >> "$GITHUB_OUTPUT"
+        printf 'file-refs<<%s\n%s%s\n' "$DELIMITER" "$FILE_REFS" "$DELIMITER" >> "$GITHUB_OUTPUT"
         printf 'manifest-json<<%s\n%s\n%s\n' "$DELIMITER" "$MANIFEST" "$DELIMITER" >> "$GITHUB_OUTPUT"

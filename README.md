@@ -239,7 +239,7 @@ git push -f origin v5
 
 ## AWS authentication for manifest actions
 
-`generate-build-manifest`, `generate-deploy-manifest` and `download-manifests` access the shared FibriCheck manifests bucket. AWS authentication must happen in the **calling repository**, immediately before invoking the manifest action:
+`generate-build-manifest`, `generate-deploy-manifest`, `download-manifests` and `latest-version` access the shared FibriCheck manifests store. They authenticate themselves: each one assumes `arn:aws:iam::964503429135:role/github-manifests` through GitHub OIDC. The calling job only needs the `id-token: write` permission:
 
 ```yaml
 permissions:
@@ -247,25 +247,22 @@ permissions:
   id-token: write
 
 steps:
-  - name: Authenticate to AWS for manifest publishing
-    uses: aws-actions/configure-aws-credentials@v6.2.4
-    with:
-      role-to-assume: ${{ vars.AWS_MANIFEST_PUBLISHER_ROLE_ARN }}
-      aws-region: eu-central-1
-
   - name: Generate build manifest
     uses: fibricheck/actions-general/generate-build-manifest@v5
     with:
       # ...
 ```
 
-The manifest actions deliberately do not request an OIDC token, assume a role, or accept AWS credentials. The calling workflow owns the GitHub `id-token: write` permission and is the repository/branch/environment identity evaluated by the AWS trust policy. Keeping authentication there also allows callers to use the appropriate role or AWS account and keeps authentication failures separate from manifest generation and upload failures.
+The role's credentials are only used inside the action. They are never written to the job environment, so AWS credentials configured elsewhere in the job are left as they are.
 
-Run input and production-context validation before authenticating so invalid runs do not request AWS credentials unnecessarily.
+The OIDC token identifies the calling repository, not `actions-general`, so the role's trust policy must allow the calling repositories.
 
+`role-arn` overrides the role. Set it to `''` to skip authentication and use the AWS credentials already configured in the job.
+
+`download-manifests` and `latest-version` validate their inputs before authenticating. `generate-build-manifest` and `generate-deploy-manifest` authenticate first, because their validation checks that the component manifests exist.
 ## generate-build-manifest
 
-Builds a traceability manifest JSON for a release, writes it locally, and uploads it to the shared FibriCheck manifests bucket. It does not commit or push to Git.
+Builds a traceability manifest JSON for a release, writes it locally, and stores it in the shared FibriCheck manifests store. It does not commit or push to Git.
 
 <!-- start usage -->
 ```yaml
@@ -311,11 +308,9 @@ Builds a traceability manifest JSON for a release, writes it locally, and upload
     # optional (default: '')
     build-output-references: ''
     # Comma-separated list of existing component build manifests this
-    # manifest combines, as s3://manifests.fibricheck.com/<key> URIs (the
-    # s3-uri output of the action that created them). Each one must be a build
-    # manifest and must exist; the action fails
-    # before uploading anything if one does not. The existence check needs
-    # s3:GetObject on the referenced keys.
+    # manifest combines, as manifest references (the manifest-ref output of
+    # the action that created them). Each one must be a build manifest and
+    # must exist; the action fails before uploading anything if one does not.
     # optional (default: '')
     component-manifests: ''
     # Unique Device Identifier, if applicable
@@ -339,19 +334,15 @@ Builds a traceability manifest JSON for a release, writes it locally, and upload
     # action). A date-only value is normalized to midnight UTC.
     # optional (default: '')
     build-timestamp: ''
-    # Top-level folder within the manifests bucket: app, pages, schemas,
+    # Top-level folder within the manifests store: app, pages, schemas,
     # tasks, packages, test, or composites. composites is required when
-    # component-manifests is given, and not allowed otherwise. Required — every manifest is uploaded, there
-    # is no local-only mode. Uploads always go to the shared FibriCheck
-    # manifests bucket (manifests.fibricheck.com); there is no way to point
-    # this action at a different bucket. The calling job must already have
-    # AWS credentials configured (e.g. aws-actions/configure-aws-credentials)
-    # — this action does not accept or configure credentials itself. Key
-    # defaults to <s3-folder>/<component>/<version>[-<build-number>]/[<target-environment>.]build-manifest.json.
-    # Uploads are create-only and fail if the key already exists. Object Lock retention is applied by the bucket's own
+    # component-manifests is given, and not allowed otherwise. Required — every manifest is stored, there
+    # is no local-only mode. The manifest is stored as
+    # <folder>/<component>/<version>[-<build-number>]/[<target-environment>.]build-manifest.json.
+    # Storing is create-only and fails if the manifest already exists. Retention is applied by the store's own
     # default retention rule, not by this action — "test" is not exempt.
     # required
-    s3-folder: 'schemas'
+    folder: 'schemas'
     # Files that belong to the build (e.g. archives, test results), one path
     # per line, relative to the working directory. A directory uploads all
     # files in it. Each file is uploaded next to the manifest, keeping its
@@ -361,9 +352,8 @@ Builds a traceability manifest JSON for a release, writes it locally, and upload
     # checksum (a re-run after a partial upload) is accepted, one with a
     # different checksum fails the upload (see force-upload). Empty
     # directories and files named [*.]build-manifest.json or
-    # [*.]deploy-manifest.json are rejected. The re-run check reads the existing
-    # file, so the caller needs s3:GetObject next to s3:PutObject. Download
-    # them again with download-manifests.
+    # [*.]deploy-manifest.json are rejected. Download them again with
+    # download-manifests.
     # optional (default: '')
     files: |
       code.zip
@@ -372,12 +362,17 @@ Builds a traceability manifest JSON for a release, writes it locally, and upload
     # version. The manifest itself stays create-only.
     # optional (default: 'false')
     force-upload: 'false'
+    # IAM role assumed through GitHub OIDC to access the manifests store. The
+    # calling job needs the id-token: write permission. Set to '' to skip
+    # authentication and use the AWS credentials already configured in the job.
+    # optional (default: arn:aws:iam::964503429135:role/github-manifests)
+    role-arn: 'arn:aws:iam::964503429135:role/github-manifests'
 
   # Outputs:
   #   manifest-json: The generated manifest, as a JSON string
   #   manifest-path: Path the manifest was written to
-  #   s3-uri: The s3://bucket/key it was uploaded to
-  #   files-s3-uris: The s3://bucket/key URIs of the files, one per line
+  #   manifest-ref: Reference to the stored manifest
+  #   file-refs: References to the stored files, one per line
 - name: Echo
   run: |
     echo "manifest-path: ${{ steps.generate-build-manifest.outputs.manifest-path }}"
@@ -390,7 +385,7 @@ The generated manifest can contain runtime-visible configuration and must not be
 
 ## download-manifests
 
-Downloads everything stored under `s3://manifests.fibricheck.com/<s3-folder>/<component>/<version>/`: its manifests and the files uploaded with them (see `files` of `generate-build-manifest`). Files uploaded with a SHA256 checksum are verified against it. Requires `s3:ListBucket` on the prefix and `s3:GetObject` on its objects.
+Downloads everything stored under `<folder>/<component>/<version>/`: its manifests and the files uploaded with them (see `files` of `generate-build-manifest`). Files uploaded with a SHA256 checksum are verified against it.
 
 <!-- start usage -->
 ```yaml
@@ -404,10 +399,10 @@ Downloads everything stored under `s3://manifests.fibricheck.com/<s3-folder>/<co
     # Version (e.g. semver)
     # required
     version: '1.1.7'
-    # Top-level folder within the manifests bucket: app, pages, schemas,
+    # Top-level folder within the manifests store: app, pages, schemas,
     # tasks, packages, test, or composites
     # required
-    s3-folder: 'tasks'
+    folder: 'tasks'
     # Local directory to download into
     # optional (default: manifests/download/<component>/<version>)
     path: ''
@@ -415,6 +410,11 @@ Downloads everything stored under `s3://manifests.fibricheck.com/<s3-folder>/<co
     # output is 'false' instead
     # optional (default: 'true')
     fail-if-missing: 'true'
+    # IAM role assumed through GitHub OIDC to access the manifests store. The
+    # calling job needs the id-token: write permission. Set to '' to skip
+    # authentication and use the AWS credentials already configured in the job.
+    # optional (default: arn:aws:iam::964503429135:role/github-manifests)
+    role-arn: 'arn:aws:iam::964503429135:role/github-manifests'
 
   # Outputs:
   #   found: 'true' when anything was stored for this version and downloaded
@@ -428,9 +428,52 @@ Downloads everything stored under `s3://manifests.fibricheck.com/<s3-folder>/<co
 
 - [Example](./download-manifests/example.yml)
 
+## latest-version
+
+Finds the highest version of a component that has a build manifest, and all build manifests of that version: the highest `<version>[-<build-number>]` folder under `<folder>/<component>/` holding a `build-manifest.json` or `*.build-manifest.json` (timestamped and environment-prefixed ones included). With `version` set, it returns the build manifests of that version instead. Only `<major>.<minor>.<patch>[-<build-number>]` folders are considered, compared number by number: `1.10.0` is higher than `1.9.0`, `2.16.0-146` is higher than `2.16.0-9`, and `2.16.0` is lower than `2.16.0-1`. Other folder names (e.g. `v1.0.0`, `1.2.0-rc.1`) are never the highest version, but their build manifests are still returned when `version` names them.
+
+<!-- start usage -->
+```yaml
+- name: Latest Version
+  id: latest-version
+  uses: fibricheck/actions-general/latest-version@v5
+  with:
+    # Name of the component or schema
+    # required
+    component: 'delete-user'
+    # Top-level folder within the manifests store: app, pages, schemas,
+    # tasks, packages, test, or composites
+    # required
+    folder: 'tasks'
+    # Version folder, <version>[-<build-number>], to return the build
+    # manifests of instead of the highest one
+    # optional
+    version: ''
+    # Fail when no build manifest is found. When 'false', the found
+    # output is 'false' instead
+    # optional (default: 'true')
+    fail-if-missing: 'true'
+    # IAM role assumed through GitHub OIDC to access the manifests store. The
+    # calling job needs the id-token: write permission. Set to '' to skip
+    # authentication and use the AWS credentials already configured in the job.
+    # optional (default: arn:aws:iam::964503429135:role/github-manifests)
+    role-arn: 'arn:aws:iam::964503429135:role/github-manifests'
+
+  # Outputs:
+  #   found: 'true' when a build manifest was found
+  #   version: Highest version folder, <version>[-<build-number>], or the given version
+  #   build-manifest-refs: Comma-separated references to all build manifests of that version
+- name: Echo
+  run: |
+    echo "version: ${{ steps.latest-version.outputs.version }}"
+```
+<!-- end usage -->
+
+- [Example](./latest-version/example.yml)
+
 ## generate-deploy-manifest
 
-Builds a deployment traceability manifest JSON, writes it locally, and uploads it to the shared FibriCheck manifests bucket. It does not commit or push to Git. Only call this after a deploy has actually succeeded — the manifest's existence is itself the success signal, there is no separate outcome field.
+Builds a deployment traceability manifest JSON, writes it locally, and stores it in the shared FibriCheck manifests store. It does not commit or push to Git. Only call this after a deploy has actually succeeded — the manifest's existence is itself the success signal, there is no separate outcome field.
 
 <!-- start usage -->
 ```yaml
@@ -450,13 +493,13 @@ Builds a deployment traceability manifest JSON, writes it locally, and uploads i
     # Platform build number, when the deployed component has one
     # optional (default: '')
     build-number: '146'
-    # Reference to the build manifest for this version — wherever it lives (an
-    # S3 URI, a repo path, whatever the caller's storage convention is).
-    # Recorded as-is; not read, fetched, or validated, since the build
+    # Reference to the build manifest for this version: the manifest-ref
+    # output of generate-build-manifest. Recorded as-is; not read, fetched,
+    # or validated, since the build
     # manifest is expected to already be an immutable, trustworthy record on
     # its own.
     # required
-    build-manifest-ref: 's3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0-146/eu-production.build-manifest.json'
+    build-manifest-ref: 'schemas/blood-pressure-measurements/1.0.0-146/eu-production.build-manifest.json'
     # When the deployment happened, as YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ.
     # Defaults to now. Pass this explicitly when recording a deployment
     # after the fact (e.g. a deploy triggered manually, such as pressing
@@ -470,31 +513,31 @@ Builds a deployment traceability manifest JSON, writes it locally, and uploads i
     # optional (default: '')
     deploy-config: '{"rolloutPercentage":100}'
     # Comma-separated list of existing component deploy manifests this
-    # manifest combines, as s3://manifests.fibricheck.com/<key> URIs (the
-    # s3-uri output of the action that created them). Each one must be a
-    # deploy manifest and must exist; the action fails before uploading
-    # anything if one does not. The existence check needs s3:GetObject on the
-    # referenced keys. s3-folder must be composites when this is given.
+    # manifest combines, as manifest references (the manifest-ref output of
+    # the action that created them). Each one must be a deploy manifest and
+    # must exist; the action fails before uploading anything if one does not.
+    # folder must be composites when this is given.
     # optional (default: '')
     component-manifests: ''
-    # Top-level folder within the manifests bucket: app, pages, schemas,
+    # Top-level folder within the manifests store: app, pages, schemas,
     # tasks, packages, test, or composites. composites is required when
-    # component-manifests is given, and not allowed otherwise. Required — every manifest is uploaded, there
-    # is no local-only mode. Uploads always go to the shared FibriCheck
-    # manifests bucket (manifests.fibricheck.com); there is no way to point
-    # this action at a different bucket. The calling job must already have
-    # AWS credentials configured (e.g. aws-actions/configure-aws-credentials)
-    # — this action does not accept or configure credentials itself. Key
-    # defaults to <s3-folder>/<component>/<version>/<target-environment>.[<build-number>.]<deployment-timestamp>.deploy-manifest.json.
-    # Uploads are create-only and fail if the key already exists. Object Lock retention is applied by the bucket's own
+    # component-manifests is given, and not allowed otherwise. Required — every manifest is stored, there
+    # is no local-only mode. The manifest is stored as
+    # <folder>/<component>/<version>/<target-environment>.[<build-number>.]<deployment-timestamp>.deploy-manifest.json.
+    # Storing is create-only and fails if the manifest already exists. Retention is applied by the store's own
     # default retention rule, not by this action — "test" is not exempt.
     # required
-    s3-folder: 'schemas'
+    folder: 'schemas'
+    # IAM role assumed through GitHub OIDC to access the manifests store. The
+    # calling job needs the id-token: write permission. Set to '' to skip
+    # authentication and use the AWS credentials already configured in the job.
+    # optional (default: arn:aws:iam::964503429135:role/github-manifests)
+    role-arn: 'arn:aws:iam::964503429135:role/github-manifests'
 
   # Outputs:
   #   manifest-json: The generated manifest, as a JSON string
   #   manifest-path: Path the manifest was written to
-  #   s3-uri: The s3://bucket/key it was uploaded to
+  #   manifest-ref: Reference to the stored manifest
 - name: Echo
   run: |
     echo "manifest-path: ${{ steps.generate-deploy-manifest.outputs.manifest-path }}"

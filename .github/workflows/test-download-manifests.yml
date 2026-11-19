@@ -55,9 +55,10 @@ jobs:
         id: download
         uses: ./download-manifests
         with:
+          role-arn: ''
           component: delete-user
           version: 1.1.7
-          s3-folder: tasks
+          folder: tasks
 
       - name: everything stored for the version is downloaded
         run: |
@@ -75,9 +76,10 @@ jobs:
         id: download-custom-path
         uses: ./download-manifests
         with:
+          role-arn: ''
           component: delete-user
           version: 1.1.7
-          s3-folder: tasks
+          folder: tasks
           path: release/
 
       - name: custom path is used
@@ -89,9 +91,10 @@ jobs:
         id: download-missing-soft
         uses: ./download-manifests
         with:
+          role-arn: ''
           component: delete-user
           version: 9.9.9
-          s3-folder: tasks
+          folder: tasks
           fail-if-missing: 'false'
 
       - name: missing version reports found false
@@ -103,9 +106,10 @@ jobs:
         continue-on-error: true
         uses: ./download-manifests
         with:
+          role-arn: ''
           component: delete-user
           version: 9.9.9
-          s3-folder: tasks
+          folder: tasks
 
       - name: missing version fails loudly
         run: |
@@ -119,9 +123,10 @@ jobs:
         continue-on-error: true
         uses: ./download-manifests
         with:
+          role-arn: ''
           component: delete-user
           version: 1.1.7
-          s3-folder: tasks
+          folder: tasks
           path: corrupt
 
       - name: checksum mismatch fails loudly
@@ -133,9 +138,10 @@ jobs:
         continue-on-error: true
         uses: ./download-manifests
         with:
+          role-arn: ''
           component: delete-user
           version: ../../etc
-          s3-folder: tasks
+          folder: tasks
 
       - name: traversal fails loudly
         run: |
@@ -149,9 +155,10 @@ jobs:
         continue-on-error: true
         uses: ./download-manifests
         with:
+          role-arn: ''
           component: delete-user
           version: 1.1.7
-          s3-folder: tasks
+          folder: tasks
           fail-if-missing: 'false'
           path: aws-down
 

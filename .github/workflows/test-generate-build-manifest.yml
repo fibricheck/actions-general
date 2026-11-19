@@ -49,6 +49,7 @@ jobs:
         id: generate-structured-config
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: fibricheck-app
           version: 2.16.0
           repo: fibricheck/fibricheck_react_native
@@ -59,7 +60,7 @@ jobs:
           build-output-references: 123456789012.dkr.ecr.eu-west-1.amazonaws.com/fibricheck-app:2.16.0,FibriCheck-2.16.0-146-eu-prod.ipa
           build-config: '{"region":"eu","FEATURE_ECG":true}'
           tooling: '{"node":"20.19.4","xcode":"16.4","gradle":"8.13"}'
-          s3-folder: app
+          folder: app
 
       - name: manifest has all fields populated correctly
         run: |
@@ -79,17 +80,18 @@ jobs:
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
           [ -f "${{ steps.generate-structured-config.outputs.manifest-path }}" ]
           [ "${{ steps.generate-structured-config.outputs.manifest-path }}" = "manifests/build/fibricheck-app-2.16.0-${TIMESTAMP}.json" ]
-          [ "${{ steps.generate-structured-config.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app/2.16.0-146/eu-production.build-manifest.json" ]
+          [ "${{ steps.generate-structured-config.outputs.manifest-ref }}" = "app/fibricheck-app/2.16.0-146/eu-production.build-manifest.json" ]
 
       - name: Generate build manifest with raw-text configuration
         id: generate-raw-text-config
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: pages-portal
           version: 1.0.0
           repo: fibricheck/pages-portal
           commit-sha: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
-          s3-folder: pages
+          folder: pages
           build-config: |
             VITE_FEATURE_US=false
             VITE_TARGET_HOST=https://api.example.com?token=abc=123
@@ -105,11 +107,12 @@ jobs:
         id: generate-without-optional-fields
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: schemas
+          folder: schemas
 
       - name: optional fields default to null when omitted
         run: |
@@ -123,19 +126,20 @@ jobs:
           [ "$(echo "$MANIFEST" | jq -r '.componentManifests | length')" = "0" ]
           [ "$(echo "$MANIFEST" | jq -r '.tooling')" = "null" ]
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.buildTimestamp' | tr -d ':')
-          [ "${{ steps.generate-without-optional-fields.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/build-manifest.json" ]
+          [ "${{ steps.generate-without-optional-fields.outputs.manifest-ref }}" = "schemas/blood-pressure-measurements/1.0.0/build-manifest.json" ]
           grep -q -- "--bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements/1.0.0/build-manifest.json --body manifests/build/blood-pressure-measurements-1.0.0-${TIMESTAMP}.json --if-none-match \*" "$RUNNER_TEMP/aws-calls.log"
 
       - name: Generate build manifest containing shell-like literal data
         id: generate-literal-data
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: "page's-component"
           version: "1.0.0"
           repo: fibricheck/pages-portal
           commit-sha: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
           commit-tag: "release-'quoted'"
-          s3-folder: pages
+          folder: pages
           build-config: |
             LABEL=customer's portal
             COMMAND=$(this-must-not-run)
@@ -154,48 +158,51 @@ jobs:
         id: generate-backdated
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
           target-environment: eu-production
           build-timestamp: "2026-08-01T00:00:00Z"
-          s3-folder: schemas
+          folder: schemas
 
       - name: explicit build-timestamp is used as-is
         run: |
           MANIFEST='${{ steps.generate-backdated.outputs.manifest-json }}'
           [ "$(echo "$MANIFEST" | jq -r '.buildTimestamp')" = "2026-08-01T00:00:00Z" ]
-          [ "${{ steps.generate-backdated.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/eu-production.build-manifest.json" ]
+          [ "${{ steps.generate-backdated.outputs.manifest-ref }}" = "schemas/blood-pressure-measurements/1.0.0/eu-production.build-manifest.json" ]
 
       - name: Generate build manifest with a date-only build-timestamp
         id: generate-date-only
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
           build-timestamp: "2026-08-02"
-          s3-folder: schemas
+          folder: schemas
 
       - name: date-only build-timestamp is normalized to midnight UTC
         run: |
           MANIFEST='${{ steps.generate-date-only.outputs.manifest-json }}'
           [ "$(echo "$MANIFEST" | jq -r '.buildTimestamp')" = "2026-08-02T00:00:00Z" ]
-          [ "${{ steps.generate-date-only.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/build-manifest.json" ]
+          [ "${{ steps.generate-date-only.outputs.manifest-ref }}" = "schemas/blood-pressure-measurements/1.0.0/build-manifest.json" ]
 
       - name: generate-invalid-build-timestamp-should-fail
         id: generate-invalid-timestamp
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
           build-timestamp: "../../../../tmp/file"
-          s3-folder: schemas
+          folder: schemas
 
       - name: invalid build-timestamp fails loudly
         run: |
@@ -206,11 +213,12 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: schemas
+          folder: schemas
           tooling: '["node","20"]'
 
       - name: invalid tooling fails loudly
@@ -222,11 +230,12 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: "../../etc/passwd"
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: schemas
+          folder: schemas
 
       - name: path-traversal component fails loudly
         run: |
@@ -237,13 +246,14 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: |-
             invalid
             component
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: schemas
+          folder: schemas
 
       - name: line-break component fails loudly
         run: |
@@ -254,11 +264,12 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: already-exists
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: schemas
+          folder: schemas
 
       - name: Existing build manifest fails loudly
         run: |
@@ -268,29 +279,31 @@ jobs:
         id: generate-composite
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: fibricheck-platform
           version: 3.0.0
-          s3-folder: composites
-          component-manifests: s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/build-manifest.json,s3://manifests.fibricheck.com/app/fibricheck-app-ios/2.16.0-146/eu-production.build-manifest.json
+          folder: composites
+          component-manifests: schemas/blood-pressure-measurements/1.0.0/build-manifest.json,app/fibricheck-app-ios/2.16.0-146/eu-production.build-manifest.json
 
       - name: composite lists its component manifests, checks each exists, and has no commit
         run: |
           MANIFEST='${{ steps.generate-composite.outputs.manifest-json }}'
-          [ "$(echo "$MANIFEST" | jq -c '.componentManifests')" = '["s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/build-manifest.json","s3://manifests.fibricheck.com/app/fibricheck-app-ios/2.16.0-146/eu-production.build-manifest.json"]' ]
+          [ "$(echo "$MANIFEST" | jq -c '.componentManifests')" = '["schemas/blood-pressure-measurements/1.0.0/build-manifest.json","app/fibricheck-app-ios/2.16.0-146/eu-production.build-manifest.json"]' ]
           [ "$(echo "$MANIFEST" | jq -c '.commit')" = '{"repo":null,"sha":null,"tag":null}' ]
           grep -q -- "head-object --bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements/1.0.0/build-manifest.json" "$RUNNER_TEMP/aws-calls.log"
           grep -q -- "head-object --bucket manifests.fibricheck.com --key app/fibricheck-app-ios/2.16.0-146/eu-production.build-manifest.json" "$RUNNER_TEMP/aws-calls.log"
-          [ "${{ steps.generate-composite.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/composites/fibricheck-platform/3.0.0/build-manifest.json" ]
+          [ "${{ steps.generate-composite.outputs.manifest-ref }}" = "composites/fibricheck-platform/3.0.0/build-manifest.json" ]
 
       - name: generate-composite-with-missing-component-should-fail
         id: generate-composite-missing
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: composite-missing
           version: 3.0.0
-          s3-folder: composites
-          component-manifests: s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/build-manifest.json,s3://manifests.fibricheck.com/schemas/missing-component/1.0.0/build-manifest.json
+          folder: composites
+          component-manifests: schemas/blood-pressure-measurements/1.0.0/build-manifest.json,schemas/missing-component/1.0.0/build-manifest.json
 
       - name: a missing component manifest fails, and nothing is uploaded
         run: |
@@ -302,40 +315,43 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: composite-forbidden
           version: 3.0.0
-          s3-folder: composites
-          component-manifests: s3://manifests.fibricheck.com/schemas/forbidden-component/1.0.0/build-manifest.json
+          folder: composites
+          component-manifests: schemas/forbidden-component/1.0.0/build-manifest.json
 
       - name: an unreadable component manifest fails, and nothing is uploaded
         run: |
           [ "${{ steps.generate-composite-forbidden.outcome }}" = "failure" ]
           ! grep -q -- "put-object .*--key composites/composite-forbidden/" "$RUNNER_TEMP/aws-calls.log"
 
-      - name: generate-composite-with-other-bucket-should-fail
-        id: generate-composite-other-bucket
+      - name: generate-composite-with-uri-should-fail
+        id: generate-composite-uri
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
-          component: composite-other-bucket
+          role-arn: ''
+          component: composite-uri
           version: 3.0.0
-          s3-folder: composites
-          component-manifests: s3://some-other-bucket/schemas/blood-pressure-measurements/1.0.0/build-manifest.json
+          folder: composites
+          component-manifests: s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/build-manifest.json
 
       - name: a component manifest outside the manifests bucket fails, and nothing is uploaded
         run: |
-          [ "${{ steps.generate-composite-other-bucket.outcome }}" = "failure" ]
-          ! grep -q -- "--key composites/composite-other-bucket/" "$RUNNER_TEMP/aws-calls.log"
+          [ "${{ steps.generate-composite-uri.outcome }}" = "failure" ]
+          ! grep -q -- "--key composites/composite-uri/" "$RUNNER_TEMP/aws-calls.log"
 
       - name: generate-composite-with-deploy-manifest-should-fail
         id: generate-composite-deploy-manifest
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: composite-deploy-manifest
           version: 3.0.0
-          s3-folder: composites
-          component-manifests: s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json
+          folder: composites
+          component-manifests: schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json
 
       - name: a component manifest that is not a build manifest fails, and nothing is checked or uploaded
         run: |
@@ -348,10 +364,11 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: composite-wrong-folder
           version: 3.0.0
-          s3-folder: test
-          component-manifests: s3://manifests.fibricheck.com/schemas/blood-pressure-measurements/1.0.0/build-manifest.json
+          folder: test
+          component-manifests: schemas/blood-pressure-measurements/1.0.0/build-manifest.json
 
       - name: a composite outside the composites folder fails, and nothing is uploaded
         run: |
@@ -363,11 +380,12 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: regular-in-composite
           version: 3.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: composites
+          folder: composites
 
       - name: a regular build manifest in the composites folder fails, and nothing is uploaded
         run: |
@@ -379,10 +397,11 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: no-source
           version: 3.0.0
           repo: fibricheck/fibricheck-schemas
-          s3-folder: test
+          folder: test
 
       - name: missing commit-sha and component-manifests fails, and nothing is uploaded
         run: |
@@ -394,74 +413,79 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: sha-without-repo
           version: 3.0.0
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: test
+          folder: test
 
       - name: commit-sha without repo fails, and nothing is uploaded
         run: |
           [ "${{ steps.generate-sha-without-repo.outcome }}" = "failure" ]
           ! grep -q -- "--key test/sha-without-repo/" "$RUNNER_TEMP/aws-calls.log"
 
-      - name: generate-s3-folder-with-build-number
-        id: generate-s3-folder-buildnum
+      - name: generate-folder-with-build-number
+        id: generate-folder-buildnum
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: fibricheck-app-ios
           version: 2.16.0
           repo: fibricheck/fibricheck_react_native
           commit-sha: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
           build-number: "146"
-          s3-folder: app
+          folder: app
 
-      - name: s3-folder includes build-number in key
+      - name: folder includes build-number in key
         run: |
-          [ "${{ steps.generate-s3-folder-buildnum.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/app/fibricheck-app-ios/2.16.0-146/build-manifest.json" ]
+          [ "${{ steps.generate-folder-buildnum.outputs.manifest-ref }}" = "app/fibricheck-app-ios/2.16.0-146/build-manifest.json" ]
 
-      - name: generate-missing-s3-folder-should-fail
+      - name: generate-missing-folder-should-fail
         id: generate-missing-folder
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: ""
+          folder: ""
 
-      - name: missing s3-folder fails loudly
+      - name: missing folder fails loudly
         run: |
           [ "${{ steps.generate-missing-folder.outcome }}" = "failure" ]
 
-      - name: generate-invalid-s3-folder-should-fail
+      - name: generate-invalid-folder-should-fail
         id: generate-bad-folder
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: shema
+          folder: shema
 
-      - name: invalid s3-folder fails loudly
+      - name: invalid folder fails loudly
         run: |
           [ "${{ steps.generate-bad-folder.outcome }}" = "failure" ]
 
-      - name: generate-s3-folder-test
-        id: generate-s3-folder-test
+      - name: generate-folder-test
+        id: generate-folder-test
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: blood-pressure-measurements
           version: 1.0.0
           repo: fibricheck/fibricheck-schemas
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: test
+          folder: test
 
-      - name: s3-folder value "test" is accepted
+      - name: folder value "test" is accepted
         run: |
-          [ "${{ steps.generate-s3-folder-test.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/test/blood-pressure-measurements/1.0.0/build-manifest.json" ]
+          [ "${{ steps.generate-folder-test.outputs.manifest-ref }}" = "test/blood-pressure-measurements/1.0.0/build-manifest.json" ]
 
       - name: Create build files
         run: |
@@ -474,11 +498,12 @@ jobs:
         id: generate-with-files
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: delete-user
           version: 1.1.7
           repo: fibricheck/taskmaster
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: tasks
+          folder: tasks
           files: |
             build-files/code.zip
             ./build-files/test-results/
@@ -486,11 +511,11 @@ jobs:
       - name: files are uploaded next to the manifest, before the manifest
         run: |
           PREFIX="tasks/delete-user/1.1.7"
-          [ "${{ steps.generate-with-files.outputs.s3-uri }}" = "s3://manifests.fibricheck.com/$PREFIX/build-manifest.json" ]
-          URIS='${{ steps.generate-with-files.outputs.files-s3-uris }}'
-          [ "$(echo "$URIS" | grep -c .)" = "3" ]
-          echo "$URIS" | grep -qx "s3://manifests.fibricheck.com/$PREFIX/build-files/code.zip"
-          echo "$URIS" | grep -qx "s3://manifests.fibricheck.com/$PREFIX/build-files/test-results/sub/test-output.log"
+          [ "${{ steps.generate-with-files.outputs.manifest-ref }}" = "$PREFIX/build-manifest.json" ]
+          REFS='${{ steps.generate-with-files.outputs.file-refs }}'
+          [ "$(echo "$REFS" | grep -c .)" = "3" ]
+          echo "$REFS" | grep -qx "$PREFIX/build-files/code.zip"
+          echo "$REFS" | grep -qx "$PREFIX/build-files/test-results/sub/test-output.log"
           grep -q -- "--key $PREFIX/build-files/code.zip --body build-files/code.zip --checksum-algorithm SHA256 --checksum-sha256 .* --if-none-match \*" "$RUNNER_TEMP/aws-calls.log"
           FILE_LINE=$(grep -n -- "--key $PREFIX/build-files/code.zip" "$RUNNER_TEMP/aws-calls.log" | cut -d: -f1)
           MANIFEST_LINE=$(grep -n -- "--key $PREFIX/build-manifest.json " "$RUNNER_TEMP/aws-calls.log" | cut -d: -f1)
@@ -501,11 +526,12 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: delete-user
           version: 1.1.7
           repo: fibricheck/taskmaster
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: tasks
+          folder: tasks
           files: ../build-files/code.zip
 
       - name: traversal file fails loudly
@@ -517,11 +543,12 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: delete-user
           version: 1.1.7
           repo: fibricheck/taskmaster
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: tasks
+          folder: tasks
           files: build-files/missing.zip
 
       - name: missing file fails loudly
@@ -533,11 +560,12 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: delete-user
           version: 1.1.7
           repo: fibricheck/taskmaster
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: tasks
+          folder: tasks
           files: build-files//code.zip
 
       - name: double slash file fails loudly
@@ -548,11 +576,12 @@ jobs:
         id: generate-force-upload
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: forced
           version: 1.1.7
           repo: fibricheck/taskmaster
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: tasks
+          folder: tasks
           files: build-files/code.zip
           force-upload: 'true'
 
@@ -565,11 +594,12 @@ jobs:
         id: generate-exists-same
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: exists-same
           version: 1.1.7
           repo: fibricheck/taskmaster
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: tasks
+          folder: tasks
           files: build-files/code.zip
 
       - name: an existing file with the same checksum is accepted
@@ -582,11 +612,12 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: exists-different
           version: 1.1.7
           repo: fibricheck/taskmaster
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: tasks
+          folder: tasks
           files: build-files/code.zip
 
       - name: an existing file with a different checksum fails, and no manifest is uploaded
@@ -599,11 +630,12 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: put-error
           version: 1.1.7
           repo: fibricheck/taskmaster
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: tasks
+          folder: tasks
           files: build-files/code.zip
 
       - name: a failing file upload fails, and no manifest is uploaded
@@ -621,11 +653,12 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: delete-user
           version: 1.1.7
           repo: fibricheck/taskmaster
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: tasks
+          folder: tasks
           files: build-files/empty/
 
       - name: an empty directory fails loudly
@@ -637,11 +670,12 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: manifest-named
           version: 1.1.7
           repo: fibricheck/taskmaster
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: tasks
+          folder: tasks
           files: |
             build-files/code.zip
             build-files/other.build-manifest.json
@@ -656,12 +690,29 @@ jobs:
         continue-on-error: true
         uses: ./generate-build-manifest
         with:
+          role-arn: ''
           component: ''
           version: 1.1.7
           repo: fibricheck/taskmaster
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
-          s3-folder: tasks
+          folder: tasks
 
       - name: an empty component fails loudly
         run: |
           [ "${{ steps.generate-empty-component.outcome }}" = "failure" ]
+
+      - name: generate-without-id-token-permission-should-fail
+        id: generate-without-id-token
+        continue-on-error: true
+        uses: ./generate-build-manifest
+        with:
+          component: without-id-token
+          version: 1.1.7
+          repo: fibricheck/taskmaster
+          commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
+          folder: tasks
+
+      - name: authenticating without the id-token permission fails before anything is uploaded
+        run: |
+          [ "${{ steps.generate-without-id-token.outcome }}" = "failure" ]
+          ! grep -q -- "tasks/without-id-token/" "$RUNNER_TEMP/aws-calls.log"

@@ -1,0 +1,182 @@
+name: 'Latest Version'
+description: 'Finds the highest version of a component that has a build manifest in the shared FibriCheck manifests store, and all build manifests of that version.'
+inputs:
+  component:
+    description: 'Name of the component or schema'
+    required: true
+  folder:
+    description: >
+      Top-level folder within the manifests store: app, pages, schemas, tasks, packages, test, or composites.
+      Every <folder>/<component>/<version>[-<build-number>]/ folder holding a build manifest
+      ([*.]build-manifest.json) is considered.
+    required: true
+  version:
+    description: >
+      Version folder, <version>[-<build-number>], to return the build manifests of instead of the highest one
+    required: false
+    default: ''
+  fail-if-missing:
+    description: "Fail when no build manifest is found. When 'false', the found output is 'false' instead"
+    required: false
+    default: 'true'
+  role-arn:
+    description: >
+      IAM role assumed through GitHub OIDC to access the manifests store. The calling job needs the
+      id-token: write permission. The credentials are only used by this action and never replace AWS
+      credentials configured elsewhere in the job. Set to '' to skip authentication and use the AWS
+      credentials already configured in the job instead.
+    required: false
+    default: 'arn:aws:iam::964503429135:role/github-manifests'
+outputs:
+  found:
+    description: "'true' when a build manifest was found"
+    value: ${{ steps.latest.outputs.found }}
+  version:
+    description: 'Highest <major>.<minor>.<patch>[-<build-number>] version folder, compared number by number, or the given version'
+    value: ${{ steps.latest.outputs.version }}
+  build-manifest-refs:
+    description: 'Comma-separated references to all build manifests of that version, e.g. tasks/delete-user/1.1.7/build-manifest.json'
+    value: ${{ steps.latest.outputs.build-manifest-refs }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate
+      shell: bash
+      env:
+        INPUT_COMPONENT: ${{ inputs.component }}
+        INPUT_FOLDER: ${{ inputs.folder }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_FAIL_IF_MISSING: ${{ inputs.fail-if-missing }}
+      run: |
+        set -euo pipefail
+
+        validate_no_path_traversal() {
+          local name="$1" value="$2"
+          case "$value" in
+            '')
+              echo "::error::${name} is required"
+              exit 1
+              ;;
+            */*|*'\'*)
+              echo "::error::${name} must not contain '/' or '\\'"
+              exit 1
+              ;;
+            .|..)
+              echo "::error::${name} must not be '.' or '..'"
+              exit 1
+              ;;
+            *$'\n'*|*$'\r'*)
+              echo "::error::${name} must not contain line breaks"
+              exit 1
+              ;;
+          esac
+        }
+        validate_no_path_traversal "component" "$INPUT_COMPONENT"
+        if [ -n "$INPUT_VERSION" ]; then
+          validate_no_path_traversal "version" "$INPUT_VERSION"
+        fi
+        case "$INPUT_FOLDER" in
+          app|pages|schemas|tasks|packages|test|composites) ;;
+          *)
+            echo "::error::folder must be one of: app, pages, schemas, tasks, packages, test, composites — got: ${INPUT_FOLDER}"
+            exit 1
+            ;;
+        esac
+        case "$INPUT_FAIL_IF_MISSING" in
+          true|false) ;;
+          *)
+            echo "::error::fail-if-missing must be 'true' or 'false' — got: ${INPUT_FAIL_IF_MISSING}"
+            exit 1
+            ;;
+        esac
+    - name: Check OIDC permission
+      if: inputs.role-arn != ''
+      shell: bash
+      run: |
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+          echo "::error::the calling job needs the id-token: write permission to authenticate to AWS"
+          exit 1
+        fi
+    - name: Authenticate to AWS
+      id: aws-auth
+      if: inputs.role-arn != ''
+      uses: aws-actions/configure-aws-credentials@v6.2.4
+      with:
+        role-to-assume: ${{ inputs.role-arn }}
+        aws-region: eu-central-1
+        output-credentials: true
+        output-env-credentials: false
+    - name: Latest version
+      id: latest
+      shell: bash
+      env:
+        INPUT_COMPONENT: ${{ inputs.component }}
+        INPUT_FOLDER: ${{ inputs.folder }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_FAIL_IF_MISSING: ${{ inputs.fail-if-missing }}
+        MANIFESTS_AWS_ACCESS_KEY_ID: ${{ steps.aws-auth.outputs.aws-access-key-id }}
+        MANIFESTS_AWS_SECRET_ACCESS_KEY: ${{ steps.aws-auth.outputs.aws-secret-access-key }}
+        MANIFESTS_AWS_SESSION_TOKEN: ${{ steps.aws-auth.outputs.aws-session-token }}
+      run: |
+        set -euo pipefail
+
+        # The manifests role's credentials apply to this step only, other AWS credentials in the job are left as they are
+        if [ -n "$MANIFESTS_AWS_ACCESS_KEY_ID" ]; then
+          unset AWS_PROFILE AWS_DEFAULT_PROFILE
+          export AWS_ACCESS_KEY_ID="$MANIFESTS_AWS_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$MANIFESTS_AWS_SECRET_ACCESS_KEY"
+          export AWS_SESSION_TOKEN="$MANIFESTS_AWS_SESSION_TOKEN"
+          export AWS_REGION="eu-central-1"
+        fi
+
+        S3_BUCKET="manifests.fibricheck.com"
+        PREFIX="${INPUT_FOLDER}/${INPUT_COMPONENT}"
+        LIST_PREFIX="${PREFIX}/"
+        [ -n "$INPUT_VERSION" ] && LIST_PREFIX="${PREFIX}/${INPUT_VERSION}/"
+
+        # Listed separately, so a failing aws call fails the step instead of looking like an empty folder
+        LISTING=$(aws s3api list-objects-v2 --bucket "$S3_BUCKET" --prefix "$LIST_PREFIX" \
+          --query 'Contents[].Key' --output text)
+        KEYS=$(printf '%s\n' "$LISTING" | tr '\t' '\n' | { grep -vx -e 'None' -e '' || true; })
+
+        # Build manifests directly in a version folder: build-manifest.json, or any name ending in .build-manifest.json
+        MANIFESTS=""
+        while IFS= read -r KEY; do
+          [ -z "$KEY" ] && continue
+          RELATIVE="${KEY#"${PREFIX}/"}"
+          VERSION="${RELATIVE%%/*}"
+          NAME="${RELATIVE#*/}"
+          [ "$RELATIVE" = "$VERSION" ] && continue
+          case "$NAME" in
+            */*) continue ;;
+            build-manifest.json|*.build-manifest.json) MANIFESTS="${MANIFESTS}${VERSION} ${KEY}"$'\n' ;;
+          esac
+        done <<< "$KEYS"
+
+        LATEST="$INPUT_VERSION"
+        if [ -z "$LATEST" ]; then
+          # Only <major>.<minor>.<patch>[-<build-number>] folders count, compared number by number. A folder without a
+          # build number is lower than the same version with one
+          LATEST=$(printf '%s' "$MANIFESTS" | cut -d' ' -f1 | jq -Rrs '
+            split("\n")
+            | map(select(test("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9]+)?$")))
+            | max_by(capture("^(?<v>[0-9.]+)(-(?<b>[0-9]+))?$")
+                | (.v | split(".") | map(tonumber)) + [(.b // "-1") | tonumber])
+            // empty')
+        fi
+        REFS=$(printf '%s' "$MANIFESTS" | awk -v version="$LATEST" '$1 == version { print $2 }' | sort | paste -sd ',' -)
+
+        if [ -z "$REFS" ]; then
+          if [ "$INPUT_FAIL_IF_MISSING" = "true" ]; then
+            echo "::error::No build manifest stored under ${LIST_PREFIX}"
+            exit 1
+          fi
+          echo "No build manifest stored under ${LIST_PREFIX}"
+          printf 'found=false\n' >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "Build manifests of ${INPUT_COMPONENT} ${LATEST}: ${REFS}"
+        printf 'found=true\n' >> "$GITHUB_OUTPUT"
+        printf 'version=%s\n' "$LATEST" >> "$GITHUB_OUTPUT"
+        printf 'build-manifest-refs=%s\n' "$REFS" >> "$GITHUB_OUTPUT"
