@@ -17,7 +17,7 @@ jobs:
           echo '{"component":"delete-user","version":"1.1.7","commit":{"sha":"c16817c46c2e4d9c7966bb4991e109b7fca5ea9d"}}' > "$PREFIX/build-manifest.json"
           echo zip > "$PREFIX/code.zip"
           echo log > "$PREFIX/test-results/test-output.log"
-          echo '{}' > "$PREFIX/eu-production.2026-01-01T00-00-00Z.deploy-manifest.json"
+          echo '{}' > "$PREFIX/eu-production.2026-01-01T000000Z.deploy-manifest.json"
 
           mkdir -p "$RUNNER_TEMP/mock-bin"
           cat > "$RUNNER_TEMP/mock-bin/aws" <<MOCKEOF
@@ -67,7 +67,7 @@ jobs:
           [ "${{ steps.download.outputs.path }}" = "$DIR" ]
           [ "$(cat "$DIR/code.zip")" = "zip" ]
           [ "$(cat "$DIR/test-results/test-output.log")" = "log" ]
-          [ -f "$DIR/eu-production.2026-01-01T00-00-00Z.deploy-manifest.json" ]
+          [ -f "$DIR/eu-production.2026-01-01T000000Z.deploy-manifest.json" ]
           FILES='${{ steps.download.outputs.files }}'
           [ "$(echo "$FILES" | grep -c .)" = "4" ]
           echo "$FILES" | grep -qx "$DIR/code.zip"

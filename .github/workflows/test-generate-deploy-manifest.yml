@@ -49,7 +49,7 @@ jobs:
           version: 1.0.0
           target-environment: eu-production
           build-number: '146'
-          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-ref }}
           deploy-config: '{"rolloutPercentage":100}'
           folder: schemas
 
@@ -60,7 +60,7 @@ jobs:
           [ "$(echo "$MANIFEST" | jq -r '.manifestVersion')" = "1.0" ]
           [ "$(echo "$MANIFEST" | jq -r '.targetEnvironment')" = "eu-production" ]
           [ "$(echo "$MANIFEST" | jq -r '.buildNumber')" = "146" ]
-          [ "$(echo "$MANIFEST" | jq -r '.buildManifestRef')" = "${{ steps.generate-build.outputs.manifest-path }}" ]
+          [ "$(echo "$MANIFEST" | jq -r '.buildManifestRef')" = "${{ steps.generate-build.outputs.manifest-ref }}" ]
           [ "$(echo "$MANIFEST" | jq -r '.deployConfig.rolloutPercentage')" = "100" ]
           [ "$(echo "$MANIFEST" | jq -r '.componentManifests | length')" = "0" ]
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.deploymentTimestamp' | tr -d ':')
@@ -79,7 +79,7 @@ jobs:
           version: 2.16.0
           target-environment: eu-production
           build-number: "146"
-          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-ref }}
           folder: app
 
       - name: build-number is recorded in the manifest and the filename
@@ -97,7 +97,7 @@ jobs:
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: us-production
-          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-ref }}
           deployment-timestamp: "2026-08-01T00:00:00Z"
           folder: schemas
 
@@ -116,7 +116,7 @@ jobs:
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: eu-production
-          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-ref }}
           deployment-timestamp: "2026-08-02"
           folder: schemas
 
@@ -134,13 +134,13 @@ jobs:
           component: does-not-exist
           version: 9.9.9
           target-environment: eu-production
-          build-manifest-ref: manifests/build/does-not-exist-9.9.9.json
+          build-manifest-ref: schemas/does-not-exist/9.9.9/build-manifest.json
           folder: schemas
 
       - name: build-manifest-ref recorded as-is, not validated
         run: |
           MANIFEST='${{ steps.generate-unresolved-build-ref.outputs.manifest-json }}'
-          [ "$(echo "$MANIFEST" | jq -r '.buildManifestRef')" = "manifests/build/does-not-exist-9.9.9.json" ]
+          [ "$(echo "$MANIFEST" | jq -r '.buildManifestRef')" = "schemas/does-not-exist/9.9.9/build-manifest.json" ]
 
       - name: Generate deploy manifest containing shell-like literal data
         id: generate-literal-data
@@ -174,7 +174,7 @@ jobs:
           component: "../../etc/passwd"
           version: 1.0.0
           target-environment: eu-production
-          build-manifest-ref: manifests/build/does-not-exist-9.9.9.json
+          build-manifest-ref: schemas/does-not-exist/9.9.9/build-manifest.json
           folder: schemas
 
       - name: path-traversal component fails loudly
@@ -191,7 +191,7 @@ jobs:
           version: 1.0.0
           target-environment: eu-production
           build-number: '../146'
-          build-manifest-ref: manifests/build/blood-pressure-measurements-1.0.0.json
+          build-manifest-ref: schemas/blood-pressure-measurements/1.0.0/build-manifest.json
           folder: schemas
 
       - name: path-traversal build-number fails loudly
@@ -207,7 +207,7 @@ jobs:
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: eu-production
-          build-manifest-ref: manifests/build/blood-pressure-measurements-1.0.0.json
+          build-manifest-ref: schemas/blood-pressure-measurements/1.0.0/build-manifest.json
           deployment-timestamp: "../../../../tmp/file"
           folder: schemas
 
@@ -226,7 +226,7 @@ jobs:
             component
           version: 1.0.0
           target-environment: eu-production
-          build-manifest-ref: manifests/build/blood-pressure-measurements-1.0.0.json
+          build-manifest-ref: schemas/blood-pressure-measurements/1.0.0/build-manifest.json
           folder: schemas
 
       - name: line-break component fails loudly
@@ -242,7 +242,7 @@ jobs:
           component: already-exists
           version: 1.0.0
           target-environment: eu-production
-          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-ref }}
           folder: schemas
 
       - name: Existing deploy manifest fails loudly
@@ -258,7 +258,7 @@ jobs:
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: eu-production
-          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-ref }}
           folder: ""
 
       - name: missing folder fails loudly
@@ -274,7 +274,7 @@ jobs:
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: eu-production
-          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-ref }}
           folder: shema
 
       - name: invalid folder fails loudly
@@ -289,7 +289,7 @@ jobs:
           component: blood-pressure-measurements
           version: 1.0.0
           target-environment: eu-production
-          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-ref }}
           folder: test
 
       - name: folder value "test" is accepted
@@ -401,10 +401,61 @@ jobs:
           component: regular-in-composite
           version: 3.0.0
           target-environment: eu-production
-          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-path }}
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-ref }}
           folder: composites
 
       - name: a regular deploy manifest in the composites folder fails, and nothing is uploaded
         run: |
           [ "${{ steps.generate-regular-composites-folder.outcome }}" = "failure" ]
           ! grep -q -- "--key composites/regular-in-composite/" "$RUNNER_TEMP/aws-calls.log"
+
+      - name: generate-with-empty-component-should-fail
+        id: generate-empty-component
+        continue-on-error: true
+        uses: ./generate-deploy-manifest
+        with:
+          role-arn: ''
+          component: ''
+          version: 1.0.0
+          target-environment: eu-production
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-ref }}
+          folder: schemas
+
+      - name: an empty component fails before anything is uploaded
+        run: |
+          [ "${{ steps.generate-empty-component.outcome }}" = "failure" ]
+          ! grep -q -- "--key schemas//" "$RUNNER_TEMP/aws-calls.log"
+
+      - name: generate-with-empty-target-environment-should-fail
+        id: generate-empty-target-environment
+        continue-on-error: true
+        uses: ./generate-deploy-manifest
+        with:
+          role-arn: ''
+          component: empty-target-environment
+          version: 1.0.0
+          target-environment: ''
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-ref }}
+          folder: schemas
+
+      - name: an empty target-environment fails before anything is uploaded
+        run: |
+          [ "${{ steps.generate-empty-target-environment.outcome }}" = "failure" ]
+          ! grep -q -- "--key schemas/empty-target-environment/" "$RUNNER_TEMP/aws-calls.log"
+
+      - name: generate-with-empty-build-manifest-ref-should-fail
+        id: generate-empty-build-manifest-ref
+        continue-on-error: true
+        uses: ./generate-deploy-manifest
+        with:
+          role-arn: ''
+          component: empty-build-manifest-ref
+          version: 1.0.0
+          target-environment: eu-production
+          build-manifest-ref: ''
+          folder: schemas
+
+      - name: an empty build-manifest-ref fails before anything is uploaded
+        run: |
+          [ "${{ steps.generate-empty-build-manifest-ref.outcome }}" = "failure" ]
+          ! grep -q -- "--key schemas/empty-build-manifest-ref/" "$RUNNER_TEMP/aws-calls.log"

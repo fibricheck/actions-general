@@ -15,10 +15,10 @@ jobs:
           PREFIX="$BUCKET/tasks/delete-user"
           mkdir -p "$PREFIX/1.9.0" "$PREFIX/1.10.0" "$PREFIX/1.11.0/test-results" "$PREFIX/2.0.0/nested"
           echo '{}' > "$PREFIX/1.9.0/build-manifest.json"
-          # Every build manifest of a version is returned, timestamped and environment-prefixed ones too
-          echo '{}' > "$PREFIX/1.10.0/2026-01-01T00-00-00Z.build-manifest.json"
-          echo '{}' > "$PREFIX/1.10.0/eu-production.2026-02-01T00-00-00Z.build-manifest.json"
-          echo '{}' > "$PREFIX/1.10.0/eu-production.2026-02-02T00-00-00Z.deploy-manifest.json"
+          # Every build manifest of a version is returned, environment-neutral and environment-prefixed
+          echo '{}' > "$PREFIX/1.10.0/build-manifest.json"
+          echo '{}' > "$PREFIX/1.10.0/eu-production.build-manifest.json"
+          echo '{}' > "$PREFIX/1.10.0/eu-production.2026-02-02T000000Z.deploy-manifest.json"
           echo zip > "$PREFIX/1.10.0/code.zip"
           # A build manifest nested deeper than the version folder is not one of the version
           echo zip > "$PREFIX/1.11.0/code.zip"
@@ -73,7 +73,7 @@ jobs:
         run: |
           [ "${{ steps.latest.outputs.found }}" = "true" ]
           [ "${{ steps.latest.outputs.version }}" = "1.10.0" ]
-          [ "${{ steps.latest.outputs.build-manifest-refs }}" = "tasks/delete-user/1.10.0/2026-01-01T00-00-00Z.build-manifest.json,tasks/delete-user/1.10.0/eu-production.2026-02-01T00-00-00Z.build-manifest.json" ]
+          [ "${{ steps.latest.outputs.build-manifest-refs }}" = "tasks/delete-user/1.10.0/build-manifest.json,tasks/delete-user/1.10.0/eu-production.build-manifest.json" ]
 
       - name: given-version
         id: given-version

@@ -430,7 +430,7 @@ Downloads everything stored under `<folder>/<component>/<version>/`: its manifes
 
 ## latest-version
 
-Finds the highest version of a component that has a build manifest, and all build manifests of that version: the highest `<version>[-<build-number>]` folder under `<folder>/<component>/` holding a `build-manifest.json` or `*.build-manifest.json` (timestamped and environment-prefixed ones included). With `version` set, it returns the build manifests of that version instead. Only `<major>.<minor>.<patch>[-<build-number>]` folders are considered, compared number by number: `1.10.0` is higher than `1.9.0`, `2.16.0-146` is higher than `2.16.0-9`, and `2.16.0` is lower than `2.16.0-1`. Other folder names (e.g. `v1.0.0`, `1.2.0-rc.1`) are never the highest version, but their build manifests are still returned when `version` names them.
+Finds the highest version of a component that has a build manifest, and all build manifests of that version: the highest `<version>[-<build-number>]` folder under `<folder>/<component>/` holding a `build-manifest.json` or `<target-environment>.build-manifest.json`. With `version` set, it returns the build manifests of that version instead. Only `<major>.<minor>.<patch>[-<build-number>]` folders are considered, compared number by number: `1.10.0` is higher than `1.9.0`, `2.16.0-146` is higher than `2.16.0-9`, and `2.16.0` is lower than `2.16.0-1`. Other folder names (e.g. `v1.0.0`, `1.2.0-rc.1`) are never the highest version, but their build manifests are still returned when `version` names them.
 
 <!-- start usage -->
 ```yaml
