@@ -339,8 +339,8 @@ Builds a traceability manifest JSON for a release, writes it locally, and stores
     # component-manifests is given, and not allowed otherwise. Required — every manifest is stored, there
     # is no local-only mode. The manifest is stored as
     # <folder>/<component>/<version>[-<build-number>]/[<target-environment>.]build-manifest.json.
-    # Storing is create-only and fails if the manifest already exists. Retention is applied by the store's own
-    # default retention rule, not by this action — "test" is not exempt.
+    # Storing is create-only and fails if the manifest already exists, unless overwrite is 'true'.
+    # Retention is applied by the store's own default retention rule, not by this action — "test" is not exempt.
     # required
     folder: 'schemas'
     # Files that belong to the build (e.g. archives, test results), one path
@@ -350,7 +350,7 @@ Builds a traceability manifest JSON for a release, writes it locally, and stores
     # only exists once all of its files are there. Uploads are create-only
     # with a SHA256 checksum; a file that already exists with the same
     # checksum (a re-run after a partial upload) is accepted, one with a
-    # different checksum fails the upload (see force-upload). Empty
+    # different checksum fails the upload (see overwrite). Empty
     # directories and files named [*.]build-manifest.json or
     # [*.]deploy-manifest.json are rejected. Download them again with
     # download-manifests.
@@ -358,10 +358,10 @@ Builds a traceability manifest JSON for a release, writes it locally, and stores
     files: |
       code.zip
       test-results
-    # 'true' uploads the files even when they already exist, as a new object
-    # version. The manifest itself stays create-only.
+    # 'true' stores the manifest and its files even when they already exist, as a
+    # new object version. The previous version is kept by the store.
     # optional (default: 'false')
-    force-upload: 'false'
+    overwrite: 'false'
     # IAM role assumed through GitHub OIDC to access the manifests store. The
     # calling job needs the id-token: write permission. Set to '' to skip
     # authentication and use the AWS credentials already configured in the job.
@@ -564,10 +564,14 @@ Builds a deployment traceability manifest JSON, writes it locally, and stores it
     # component-manifests is given, and not allowed otherwise. Required — every manifest is stored, there
     # is no local-only mode. The manifest is stored as
     # <folder>/<component>/<version>[-<build-number>]/<target-environment>.<deployment-timestamp>.deploy-manifest.json.
-    # Storing is create-only and fails if the manifest already exists. Retention is applied by the store's own
-    # default retention rule, not by this action — "test" is not exempt.
+    # Storing is create-only and fails if the manifest already exists, unless overwrite is 'true'.
+    # Retention is applied by the store's own default retention rule, not by this action — "test" is not exempt.
     # required
     folder: 'schemas'
+    # 'true' stores the manifest even when it already exists, as a new object
+    # version. The previous version is kept by the store.
+    # optional (default: 'false')
+    overwrite: 'false'
     # IAM role assumed through GitHub OIDC to access the manifests store. The
     # calling job needs the id-token: write permission. Set to '' to skip
     # authentication and use the AWS credentials already configured in the job.

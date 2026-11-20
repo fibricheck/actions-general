@@ -44,9 +44,15 @@ inputs:
       composites is required when component-manifests is given, and not allowed otherwise.
       Required — every manifest is stored, there is no local-only mode. The manifest is stored as
       <folder>/<component>/<version>[-<build-number>]/<target-environment>.<deployment-timestamp>.deploy-manifest.json.
-      Storing is create-only and fails if the manifest already exists. Retention is applied by the
-      store's own default retention rule, not by this action — "test" is not exempt from it.
+      Storing is create-only and fails if the manifest already exists, unless overwrite is 'true'.
+      Retention is applied by the store's own default retention rule, not by this action — "test" is not exempt from it.
     required: true
+  overwrite:
+    description: >
+      'true' stores the manifest even when it already exists, as a new object version. The previous version is
+      kept by the store.
+    required: false
+    default: 'false'
   role-arn:
     description: >
       IAM role assumed through GitHub OIDC to access the manifests store. The calling job needs the
@@ -98,6 +104,7 @@ runs:
         INPUT_COMPONENT_MANIFESTS: ${{ inputs.component-manifests }}
         INPUT_DEPLOY_CONFIG: ${{ inputs.deploy-config }}
         INPUT_FOLDER: ${{ inputs.folder }}
+        INPUT_OVERWRITE: ${{ inputs.overwrite }}
         MANIFESTS_AWS_ACCESS_KEY_ID: ${{ steps.aws-auth.outputs.aws-access-key-id }}
         MANIFESTS_AWS_SECRET_ACCESS_KEY: ${{ steps.aws-auth.outputs.aws-secret-access-key }}
         MANIFESTS_AWS_SESSION_TOKEN: ${{ steps.aws-auth.outputs.aws-session-token }}
@@ -144,6 +151,13 @@ runs:
           echo "::error::build-manifest-ref is required"
           exit 1
         fi
+        case "$INPUT_OVERWRITE" in
+          true|false) ;;
+          *)
+            echo "::error::overwrite must be 'true' or 'false' — got: ${INPUT_OVERWRITE}"
+            exit 1
+            ;;
+        esac
         case "$INPUT_FOLDER" in
           app|pages|schemas|tasks|packages|test|composites) ;;
           *)
@@ -243,8 +257,12 @@ runs:
         [ -n "$INPUT_BUILD_NUMBER" ] && BUILD_NUMBER_SEGMENT="-${INPUT_BUILD_NUMBER}"
         S3_KEY="${INPUT_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}${BUILD_NUMBER_SEGMENT}/${INPUT_TARGET_ENVIRONMENT}.${FILENAME_SAFE_TIMESTAMP}.deploy-manifest.json"
 
-        # Create-only upload: every deployment record must have its own unused key.
-        aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" --if-none-match '*' >/dev/null
+        # Create-only upload: every deployment record must have its own unused key, unless overwrite is enabled.
+        if [ "$INPUT_OVERWRITE" = "true" ]; then
+          aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" >/dev/null
+        else
+          aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" --if-none-match '*' >/dev/null
+        fi
 
         DELIMITER="manifest_$(date +%s)_$RANDOM"
         printf 'manifest-path=%s\n' "$OUTPUT_PATH" >> "$GITHUB_OUTPUT"

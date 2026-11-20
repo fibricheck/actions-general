@@ -572,23 +572,23 @@ jobs:
         run: |
           [ "${{ steps.generate-double-slash-file.outcome }}" = "failure" ]
 
-      - name: generate-with-force-upload
-        id: generate-force-upload
+      - name: generate-with-overwrite
+        id: generate-overwrite
         uses: ./generate-build-manifest
         with:
           role-arn: ''
-          component: forced
+          component: overwritten
           version: 1.1.7
           repo: fibricheck/taskmaster
           commit-sha: c16817c46c2e4d9c7966bb4991e109b7fca5ea9d
           folder: tasks
           files: build-files/code.zip
-          force-upload: 'true'
+          overwrite: 'true'
 
-      - name: forced files are uploaded without if-none-match, the manifest with it
+      - name: overwritten files and manifest are uploaded without if-none-match
         run: |
-          grep -- "--key tasks/forced/1.1.7/build-files/code.zip " "$RUNNER_TEMP/aws-calls.log" | grep -vq -- "--if-none-match"
-          grep -q -- "--key tasks/forced/1.1.7/build-manifest.json .*--if-none-match \*" "$RUNNER_TEMP/aws-calls.log"
+          grep -- "--key tasks/overwritten/1.1.7/build-files/code.zip " "$RUNNER_TEMP/aws-calls.log" | grep -vq -- "--if-none-match"
+          grep -- "put-object .*--key tasks/overwritten/1.1.7/build-manifest.json " "$RUNNER_TEMP/aws-calls.log" | grep -vq -- "--if-none-match"
 
       - name: generate-with-existing-same-file
         id: generate-exists-same

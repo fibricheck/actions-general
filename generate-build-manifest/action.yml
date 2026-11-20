@@ -73,7 +73,7 @@ inputs:
       composites is required when component-manifests is given, and not allowed otherwise.
       Required — every manifest is stored. The manifest is stored as
       <folder>/<component>/<version>[-<build-number>]/[<target-environment>.]build-manifest.json.
-      Storing is create-only and fails if the manifest already exists.
+      Storing is create-only and fails if the manifest already exists, unless overwrite is 'true'.
       Retention is applied by the store's own default retention rule, not by this
       action — "test" is not exempt from it.
     required: true
@@ -84,13 +84,13 @@ inputs:
       path: <manifest folder>/<path>. Files are uploaded before the manifest, so a manifest only exists once all of
       its files are there. Uploads are create-only with a SHA256 checksum; a file that already exists with the same
       checksum (a re-run after a partial upload) is accepted, one with a different checksum fails the upload (see
-      force-upload). Empty directories and files named [*.]build-manifest.json or [*.]deploy-manifest.json are rejected.
+      overwrite). Empty directories and files named [*.]build-manifest.json or [*.]deploy-manifest.json are rejected.
     required: false
     default: ''
-  force-upload:
+  overwrite:
     description: >
-      'true' uploads the files even when they already exist, as a new object version. The manifest itself stays
-      create-only.
+      'true' stores the manifest and its files even when they already exist, as a new object version. The
+      previous version is kept by the store.
     required: false
     default: 'false'
   role-arn:
@@ -154,7 +154,7 @@ runs:
         INPUT_BUILD_TIMESTAMP: ${{ inputs.build-timestamp }}
         INPUT_FOLDER: ${{ inputs.folder }}
         INPUT_FILES: ${{ inputs.files }}
-        INPUT_FORCE_UPLOAD: ${{ inputs.force-upload }}
+        INPUT_OVERWRITE: ${{ inputs.overwrite }}
         MANIFESTS_AWS_ACCESS_KEY_ID: ${{ steps.aws-auth.outputs.aws-access-key-id }}
         MANIFESTS_AWS_SECRET_ACCESS_KEY: ${{ steps.aws-auth.outputs.aws-secret-access-key }}
         MANIFESTS_AWS_SESSION_TOKEN: ${{ steps.aws-auth.outputs.aws-session-token }}
@@ -195,10 +195,10 @@ runs:
         validate_no_path_traversal "version" "$INPUT_VERSION"
         [ -n "$INPUT_BUILD_NUMBER" ] && validate_no_path_traversal "build-number" "$INPUT_BUILD_NUMBER"
         [ -n "$INPUT_TARGET_ENVIRONMENT" ] && validate_no_path_traversal "target-environment" "$INPUT_TARGET_ENVIRONMENT"
-        case "$INPUT_FORCE_UPLOAD" in
+        case "$INPUT_OVERWRITE" in
           true|false) ;;
           *)
-            echo "::error::force-upload must be 'true' or 'false' — got: ${INPUT_FORCE_UPLOAD}"
+            echo "::error::overwrite must be 'true' or 'false' — got: ${INPUT_OVERWRITE}"
             exit 1
             ;;
         esac
@@ -402,7 +402,7 @@ runs:
             FILE_KEY="${FILES_PREFIX}/${FILE}"
             CHECKSUM=$(openssl dgst -sha256 -binary "$FILE" | base64)
 
-            if [ "$INPUT_FORCE_UPLOAD" = "true" ]; then
+            if [ "$INPUT_OVERWRITE" = "true" ]; then
               aws s3api put-object --bucket "$S3_BUCKET" --key "$FILE_KEY" --body "$FILE" \
                 --checksum-algorithm SHA256 --checksum-sha256 "$CHECKSUM" >/dev/null
               FILE_REFS="${FILE_REFS}${FILE_KEY}"$'\n'
@@ -430,8 +430,12 @@ runs:
           rm -f "$UPLOAD_ERR"
         fi
 
-        # Create-only upload: never create a newer object version under an existing manifest key.
-        aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" --if-none-match '*' >/dev/null
+        # Create-only upload: never create a newer object version under an existing manifest key, unless overwrite is enabled.
+        if [ "$INPUT_OVERWRITE" = "true" ]; then
+          aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" >/dev/null
+        else
+          aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" --if-none-match '*' >/dev/null
+        fi
 
         DELIMITER="manifest_$(date +%s)_$RANDOM"
         printf 'manifest-path=%s\n' "$OUTPUT_PATH" >> "$GITHUB_OUTPUT"

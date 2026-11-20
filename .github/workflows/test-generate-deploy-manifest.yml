@@ -249,6 +249,40 @@ jobs:
         run: |
           [ "${{ steps.generate-existing-deploy-manifest.outcome }}" = "failure" ]
 
+      - name: Existing deploy manifest is overwritten with overwrite true
+        id: generate-overwritten-deploy-manifest
+        uses: ./generate-deploy-manifest
+        with:
+          role-arn: ''
+          component: overwritten
+          version: 1.0.0
+          target-environment: eu-production
+          deployment-timestamp: 2026-09-07T10:15:02Z
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-ref }}
+          folder: schemas
+          overwrite: 'true'
+
+      - name: overwritten deploy manifest is uploaded without if-none-match
+        run: |
+          grep -- "put-object .*--key schemas/overwritten/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json " "$RUNNER_TEMP/aws-calls.log" | grep -vq -- "--if-none-match"
+
+      - name: generate-invalid-overwrite-should-fail
+        id: generate-invalid-overwrite
+        continue-on-error: true
+        uses: ./generate-deploy-manifest
+        with:
+          role-arn: ''
+          component: blood-pressure-measurements
+          version: 1.0.0
+          target-environment: eu-production
+          build-manifest-ref: ${{ steps.generate-build.outputs.manifest-ref }}
+          folder: schemas
+          overwrite: 'yes'
+
+      - name: invalid overwrite fails loudly
+        run: |
+          [ "${{ steps.generate-invalid-overwrite.outcome }}" = "failure" ]
+
       - name: generate-missing-folder-should-fail
         id: generate-missing-folder
         continue-on-error: true
