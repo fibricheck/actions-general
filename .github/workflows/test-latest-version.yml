@@ -35,6 +35,9 @@ jobs:
           echo '{}' > "$APP/2.16.0/eu-production.build-manifest.json"
           echo '{}' > "$APP/2.16.0-9/eu-production.build-manifest.json"
           echo '{}' > "$APP/2.16.0-146/eu-production.build-manifest.json"
+          # The US build of the same version has its own, higher build number
+          mkdir -p "$APP/2.16.0-147"
+          echo '{}' > "$APP/2.16.0-147/us-production.build-manifest.json"
 
           mkdir -p "$RUNNER_TEMP/mock-bin"
           cat > "$RUNNER_TEMP/mock-bin/aws" <<MOCKEOF
@@ -126,7 +129,49 @@ jobs:
 
       - name: build numbers are compared as numbers
         run: |
-          [ "${{ steps.latest-build-number.outputs.version }}" = "2.16.0-146" ]
+          [ "${{ steps.latest-build-number.outputs.version }}" = "2.16.0-147" ]
+
+      - name: latest-for-environment
+        id: latest-environment
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: fibricheck-app-ios
+          folder: app
+          target-environment: eu-production
+
+      - name: a target environment only considers its own build manifests
+        run: |
+          [ "${{ steps.latest-environment.outputs.version }}" = "2.16.0-146" ]
+          [ "${{ steps.latest-environment.outputs.build-manifest-refs }}" = "app/fibricheck-app-ios/2.16.0-146/eu-production.build-manifest.json" ]
+
+      - name: latest-for-environment-neutral
+        id: latest-environment-neutral
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: delete-user
+          folder: tasks
+          target-environment: us-production
+
+      - name: environment-neutral build manifests count for every target environment
+        run: |
+          [ "${{ steps.latest-environment-neutral.outputs.version }}" = "1.10.0" ]
+          [ "${{ steps.latest-environment-neutral.outputs.build-manifest-refs }}" = "tasks/delete-user/1.10.0/build-manifest.json" ]
+
+      - name: latest-environment-traversal-should-fail
+        id: latest-environment-traversal
+        continue-on-error: true
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: delete-user
+          folder: tasks
+          target-environment: ../eu-production
+
+      - name: an environment with a path fails loudly
+        run: |
+          [ "${{ steps.latest-environment-traversal.outcome }}" = "failure" ]
 
       - name: latest-missing-without-failing
         id: latest-missing-soft

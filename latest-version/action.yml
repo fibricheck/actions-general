@@ -15,6 +15,12 @@ inputs:
       Version folder, <version>[-<build-number>], to return the build manifests of instead of the highest one
     required: false
     default: ''
+  target-environment:
+    description: >
+      Only consider build manifests for this environment: <target-environment>.build-manifest.json and the
+      environment-neutral build-manifest.json. Without it, every build manifest counts.
+    required: false
+    default: ''
   fail-if-missing:
     description: "Fail when no build manifest is found. When 'false', the found output is 'false' instead"
     required: false
@@ -46,6 +52,7 @@ runs:
         INPUT_COMPONENT: ${{ inputs.component }}
         INPUT_FOLDER: ${{ inputs.folder }}
         INPUT_VERSION: ${{ inputs.version }}
+        INPUT_TARGET_ENVIRONMENT: ${{ inputs.target-environment }}
         INPUT_FAIL_IF_MISSING: ${{ inputs.fail-if-missing }}
       run: |
         set -euo pipefail
@@ -74,6 +81,9 @@ runs:
         validate_no_path_traversal "component" "$INPUT_COMPONENT"
         if [ -n "$INPUT_VERSION" ]; then
           validate_no_path_traversal "version" "$INPUT_VERSION"
+        fi
+        if [ -n "$INPUT_TARGET_ENVIRONMENT" ]; then
+          validate_no_path_traversal "target-environment" "$INPUT_TARGET_ENVIRONMENT"
         fi
         case "$INPUT_FOLDER" in
           app|pages|schemas|tasks|packages|test|composites) ;;
@@ -113,6 +123,7 @@ runs:
         INPUT_COMPONENT: ${{ inputs.component }}
         INPUT_FOLDER: ${{ inputs.folder }}
         INPUT_VERSION: ${{ inputs.version }}
+        INPUT_TARGET_ENVIRONMENT: ${{ inputs.target-environment }}
         INPUT_FAIL_IF_MISSING: ${{ inputs.fail-if-missing }}
         MANIFESTS_AWS_ACCESS_KEY_ID: ${{ steps.aws-auth.outputs.aws-access-key-id }}
         MANIFESTS_AWS_SECRET_ACCESS_KEY: ${{ steps.aws-auth.outputs.aws-secret-access-key }}
@@ -139,7 +150,8 @@ runs:
           --query 'Contents[].Key' --output text)
         KEYS=$(printf '%s\n' "$LISTING" | tr '\t' '\n' | { grep -vx -e 'None' -e '' || true; })
 
-        # Build manifests directly in a version folder: build-manifest.json, or any name ending in .build-manifest.json
+        # Build manifests directly in a version folder: build-manifest.json, or any name ending in .build-manifest.json.
+        # With a target environment, only that environment's and environment-neutral ones
         MANIFESTS=""
         while IFS= read -r KEY; do
           [ -z "$KEY" ] && continue
@@ -149,7 +161,12 @@ runs:
           [ "$RELATIVE" = "$VERSION" ] && continue
           case "$NAME" in
             */*) continue ;;
-            build-manifest.json|*.build-manifest.json) MANIFESTS="${MANIFESTS}${VERSION} ${KEY}"$'\n' ;;
+            build-manifest.json|"${INPUT_TARGET_ENVIRONMENT}.build-manifest.json") MANIFESTS="${MANIFESTS}${VERSION} ${KEY}"$'\n' ;;
+            *.build-manifest.json)
+              if [ -z "$INPUT_TARGET_ENVIRONMENT" ]; then
+                MANIFESTS="${MANIFESTS}${VERSION} ${KEY}"$'\n'
+              fi
+              ;;
           esac
         done <<< "$KEYS"
 
