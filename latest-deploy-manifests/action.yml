@@ -1,0 +1,179 @@
+name: 'Latest Deploy Manifests'
+description: 'Finds the latest deploy manifest to an environment for each given build manifest in the shared FibriCheck manifests store.'
+inputs:
+  build-manifest-refs:
+    description: >
+      Comma-separated build manifest references, e.g. tasks/delete-user/1.1.7/build-manifest.json (the manifest-ref
+      output of generate-build-manifest, or the build-manifest-refs output of latest-version). Each build manifest is
+      read for its component, version and build number.
+    required: true
+  target-environment:
+    description: 'Environment the deployments went to (e.g. eu-production)'
+    required: true
+  role-arn:
+    description: >
+      IAM role assumed through GitHub OIDC to access the manifests store. The calling job needs the
+      id-token: write permission. The credentials are only used by this action and never replace AWS
+      credentials configured elsewhere in the job. Set to '' to skip authentication and use the AWS
+      credentials already configured in the job instead.
+    required: false
+    default: 'arn:aws:iam::964503429135:role/github-manifests'
+outputs:
+  deploy-manifest-refs:
+    description: >
+      Comma-separated references to the latest deploy manifest of each component version, in the order of
+      build-manifest-refs. Build manifests of the same component version and build number share one deploy manifest.
+    value: ${{ steps.latest.outputs.deploy-manifest-refs }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate
+      shell: bash
+      env:
+        INPUT_BUILD_MANIFEST_REFS: ${{ inputs.build-manifest-refs }}
+        INPUT_TARGET_ENVIRONMENT: ${{ inputs.target-environment }}
+      run: |
+        set -euo pipefail
+
+        validate_no_path_traversal() {
+          local name="$1" value="$2"
+          case "$value" in
+            '')
+              echo "::error::${name} is required"
+              exit 1
+              ;;
+            */*|*'\'*)
+              echo "::error::${name} must not contain '/' or '\\'"
+              exit 1
+              ;;
+            .|..)
+              echo "::error::${name} must not be '.' or '..'"
+              exit 1
+              ;;
+            *$'\n'*|*$'\r'*)
+              echo "::error::${name} must not contain line breaks"
+              exit 1
+              ;;
+          esac
+        }
+        validate_no_path_traversal "target-environment" "$INPUT_TARGET_ENVIRONMENT"
+
+        REFS=$(jq -Rn --arg value "$INPUT_BUILD_MANIFEST_REFS" '$value | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+        if [ "$(jq 'length' <<< "$REFS")" -eq 0 ]; then
+          echo "::error::build-manifest-refs is required"
+          exit 1
+        fi
+        while IFS= read -r REF; do
+          case "/$REF/" in
+            *//*|*/../*|*/./*|*$'\n'*|*$'\r'*)
+              echo "::error::build-manifest-refs must be manifest references — got: ${REF}"
+              exit 1
+              ;;
+          esac
+          # <folder>/<component>/<version folder>/<manifest>
+          if [ "$(tr -cd '/' <<< "$REF" | wc -c)" -ne 3 ]; then
+            echo "::error::build-manifest-refs must be <folder>/<component>/<version>/<manifest> — got: ${REF}"
+            exit 1
+          fi
+          if [[ ".${REF##*/}" != *.build-manifest.json ]]; then
+            echo "::error::build-manifest-refs must reference build manifests — got: ${REF}"
+            exit 1
+          fi
+        done < <(jq -r '.[]' <<< "$REFS")
+    - name: Check OIDC permission
+      if: inputs.role-arn != ''
+      shell: bash
+      run: |
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+          echo "::error::the calling job needs the id-token: write permission to authenticate to AWS"
+          exit 1
+        fi
+    - name: Authenticate to AWS
+      id: aws-auth
+      if: inputs.role-arn != ''
+      uses: aws-actions/configure-aws-credentials@v6.2.4
+      with:
+        role-to-assume: ${{ inputs.role-arn }}
+        aws-region: eu-central-1
+        output-credentials: true
+        output-env-credentials: false
+    - name: Latest deploy manifests
+      id: latest
+      shell: bash
+      env:
+        INPUT_BUILD_MANIFEST_REFS: ${{ inputs.build-manifest-refs }}
+        INPUT_TARGET_ENVIRONMENT: ${{ inputs.target-environment }}
+        MANIFESTS_AWS_ACCESS_KEY_ID: ${{ steps.aws-auth.outputs.aws-access-key-id }}
+        MANIFESTS_AWS_SECRET_ACCESS_KEY: ${{ steps.aws-auth.outputs.aws-secret-access-key }}
+        MANIFESTS_AWS_SESSION_TOKEN: ${{ steps.aws-auth.outputs.aws-session-token }}
+      run: |
+        set -euo pipefail
+
+        # The manifests role's credentials apply to this step only, other AWS credentials in the job are left as they are
+        if [ -n "$MANIFESTS_AWS_ACCESS_KEY_ID" ]; then
+          unset AWS_PROFILE AWS_DEFAULT_PROFILE
+          export AWS_ACCESS_KEY_ID="$MANIFESTS_AWS_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$MANIFESTS_AWS_SECRET_ACCESS_KEY"
+          export AWS_SESSION_TOKEN="$MANIFESTS_AWS_SESSION_TOKEN"
+          export AWS_REGION="eu-central-1"
+        fi
+
+        S3_BUCKET="manifests.fibricheck.com"
+        ENVIRONMENT="$INPUT_TARGET_ENVIRONMENT"
+        BUILD_MANIFEST=$(mktemp)
+
+        DEPLOY_REFS=""
+        while IFS= read -r REF; do
+          FOLDER="${REF%%/*}"
+          aws s3api get-object --bucket "$S3_BUCKET" --key "$REF" "$BUILD_MANIFEST" >/dev/null
+          COMPONENT=$(jq -r '.component' "$BUILD_MANIFEST")
+          VERSION=$(jq -r '.version' "$BUILD_MANIFEST")
+          BUILD_NUMBER=$(jq -r '.buildNumber // empty' "$BUILD_MANIFEST")
+          REF_COMPONENT="${REF#*/}"
+          REF_COMPONENT="${REF_COMPONENT%%/*}"
+          if [ "$COMPONENT" != "$REF_COMPONENT" ]; then
+            echo "::error::${REF} is a build manifest of ${COMPONENT}, not ${REF_COMPONENT}"
+            exit 1
+          fi
+          case "$VERSION" in
+            ''|null|*/*|.|..)
+              echo "::error::${REF} has no usable version — got: ${VERSION}"
+              exit 1
+              ;;
+          esac
+
+          # Deploy manifests of a build are stored as <environment>.<timestamp>.deploy-manifest.json
+          # in <folder>/<component>/<version>[-<build-number>]/
+          PREFIX="${FOLDER}/${COMPONENT}/${VERSION}"
+          [ -n "$BUILD_NUMBER" ] && PREFIX="${PREFIX}-${BUILD_NUMBER}"
+          NAME_PREFIX="${ENVIRONMENT}."
+
+          # Listed separately, so a failing aws call fails the step instead of looking like an empty folder
+          LISTING=$(aws s3api list-objects-v2 --bucket "$S3_BUCKET" --prefix "${PREFIX}/${NAME_PREFIX}" \
+            --query 'Contents[].Key' --output text)
+          KEYS=$(printf '%s\n' "$LISTING" | tr '\t' '\n' | { grep -vx -e 'None' -e '' || true; })
+
+          # The timestamp is YYYY-MM-DDTHHMMSSZ, so the highest name is the latest deployment
+          LATEST=""
+          while IFS= read -r KEY; do
+            [ -z "$KEY" ] && continue
+            TIMESTAMP="${KEY#"${PREFIX}/${NAME_PREFIX}"}"
+            TIMESTAMP="${TIMESTAMP%.deploy-manifest.json}"
+            [[ "$TIMESTAMP" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z$ ]] || continue
+            [[ "$KEY" > "$LATEST" ]] && LATEST="$KEY"
+          done <<< "$KEYS"
+
+          if [ -z "$LATEST" ]; then
+            echo "::error::No deploy manifest to ${ENVIRONMENT} stored for ${COMPONENT} ${VERSION}${BUILD_NUMBER:+ build ${BUILD_NUMBER}} (${PREFIX}/)"
+            exit 1
+          fi
+          echo "${COMPONENT} ${VERSION}${BUILD_NUMBER:+ build ${BUILD_NUMBER}}: ${LATEST}"
+
+          case ",${DEPLOY_REFS}," in
+            *",${LATEST},"*) ;;
+            *) DEPLOY_REFS="${DEPLOY_REFS:+${DEPLOY_REFS},}${LATEST}" ;;
+          esac
+        done < <(jq -Rnr --arg value "$INPUT_BUILD_MANIFEST_REFS" '$value | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0)) | .[]')
+        rm -f "$BUILD_MANIFEST"
+
+        printf 'deploy-manifest-refs=%s\n' "$DEPLOY_REFS" >> "$GITHUB_OUTPUT"

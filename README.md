@@ -239,7 +239,7 @@ git push -f origin v5
 
 ## AWS authentication for manifest actions
 
-`generate-build-manifest`, `generate-deploy-manifest`, `download-manifests` and `latest-version` access the shared FibriCheck manifests store. They authenticate themselves: each one assumes `arn:aws:iam::964503429135:role/github-manifests` through GitHub OIDC. The calling job only needs the `id-token: write` permission:
+`generate-build-manifest`, `generate-deploy-manifest`, `download-manifests`, `latest-version` and `latest-deploy-manifests` access the shared FibriCheck manifests store. They authenticate themselves: each one assumes `arn:aws:iam::964503429135:role/github-manifests` through GitHub OIDC. The calling job only needs the `id-token: write` permission:
 
 ```yaml
 permissions:
@@ -259,7 +259,7 @@ The OIDC token identifies the calling repository, not `actions-general`, so the 
 
 `role-arn` overrides the role. Set it to `''` to skip authentication and use the AWS credentials already configured in the job.
 
-`download-manifests` and `latest-version` validate their inputs before authenticating. `generate-build-manifest` and `generate-deploy-manifest` authenticate first, because their validation checks that the component manifests exist.
+`download-manifests`, `latest-version` and `latest-deploy-manifests` validate their inputs before authenticating. `generate-build-manifest` and `generate-deploy-manifest` authenticate first, because their validation checks that the component manifests exist.
 ## generate-build-manifest
 
 Builds a traceability manifest JSON for a release, writes it locally, and stores it in the shared FibriCheck manifests store. It does not commit or push to Git.
@@ -471,6 +471,41 @@ Finds the highest version of a component that has a build manifest, and all buil
 
 - [Example](./latest-version/example.yml)
 
+## latest-deploy-manifests
+
+Finds the latest deployment of each given build to `target-environment`. Each build manifest in `build-manifest-refs` is read for its component, version and build number. The deploy manifests of that build are the `<target-environment>.<deployment-timestamp>.deploy-manifest.json` files in `<folder>/<component>/<version>[-<build-number>]/`, and the one with the highest deployment timestamp is returned. Build manifests of the same component version and build number share one deploy manifest, which is returned once. Fails when a build has no deployment to `target-environment`. Typically used to assemble the `component-manifests` of a composite `generate-deploy-manifest` from the `componentManifests` of a composite build manifest.
+
+<!-- start usage -->
+```yaml
+- name: Latest Deploy Manifests
+  id: latest-deploy-manifests
+  uses: fibricheck/actions-general/latest-deploy-manifests@v5
+  with:
+    # Comma-separated build manifest references (manifest-ref of
+    # generate-build-manifest, build-manifest-refs of latest-version)
+    # required
+    build-manifest-refs: 'tasks/delete-user/1.1.7/build-manifest.json'
+    # Environment the deployments went to
+    # required
+    target-environment: 'eu-production'
+    # IAM role assumed through GitHub OIDC to access the manifests store. The
+    # calling job needs the id-token: write permission. Set to '' to skip
+    # authentication and use the AWS credentials already configured in the job.
+    # optional (default: arn:aws:iam::964503429135:role/github-manifests)
+    role-arn: 'arn:aws:iam::964503429135:role/github-manifests'
+
+  # Outputs:
+  #   deploy-manifest-refs: Comma-separated references to the latest deploy
+  #     manifest of each component version and build number, in the order of
+  #     build-manifest-refs
+- name: Echo
+  run: |
+    echo "deploy manifests: ${{ steps.latest-deploy-manifests.outputs.deploy-manifest-refs }}"
+```
+<!-- end usage -->
+
+- [Example](./latest-deploy-manifests/example.yml)
+
 ## generate-deploy-manifest
 
 Builds a deployment traceability manifest JSON, writes it locally, and stores it in the shared FibriCheck manifests store. It does not commit or push to Git. Only call this after a deploy has actually succeeded — the manifest's existence is itself the success signal, there is no separate outcome field.
@@ -523,7 +558,7 @@ Builds a deployment traceability manifest JSON, writes it locally, and stores it
     # tasks, packages, test, or composites. composites is required when
     # component-manifests is given, and not allowed otherwise. Required — every manifest is stored, there
     # is no local-only mode. The manifest is stored as
-    # <folder>/<component>/<version>/<target-environment>.[<build-number>.]<deployment-timestamp>.deploy-manifest.json.
+    # <folder>/<component>/<version>[-<build-number>]/<target-environment>.<deployment-timestamp>.deploy-manifest.json.
     # Storing is create-only and fails if the manifest already exists. Retention is applied by the store's own
     # default retention rule, not by this action — "test" is not exempt.
     # required

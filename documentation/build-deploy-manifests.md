@@ -11,7 +11,7 @@ A build manifest records that *something was produced*. A deploy manifest record
 - **`fibricheck-schemas`**: a released schema can be deployed to both `eu-production` and `us-production`. Each execution records the build/publishing event that supplied the schema and the successful deployment event. A version has exactly one build manifest per target environment. A later rollback to an older product version reuses that version's existing build manifest (see below) and only adds a new timestamped deployment manifest.
 - **`fibricheck_react_native`**: effectively 1:1 per platform, but *not* strictly 1:1 overall — a version+region+platform combination can have *multiple build attempts* (e.g. a rebuild after an App Store rejection) but only ever *one* deployment, since region/environment config (`config.eu.prod.json` vs `config.us.prod.json`) is baked in at build time, making the EU build and the US build different artifacts from the start, not one artifact deployed twice. iOS and Android are two independent build artifacts with independent review timelines too, not variants of one build.
 
-The actions themselves (`generate-build-manifest`/`generate-deploy-manifest`, plus `download-manifests` for reading a version back and `latest-version` for finding the highest one) don't assume either shape — they just write independent files. The relationship is entirely a calling-workflow/naming-convention decision, and differs per repo.
+The actions themselves (`generate-build-manifest`/`generate-deploy-manifest`, plus `download-manifests` for reading a version back, `latest-version` for finding the highest one, and `latest-deploy-manifests` for finding the latest deployment of a build) don't assume either shape — they just write independent files. The relationship is entirely a calling-workflow/naming-convention decision, and differs per repo.
 
 ## Storage: S3, not git
 
@@ -31,7 +31,7 @@ The verification procedure for a stored manifest stays intentionally simple: con
 - **Access**: Block all public access on, ACLs disabled (bucket owner enforced) — nothing in this bucket is ever public-read.
 - **Encryption**: SSE-S3 (default).
 - **Bucket-level default Object Lock retention**: this is the *only* place retention is configured — the actions themselves have no retention inputs, so every upload inherits whatever the bucket's default retention rule says, with no way to override it per call. Configured as `GOVERNANCE` mode, 10 years.
-- **IAM**: the manifest actions assume role `arn:aws:iam::964503429135:role/github-manifests` themselves through GitHub OIDC. The OIDC token identifies the calling repository, so the role's trust policy must allow each calling repository (scoped to its verified production branch). The role needs `s3:PutObject` on the seven folder prefixes, `s3:GetObject` (the files re-run check, the component manifest existence check, `download-manifests`) and `s3:ListBucket` (`download-manifests`, `latest-version`; without it a missing component manifest returns 403 instead of 404).
+- **IAM**: the manifest actions assume role `arn:aws:iam::964503429135:role/github-manifests` themselves through GitHub OIDC. The OIDC token identifies the calling repository, so the role's trust policy must allow each calling repository (scoped to its verified production branch). The role needs `s3:PutObject` on the seven folder prefixes, `s3:GetObject` (the files re-run check, the component manifest existence check, `download-manifests`, `latest-deploy-manifests`) and `s3:ListBucket` (`download-manifests`, `latest-version`, `latest-deploy-manifests`; without it a missing component manifest returns 403 instead of 404).
 
 No S3 upload path exists for iOS at all yet (`.ipa` goes through `xcode-cloud`/App Store Connect only); if iOS manifests need to land in `manifests.fibricheck.com`, that upload path — and the credentials for it — still need to be built from scratch.
 
@@ -53,22 +53,20 @@ app/
 # manifests.fibricheck.com (default, via folder alone)
 app/
   fibricheck-app-ios/
-    2.16.0/
-      eu-production.146.2026-09-03T141502Z.deploy-manifest.json
     2.16.0-146/
       eu-production.build-manifest.json
+      eu-production.2026-09-03T141502Z.deploy-manifest.json
     2.16.0-147/
       eu-production.build-manifest.json  # rebuilt after App Review rejection
   fibricheck-app-android/
-    2.16.0/
-      eu-production.89.2026-09-03T143011Z.deploy-manifest.json
     2.16.0-89/
       eu-production.build-manifest.json
+      eu-production.2026-09-03T143011Z.deploy-manifest.json
 ```
 
 - `component` already encodes platform (`fibricheck-app-ios`/`fibricheck-app-android`), so platform doesn't need a subfolder to stay unambiguous — it's in the filename either way.
 - Build manifest filenames follow the action's default (`[<target-environment>.]build-manifest.json`) inside the `<version>[-<build-number>]` folder. Environment-neutral builds omit the environment segment. There is a single build manifest per component, version, build number and environment; the create-only upload rejects a second one. `commit.sha` (and `ciReference`, best-effort) inside the manifest correlate it to the source and CI run.
-- Deploy manifest filenames always include their deployment timestamp, and optionally a build number when the deployed component has one. Either way, every deployment event gets its own record, including a rollback to an older product version; the build that was deployed remains recoverable through `buildManifestRef`.
+- Deploy manifest filenames are `<target-environment>.<deployment-timestamp>.deploy-manifest.json`, stored in the same `<version>[-<build-number>]` folder as the build manifest, so the build number is in the folder, not the filename. Every deployment event gets its own record, including a rollback to an older product version; the build that was deployed remains recoverable through `buildManifestRef`.
 
 **Dev artifacts are entirely unaffected.** `.apk`/`.ipa` uploads for dev builds continue exactly as they work today — same bucket, same process. The only new, prod-gated thing is manifest generation into `manifests.fibricheck.com`; dev builds never get one.
 
@@ -162,7 +160,7 @@ The production deployment workflow resolves the selected release's version and e
 
 Each takes structured inputs and **produces JSON as output** (file + step output), writes the manifest locally, and uploads it to `manifests.fibricheck.com`. `folder` (`app`/`pages`/`schemas`/`tasks`/`packages`/`test`, plus `composites` for composite manifests) is a **required** input on both actions — every call uploads, there is no local-file-only mode and no way to opt out. The bucket is hardcoded directly in the action's script; there is no `s3-bucket` input and no way to point either action at a different bucket. Since IAM already scopes the publisher role's credentials to `manifests.fibricheck.com` specifically, this isn't closing a security hole (a different bucket name would just get `AccessDenied`) — it's a simplicity call: one bucket, no override, no "why did this try to upload somewhere else" failure mode to debug. The local write path is likewise always computed internally (`manifests/build/<component>-<version>-<timestamp>.json` / `manifests/deploy/<component>/<version>-<target-environment>-<timestamp>.json`) with no way to override it — it's just where the file lands before upload, nothing has ever needed a different one.
 
-The default S3 key is `<folder>/<component>/<version>[-<build-number>]/[<target-environment>.]build-manifest.json` for the build manifest and `<folder>/<component>/<version>/<target-environment>.[<build-number>.]<deployment-timestamp>.deploy-manifest.json` for the deploy manifest. There is no way to override the key. Both uploads use an S3 create-only condition and fail instead of writing another object version when the key already exists. `generate-deploy-manifest`'s `build-manifest-ref` is recorded as-is — it doesn't read, fetch, or validate the thing it points to (see the field notes above).
+The default S3 key is `<folder>/<component>/<version>[-<build-number>]/[<target-environment>.]build-manifest.json` for the build manifest and `<folder>/<component>/<version>[-<build-number>]/<target-environment>.<deployment-timestamp>.deploy-manifest.json` for the deploy manifest. There is no way to override the key. Both uploads use an S3 create-only condition and fail instead of writing another object version when the key already exists. `generate-deploy-manifest`'s `build-manifest-ref` is recorded as-is — it doesn't read, fetch, or validate the thing it points to (see the field notes above).
 
 `build-config`/`deploy-config` auto-detect shape: if the input is valid JSON, it's embedded as-is (an object); otherwise it's wrapped as a JSON string, unparsed. Callers never need a separate conversion step for either case. `tooling` accepts a JSON object and fails when a non-object or invalid JSON value is supplied — intentionally separate from `build-config`: build configuration describes the product's behaviour, tooling describes the environment that produced it.
 

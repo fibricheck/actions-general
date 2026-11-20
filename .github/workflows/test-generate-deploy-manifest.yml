@@ -66,8 +66,8 @@ jobs:
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.deploymentTimestamp' | tr -d ':')
           [ -n "$TIMESTAMP" ]
           [ -f "${{ steps.generate-all-fields.outputs.manifest-path }}" ]
-          [ "${{ steps.generate-all-fields.outputs.manifest-ref }}" = "schemas/blood-pressure-measurements/1.0.0/eu-production.146.${TIMESTAMP}.deploy-manifest.json" ]
-          grep -q -- "--key schemas/blood-pressure-measurements/1.0.0/eu-production.146.${TIMESTAMP}.deploy-manifest.json --body" "$RUNNER_TEMP/aws-calls.log"
+          [ "${{ steps.generate-all-fields.outputs.manifest-ref }}" = "schemas/blood-pressure-measurements/1.0.0-146/eu-production.${TIMESTAMP}.deploy-manifest.json" ]
+          grep -q -- "--key schemas/blood-pressure-measurements/1.0.0-146/eu-production.${TIMESTAMP}.deploy-manifest.json --body" "$RUNNER_TEMP/aws-calls.log"
           grep -q -- "--if-none-match \*" "$RUNNER_TEMP/aws-calls.log"
 
       - name: Generate deploy manifest with a build number
@@ -87,7 +87,7 @@ jobs:
           MANIFEST='${{ steps.generate-with-build-number.outputs.manifest-json }}'
           [ "$(echo "$MANIFEST" | jq -r '.buildNumber')" = "146" ]
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.deploymentTimestamp' | tr -d ':')
-          [ "${{ steps.generate-with-build-number.outputs.manifest-ref }}" = "app/fibricheck-app-ios/2.16.0/eu-production.146.${TIMESTAMP}.deploy-manifest.json" ]
+          [ "${{ steps.generate-with-build-number.outputs.manifest-ref }}" = "app/fibricheck-app-ios/2.16.0-146/eu-production.${TIMESTAMP}.deploy-manifest.json" ]
 
       - name: Generate deploy manifest with an explicit backdated timestamp
         id: generate-backdated
@@ -308,14 +308,14 @@ jobs:
           target-environment: eu-production
           build-manifest-ref: composites/fibricheck-platform/3.0.0/build-manifest.json
           folder: composites
-          component-manifests: schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json,app/fibricheck-app-ios/2.16.0/eu-production.146.2026-09-03T141502Z.deploy-manifest.json
+          component-manifests: schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json,app/fibricheck-app-ios/2.16.0-146/eu-production.2026-09-03T141502Z.deploy-manifest.json
 
       - name: composite lists its component manifests, checks each exists, and is uploaded to composites
         run: |
           MANIFEST='${{ steps.generate-composite.outputs.manifest-json }}'
-          [ "$(echo "$MANIFEST" | jq -c '.componentManifests')" = '["schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json","app/fibricheck-app-ios/2.16.0/eu-production.146.2026-09-03T141502Z.deploy-manifest.json"]' ]
+          [ "$(echo "$MANIFEST" | jq -c '.componentManifests')" = '["schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json","app/fibricheck-app-ios/2.16.0-146/eu-production.2026-09-03T141502Z.deploy-manifest.json"]' ]
           grep -q -- "head-object --bucket manifests.fibricheck.com --key schemas/blood-pressure-measurements/1.0.0/eu-production.2026-09-07T101502Z.deploy-manifest.json" "$RUNNER_TEMP/aws-calls.log"
-          grep -q -- "head-object --bucket manifests.fibricheck.com --key app/fibricheck-app-ios/2.16.0/eu-production.146.2026-09-03T141502Z.deploy-manifest.json" "$RUNNER_TEMP/aws-calls.log"
+          grep -q -- "head-object --bucket manifests.fibricheck.com --key app/fibricheck-app-ios/2.16.0-146/eu-production.2026-09-03T141502Z.deploy-manifest.json" "$RUNNER_TEMP/aws-calls.log"
           TIMESTAMP=$(echo "$MANIFEST" | jq -r '.deploymentTimestamp' | tr -d ':')
           [ "${{ steps.generate-composite.outputs.manifest-ref }}" = "composites/fibricheck-platform/3.0.0/eu-production.${TIMESTAMP}.deploy-manifest.json" ]
 

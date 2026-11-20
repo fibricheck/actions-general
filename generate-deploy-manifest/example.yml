@@ -21,7 +21,7 @@ jobs:
           version: '1.0.0'
           target-environment: 'eu-production'
           build-number: '146'
-          build-manifest-ref: 'schemas/blood-pressure-measurements/1.0.0/eu-production.build-manifest.json'
+          build-manifest-ref: 'schemas/blood-pressure-measurements/1.0.0-146/eu-production.build-manifest.json'
           folder: 'schemas'
 
       - run: |

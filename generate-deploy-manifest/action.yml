@@ -43,7 +43,7 @@ inputs:
       Top-level folder within the manifests store: app, pages, schemas, tasks, packages, test, or composites.
       composites is required when component-manifests is given, and not allowed otherwise.
       Required — every manifest is stored, there is no local-only mode. The manifest is stored as
-      <folder>/<component>/<version>/<target-environment>.[<build-number>.]<deployment-timestamp>.deploy-manifest.json.
+      <folder>/<component>/<version>[-<build-number>]/<target-environment>.<deployment-timestamp>.deploy-manifest.json.
       Storing is create-only and fails if the manifest already exists. Retention is applied by the
       store's own default retention rule, not by this action — "test" is not exempt from it.
     required: true
@@ -154,7 +154,7 @@ runs:
 
         S3_BUCKET="manifests.fibricheck.com"
 
-        COMPONENT_MANIFESTS=$(jq -Rn --arg value "$INPUT_COMPONENT_MANIFESTS" '$value | split(",") | map(select(length > 0))')
+        COMPONENT_MANIFESTS=$(jq -Rn --arg value "$INPUT_COMPONENT_MANIFESTS" '$value | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
 
         # Composite manifests live in the composites folder, and only there
         if [ "$(jq 'length' <<< "$COMPONENT_MANIFESTS")" -gt 0 ] && [ "$INPUT_FOLDER" != "composites" ]; then
@@ -240,8 +240,8 @@ runs:
         printf '%s\n' "$MANIFEST" > "$OUTPUT_PATH"
 
         BUILD_NUMBER_SEGMENT=""
-        [ -n "$INPUT_BUILD_NUMBER" ] && BUILD_NUMBER_SEGMENT="${INPUT_BUILD_NUMBER}."
-        S3_KEY="${INPUT_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}/${INPUT_TARGET_ENVIRONMENT}.${BUILD_NUMBER_SEGMENT}${FILENAME_SAFE_TIMESTAMP}.deploy-manifest.json"
+        [ -n "$INPUT_BUILD_NUMBER" ] && BUILD_NUMBER_SEGMENT="-${INPUT_BUILD_NUMBER}"
+        S3_KEY="${INPUT_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}${BUILD_NUMBER_SEGMENT}/${INPUT_TARGET_ENVIRONMENT}.${FILENAME_SAFE_TIMESTAMP}.deploy-manifest.json"
 
         # Create-only upload: every deployment record must have its own unused key.
         aws s3api put-object --bucket "$S3_BUCKET" --key "$S3_KEY" --body "$OUTPUT_PATH" --if-none-match '*' >/dev/null

@@ -249,7 +249,7 @@ runs:
         S3_BUCKET="manifests.fibricheck.com"
 
         # Every referenced component manifest must already exist, checked before anything is uploaded
-        COMPONENT_MANIFESTS=$(jq -Rn --arg value "$INPUT_COMPONENT_MANIFESTS" '$value | split(",") | map(select(length > 0))')
+        COMPONENT_MANIFESTS=$(jq -Rn --arg value "$INPUT_COMPONENT_MANIFESTS" '$value | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
 
         # A manifest must trace back to its source: its own commit, or the component manifests it combines
         if [ -z "$INPUT_COMMIT_SHA" ] && [ "$(jq 'length' <<< "$COMPONENT_MANIFESTS")" -eq 0 ]; then
@@ -329,7 +329,7 @@ runs:
         UDI="$INPUT_UDI"
         [ -z "$UDI" ] && UDI=null || UDI=$(jq -Rn --arg v "$UDI" '$v')
 
-        BUILD_OUTPUT_REFERENCES=$(jq -Rn --arg value "$INPUT_BUILD_OUTPUT_REFERENCES" '$value | split(",") | map(select(length > 0))')
+        BUILD_OUTPUT_REFERENCES=$(jq -Rn --arg value "$INPUT_BUILD_OUTPUT_REFERENCES" '$value | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
 
         BUILD_CONFIG_INPUT="$INPUT_BUILD_CONFIG"
         if [ -z "$BUILD_CONFIG_INPUT" ]; then
