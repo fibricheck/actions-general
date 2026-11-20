@@ -1,0 +1,231 @@
+name: Test Latest Version
+
+on:
+  workflow_call:
+
+jobs:
+  test-latest-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install mock aws CLI backed by a local directory
+        run: |
+          BUCKET="$RUNNER_TEMP/mock-bucket"
+          PREFIX="$BUCKET/tasks/delete-user"
+          mkdir -p "$PREFIX/1.9.0" "$PREFIX/1.10.0" "$PREFIX/1.11.0/test-results" "$PREFIX/2.0.0/nested"
+          echo '{}' > "$PREFIX/1.9.0/build-manifest.json"
+          # Every build manifest of a version is returned, environment-neutral and environment-prefixed
+          echo '{}' > "$PREFIX/1.10.0/build-manifest.json"
+          echo '{}' > "$PREFIX/1.10.0/eu-production.build-manifest.json"
+          echo '{}' > "$PREFIX/1.10.0/eu-production.2026-02-02T000000Z.deploy-manifest.json"
+          echo zip > "$PREFIX/1.10.0/code.zip"
+          # A build manifest nested deeper than the version folder is not one of the version
+          echo zip > "$PREFIX/1.11.0/code.zip"
+          echo '{}' > "$PREFIX/1.11.0/test-results/build-manifest.json"
+          echo '{}' > "$PREFIX/2.0.0/nested/build-manifest.json"
+          # Folders that are not <major>.<minor>.<patch>[-<build-number>] are never the highest version
+          mkdir -p "$PREFIX/v9.0.0" "$PREFIX/test" "$PREFIX/1.10.0-rc.1"
+          echo '{}' > "$PREFIX/v9.0.0/build-manifest.json"
+          echo '{}' > "$PREFIX/test/build-manifest.json"
+          echo '{}' > "$PREFIX/1.10.0-rc.1/build-manifest.json"
+          APP="$BUCKET/app/fibricheck-app-ios"
+          mkdir -p "$APP/2.9.0-999" "$APP/2.16.0" "$APP/2.16.0-9" "$APP/2.16.0-146"
+          echo '{}' > "$APP/2.9.0-999/eu-production.build-manifest.json"
+          echo '{}' > "$APP/2.16.0/eu-production.build-manifest.json"
+          echo '{}' > "$APP/2.16.0-9/eu-production.build-manifest.json"
+          echo '{}' > "$APP/2.16.0-146/eu-production.build-manifest.json"
+          # The US build of the same version has its own, higher build number
+          mkdir -p "$APP/2.16.0-147"
+          echo '{}' > "$APP/2.16.0-147/us-production.build-manifest.json"
+
+          mkdir -p "$RUNNER_TEMP/mock-bin"
+          cat > "$RUNNER_TEMP/mock-bin/aws" <<MOCKEOF
+          #!/bin/bash
+          BUCKET="$BUCKET"
+          MOCKEOF
+          cat >> "$RUNNER_TEMP/mock-bin/aws" <<'MOCKEOF'
+          prefix=""; prev=""
+          for a in "$@"; do
+            [ "$prev" = "--prefix" ] && prefix=$a
+            prev=$a
+          done
+          if [ -f "$RUNNER_TEMP/aws-down" ]; then
+            echo "An error occurred (AccessDenied) when calling the ListObjectsV2 operation: Access Denied" >&2
+            exit 254
+          fi
+          case "$2" in
+            list-objects-v2)
+              # Like the real CLI, an empty listing prints None
+              KEYS=$(cd "$BUCKET" && find "${prefix%/}" -type f 2>/dev/null | sort | paste -sd $'\t' -)
+              echo "${KEYS:-None}" ;;
+          esac
+          MOCKEOF
+          chmod +x "$RUNNER_TEMP/mock-bin/aws"
+          echo "$RUNNER_TEMP/mock-bin" >> "$GITHUB_PATH"
+
+      - name: latest
+        id: latest
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: delete-user
+          folder: tasks
+
+      - name: highest version with a build manifest is found, with all its build manifests
+        run: |
+          [ "${{ steps.latest.outputs.found }}" = "true" ]
+          [ "${{ steps.latest.outputs.version }}" = "1.10.0" ]
+          [ "${{ steps.latest.outputs.build-manifest-refs }}" = "tasks/delete-user/1.10.0/build-manifest.json,tasks/delete-user/1.10.0/eu-production.build-manifest.json" ]
+
+      - name: given-version
+        id: given-version
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: delete-user
+          folder: tasks
+          version: 1.9.0
+
+      - name: a given version returns the build manifests of that version
+        run: |
+          [ "${{ steps.given-version.outputs.version }}" = "1.9.0" ]
+          [ "${{ steps.given-version.outputs.build-manifest-refs }}" = "tasks/delete-user/1.9.0/build-manifest.json" ]
+
+      - name: given-version-without-build-manifest-should-fail
+        id: given-version-missing
+        continue-on-error: true
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: delete-user
+          folder: tasks
+          version: 1.11.0
+
+      - name: given-version-not-a-version-number
+        id: given-version-other-format
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: delete-user
+          folder: tasks
+          version: v9.0.0
+
+      - name: a given version is returned whatever its format
+        run: |
+          [ "${{ steps.given-version-other-format.outputs.build-manifest-refs }}" = "tasks/delete-user/v9.0.0/build-manifest.json" ]
+
+      - name: a given version without a build manifest fails loudly
+        run: |
+          [ "${{ steps.given-version-missing.outcome }}" = "failure" ]
+
+      - name: latest-with-build-number
+        id: latest-build-number
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: fibricheck-app-ios
+          folder: app
+
+      - name: build numbers are compared as numbers
+        run: |
+          [ "${{ steps.latest-build-number.outputs.version }}" = "2.16.0-147" ]
+
+      - name: latest-for-environment
+        id: latest-environment
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: fibricheck-app-ios
+          folder: app
+          target-environment: eu-production
+
+      - name: a target environment only considers its own build manifests
+        run: |
+          [ "${{ steps.latest-environment.outputs.version }}" = "2.16.0-146" ]
+          [ "${{ steps.latest-environment.outputs.build-manifest-refs }}" = "app/fibricheck-app-ios/2.16.0-146/eu-production.build-manifest.json" ]
+
+      - name: latest-for-environment-neutral
+        id: latest-environment-neutral
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: delete-user
+          folder: tasks
+          target-environment: us-production
+
+      - name: environment-neutral build manifests count for every target environment
+        run: |
+          [ "${{ steps.latest-environment-neutral.outputs.version }}" = "1.10.0" ]
+          [ "${{ steps.latest-environment-neutral.outputs.build-manifest-refs }}" = "tasks/delete-user/1.10.0/build-manifest.json" ]
+
+      - name: latest-environment-traversal-should-fail
+        id: latest-environment-traversal
+        continue-on-error: true
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: delete-user
+          folder: tasks
+          target-environment: ../eu-production
+
+      - name: an environment with a path fails loudly
+        run: |
+          [ "${{ steps.latest-environment-traversal.outcome }}" = "failure" ]
+
+      - name: latest-missing-without-failing
+        id: latest-missing-soft
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: unknown
+          folder: tasks
+          fail-if-missing: 'false'
+
+      - name: missing component reports found false
+        run: |
+          [ "${{ steps.latest-missing-soft.outputs.found }}" = "false" ]
+          [ -z "${{ steps.latest-missing-soft.outputs.version }}" ]
+
+      - name: latest-missing-should-fail
+        id: latest-missing
+        continue-on-error: true
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: unknown
+          folder: tasks
+
+      - name: missing component fails loudly
+        run: |
+          [ "${{ steps.latest-missing.outcome }}" = "failure" ]
+
+      - name: latest-traversal-should-fail
+        id: latest-traversal
+        continue-on-error: true
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: ../etc
+          folder: tasks
+
+      - name: traversal fails loudly
+        run: |
+          [ "${{ steps.latest-traversal.outcome }}" = "failure" ]
+
+      - name: Make the aws CLI fail
+        run: touch "$RUNNER_TEMP/aws-down"
+
+      - name: latest-with-failing-aws-should-fail
+        id: latest-aws-down
+        continue-on-error: true
+        uses: ./latest-version
+        with:
+          role-arn: ''
+          component: delete-user
+          folder: tasks
+          fail-if-missing: 'false'
+
+      - name: a failing aws call fails, even with fail-if-missing false
+        run: |
+          [ "${{ steps.latest-aws-down.outcome }}" = "failure" ]

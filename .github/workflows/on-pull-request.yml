@@ -15,3 +15,7 @@ jobs:
     uses: './.github/workflows/test-generate-deploy-manifest.yml'
   on-pull-test-download-manifests:
     uses: './.github/workflows/test-download-manifests.yml'
+  on-pull-test-latest-version:
+    uses: './.github/workflows/test-latest-version.yml'
+  on-pull-test-latest-deploy-manifests:
+    uses: './.github/workflows/test-latest-deploy-manifests.yml'

@@ -1,0 +1,22 @@
+name: Latest Deploy Manifests Example
+
+on:
+  workflow_call:
+
+jobs:
+  latest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Latest Deploy Manifests
+        id: latest-deploy-manifests
+        uses: fibricheck/actions-general/latest-deploy-manifests@v5
+        with:
+          build-manifest-refs: 'tasks/delete-user/1.1.7/build-manifest.json'
+          target-environment: 'eu-production'
+
+      - run: |
+          echo "Deploy manifests: ${{ steps.latest-deploy-manifests.outputs.deploy-manifest-refs }}"
