@@ -240,7 +240,7 @@ runs:
           --argjson componentManifests "$COMPONENT_MANIFESTS" \
           --argjson deployConfig "$DEPLOY_CONFIG" \
           '{
-            manifestVersion: "1.0",
+            manifestVersion: "2.0",
             buildManifestRef: $buildManifestRef,
             component: $component,
             version: $version,

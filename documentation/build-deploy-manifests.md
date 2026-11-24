@@ -80,7 +80,7 @@ Manifests are only generated for production builds (`type: prod`), not dev. Dev 
 
 ```json
 {
-  "manifestVersion": "1.0",
+  "manifestVersion": "2.0",
   "component": "fibricheck-app-ios",
   "version": "2.16.0",
   "buildNumber": "146",
@@ -116,7 +116,7 @@ Manifests are only generated for production builds (`type: prod`), not dev. Dev 
 
 ```json
 {
-  "manifestVersion": "1.0",
+  "manifestVersion": "2.0",
   "buildManifestRef": "app/fibricheck-app-ios/2.16.0-146/eu-production.build-manifest.json",
   "component": "fibricheck-app-ios",
   "version": "2.16.0",

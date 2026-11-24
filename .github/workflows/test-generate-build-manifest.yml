@@ -68,7 +68,7 @@ jobs:
           [ "$(echo "$MANIFEST" | jq -r '.component')" = "fibricheck-app" ]
           [ "$(echo "$MANIFEST" | jq -r '.commit.sha')" = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" ]
           [ "$(echo "$MANIFEST" | jq -r '.commit.tag')" = "null" ]
-          [ "$(echo "$MANIFEST" | jq -r '.manifestVersion')" = "1.0" ]
+          [ "$(echo "$MANIFEST" | jq -r '.manifestVersion')" = "2.0" ]
           [ "$(echo "$MANIFEST" | jq -r '.buildNumber')" = "146" ]
           [ "$(echo "$MANIFEST" | jq -r '.targetEnvironment')" = "eu-production" ]
           [ "$(echo "$MANIFEST" | jq -r '.ciReference')" = "9876543210" ]

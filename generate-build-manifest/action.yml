@@ -363,7 +363,7 @@ runs:
           --argjson buildConfig "$BUILD_CONFIG" \
           --argjson tooling "$TOOLING" \
           '{
-            manifestVersion: "1.0",
+            manifestVersion: "2.0",
             component: $component,
             version: $version,
             buildNumber: $buildNumber,

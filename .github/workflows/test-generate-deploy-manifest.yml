@@ -57,7 +57,7 @@ jobs:
         run: |
           MANIFEST='${{ steps.generate-all-fields.outputs.manifest-json }}'
           [ "$(echo "$MANIFEST" | jq -r '.component')" = "blood-pressure-measurements" ]
-          [ "$(echo "$MANIFEST" | jq -r '.manifestVersion')" = "1.0" ]
+          [ "$(echo "$MANIFEST" | jq -r '.manifestVersion')" = "2.0" ]
           [ "$(echo "$MANIFEST" | jq -r '.targetEnvironment')" = "eu-production" ]
           [ "$(echo "$MANIFEST" | jq -r '.buildNumber')" = "146" ]
           [ "$(echo "$MANIFEST" | jq -r '.buildManifestRef')" = "${{ steps.generate-build.outputs.manifest-ref }}" ]
