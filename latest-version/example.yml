@@ -1,0 +1,22 @@
+name: Latest Version Example
+
+on:
+  workflow_call:
+
+jobs:
+  latest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Latest Version
+        id: latest-version
+        uses: fibricheck/actions-general/latest-version@v5
+        with:
+          component: 'delete-user'
+          folder: 'tasks'
+
+      - run: |
+          echo "Latest version: ${{ steps.latest-version.outputs.version }}"

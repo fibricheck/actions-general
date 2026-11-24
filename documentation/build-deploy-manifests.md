@@ -8,17 +8,17 @@ Two tickets ask for traceability records on every schema release/deploy — comp
 
 A build manifest records that *something was produced*. A deploy manifest records that *a specific already-built artifact was put into service somewhere*. Whether that's 1:1 or 1:many depends entirely on how the consuming repo actually builds:
 
-- **`fibricheck-schemas`**: a released schema can be deployed to both `eu-production` and `us-production`. Each execution records the build/publishing event that supplied the schema and the successful deployment event. A later rollback to an older product version is a new publishing and deployment event, so it receives new timestamped manifests rather than reusing an earlier record.
+- **`fibricheck-schemas`**: a released schema can be deployed to both `eu-production` and `us-production`. Each execution records the build/publishing event that supplied the schema and the successful deployment event. A version has exactly one build manifest per target environment. A later rollback to an older product version reuses that version's existing build manifest (see below) and only adds a new timestamped deployment manifest.
 - **`fibricheck_react_native`**: effectively 1:1 per platform, but *not* strictly 1:1 overall — a version+region+platform combination can have *multiple build attempts* (e.g. a rebuild after an App Store rejection) but only ever *one* deployment, since region/environment config (`config.eu.prod.json` vs `config.us.prod.json`) is baked in at build time, making the EU build and the US build different artifacts from the start, not one artifact deployed twice. iOS and Android are two independent build artifacts with independent review timelines too, not variants of one build.
 
-The actions themselves (`generate-build-manifest`/`generate-deploy-manifest`, plus `download-manifests` for reading a version back) don't assume either shape — they just write independent files. The relationship is entirely a calling-workflow/naming-convention decision, and differs per repo.
+The actions themselves (`generate-build-manifest`/`generate-deploy-manifest`, plus `download-manifests` for reading a version back, `latest-version` for finding the highest one, and `latest-deploy-manifests` for finding the latest deployment of a build) don't assume either shape — they just write independent files. The relationship is entirely a calling-workflow/naming-convention decision, and differs per repo.
 
 ## Storage: S3, not git
 
 Manifests are **not** committed to a git repo.
 
 1. **Tamper-evidence.** A git-committed file is just a file — nothing stops someone editing it in a later commit, and while the edit is discoverable in git history, nothing actually *prevents* it. S3 Object Lock (WORM — write-once-read-many) gives a real, enforced guarantee: an object can be made genuinely unmodifiable and undeletable for a configured retention period, even against an account with admin rights, and it's per-object — the build manifest can be locked the moment it's written and the deploy manifest locked independently, weeks later.
-2. **A dedicated bucket.** `manifests.fibricheck.com` is a separate, purpose-built bucket, created with Object Lock (and the Versioning it requires) enabled from the start. `builds.fibricheck.com` — where Android `.apk` builds land — is untouched by this and keeps working exactly as it does today (binaries only, `public-read`, no Object Lock). The top-level folders inside `manifests.fibricheck.com` are `app`, `pages`, `schemas`, `tasks`, `packages` (shared/native SDKs not tied to one of the other four, e.g. the camera SDKs), and `test` (for exercising the upload path without mixing test data into real evidence — it is **not** a way to get objects that can be freely deleted: Object Lock doesn't care which folder an object is in, and the bucket's default retention rule applies to every object regardless of folder).
+2. **A dedicated bucket.** `manifests.fibricheck.com` is a separate, purpose-built bucket, created with Object Lock (and the Versioning it requires) enabled from the start. `builds.fibricheck.com` — where Android `.apk` builds land — is untouched by this and keeps working exactly as it does today (binaries only, `public-read`, no Object Lock). The top-level folders inside `manifests.fibricheck.com` are `app`, `pages`, `schemas`, `tasks`, `packages` (shared/native SDKs not tied to one of the other four, e.g. the camera SDKs), `composites` (composite manifests that combine component manifests), and `test` (for exercising the upload path without mixing test data into real evidence — it is **not** a way to get objects that can be freely deleted: Object Lock doesn't care which folder an object is in, and the bucket's default retention rule applies to every object regardless of folder).
 
 Manifest objects in `manifests.fibricheck.com` are private (Block Public Access on, ACLs disabled) — no `public-read`, unlike `builds.fibricheck.com`'s binaries. Anything that needs to fetch a known manifest or discover a folder's contents (the separate release process or an internal tool) uses authenticated AWS/IAM access.
 
@@ -31,7 +31,7 @@ The verification procedure for a stored manifest stays intentionally simple: con
 - **Access**: Block all public access on, ACLs disabled (bucket owner enforced) — nothing in this bucket is ever public-read.
 - **Encryption**: SSE-S3 (default).
 - **Bucket-level default Object Lock retention**: this is the *only* place retention is configured — the actions themselves have no retention inputs, so every upload inherits whatever the bucket's default retention rule says, with no way to override it per call. Configured as `GOVERNANCE` mode, 10 years.
-- **IAM**: role `manifestPublishingPolicy` exists, trust policy scoped per-repo to each caller's actual verified production branch, permissions policy limited to `s3:PutObject`/`s3:PutObjectRetention` on the six folder prefixes. Nothing currently calls it. A caller that uploads `files` with `generate-build-manifest` also needs `s3:GetObject` (the re-run check reads an existing file), and `download-manifests` needs `s3:ListBucket` and `s3:GetObject`; this policy grants neither.
+- **IAM**: the manifest actions assume role `arn:aws:iam::964503429135:role/github-manifests` themselves through GitHub OIDC. The OIDC token identifies the calling repository, so the role's trust policy must allow each calling repository (scoped to its verified production branch). The role needs `s3:PutObject` on the seven folder prefixes, `s3:GetObject` (the files re-run check, the component manifest existence check, `download-manifests`, `latest-deploy-manifests`) and `s3:ListBucket` (`download-manifests`, `latest-version`, `latest-deploy-manifests`; without it a missing component manifest returns 403 instead of 404).
 
 No S3 upload path exists for iOS at all yet (`.ipa` goes through `xcode-cloud`/App Store Connect only); if iOS manifests need to land in `manifests.fibricheck.com`, that upload path — and the credentials for it — still need to be built from scratch.
 
@@ -50,24 +50,23 @@ app/
 `manifests.fibricheck.com` groups manifests by component and version:
 
 ```
-# manifests.fibricheck.com (default, via s3-folder alone)
+# manifests.fibricheck.com (default, via folder alone)
 app/
   fibricheck-app-ios/
-    2.16.0/
-      eu-production.146.2026-09-01T095637Z.build-manifest.json
-      eu-production.147.2026-09-02T081403Z.build-manifest.json  # rebuilt after App Review rejection
-      eu-production.146.2026-09-03T141502Z.deploy-manifest.json
+    2.16.0-146/
+      eu-production.build-manifest.json
+      eu-production.2026-09-03T141502Z.deploy-manifest.json
+    2.16.0-147/
+      eu-production.build-manifest.json  # rebuilt after App Review rejection
   fibricheck-app-android/
-    2.16.0/
-      eu-production.89.2026-09-01T101122Z.build-manifest.json
-      eu-production.89.2026-09-03T143011Z.deploy-manifest.json
+    2.16.0-89/
+      eu-production.build-manifest.json
+      eu-production.2026-09-03T143011Z.deploy-manifest.json
 ```
 
-An explicit `s3-key` can still override the complete key when a repository has a justified storage convention of its own.
-
 - `component` already encodes platform (`fibricheck-app-ios`/`fibricheck-app-android`), so platform doesn't need a subfolder to stay unambiguous — it's in the filename either way.
-- Build manifest filenames follow the action's default (`[<target-environment>.][<build-number>.]<build-timestamp>.build-manifest.json`) inside the component/version folder. Dots separate the optional environment and build number from the readable ISO timestamp. Environment-neutral builds omit that segment. The timestamp gives every build or rebuild its own record. `commit.sha` (and `buildId`, best-effort) inside the manifest correlate it to the source and CI run.
-- Deploy manifest filenames always include their deployment timestamp, and optionally a build number when the deployed component has one. Either way, every deployment event gets its own record, including a rollback to an older product version; the build that was deployed remains recoverable through `buildManifestRef`.
+- Build manifest filenames follow the action's default (`[<target-environment>.]build-manifest.json`) inside the `<version>[-<build-number>]` folder. Environment-neutral builds omit the environment segment. There is a single build manifest per component, version, build number and environment; the create-only upload rejects a second one unless `overwrite` is `true`. `commit.sha` (and `ciReference`, best-effort) inside the manifest correlate it to the source and CI run.
+- Deploy manifest filenames are `<target-environment>.<deployment-timestamp>.deploy-manifest.json`, stored in the same `<version>[-<build-number>]` folder as the build manifest, so the build number is in the folder, not the filename. Every deployment event gets its own record, including a rollback to an older product version; the build that was deployed remains recoverable through `buildManifestRef`.
 
 **Dev artifacts are entirely unaffected.** `.apk`/`.ipa` uploads for dev builds continue exactly as they work today — same bucket, same process. The only new, prod-gated thing is manifest generation into `manifests.fibricheck.com`; dev builds never get one.
 
@@ -81,18 +80,19 @@ Manifests are only generated for production builds (`type: prod`), not dev. Dev 
 
 ```json
 {
-  "manifestVersion": "1.0",
+  "manifestVersion": "2.0",
   "component": "fibricheck-app-ios",
   "version": "2.16.0",
   "buildNumber": "146",
   "targetEnvironment": "eu-production",
-  "buildId": "4839201756",
+  "ciReference": "4839201756",
+  "buildOutputReferences": ["FibriCheck-2.16.0-146-eu-prod.ipa"],
+  "componentManifests": [],
   "commit": {
     "repo": "fibricheck/fibricheck_react_native",
     "sha": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
     "tag": null
   },
-  "productIdentifiers": ["fibricheck-app-ios-v2.16.0-eu-prod"],
   "buildTimestamp": "2026-09-01T09:56:37Z",
   "udi": null,
   "buildConfig": {
@@ -116,13 +116,14 @@ Manifests are only generated for production builds (`type: prod`), not dev. Dev 
 
 ```json
 {
-  "manifestVersion": "1.0",
-  "buildManifestRef": "s3://manifests.fibricheck.com/app/fibricheck-app-ios/2.16.0/eu-production.146.2026-09-01T095637Z.build-manifest.json",
+  "manifestVersion": "2.0",
+  "buildManifestRef": "app/fibricheck-app-ios/2.16.0-146/eu-production.build-manifest.json",
   "component": "fibricheck-app-ios",
   "version": "2.16.0",
   "targetEnvironment": "eu-production",
   "buildNumber": "146",
   "deploymentTimestamp": "2026-09-01T10:15:02Z",
+  "componentManifests": [],
   "deployConfig": null
 }
 ```
@@ -133,31 +134,33 @@ Notes on individual fields:
 - **`manifestVersion`** versions the meaning and shape of the manifest independently from the product version. It starts at `1.0` and changes when the manifest contract changes.
 - **`buildNumber`** is optional. Mobile builds record it because multiple builds can come from the same commit. Pages and schemas currently have no build number and leave it `null`; their existing `commit.sha` is the build identifier until their process introduces one.
 - **`targetEnvironment` on a build** is optional. It records the environment a build was produced for when configuration makes that meaningful. Environment-neutral builds leave it `null`. Deployment manifests always record their target environment.
-- **`buildId`** is optional, added at QA's request to reference the CI build that produced the artifact (e.g. a GitHub Actions run ID). Best-effort only, not a durable reference — GitHub's workflow-run retention window (90 days as of 2026-10-01) means a stored run ID can stop resolving to anything well within this manifest's own multi-year retention period. `commit.sha` is what actually stays valid regardless of GitHub's retention; anyone investigating a build can still find the CI run by searching Actions history against that SHA even without a stored run ID. The calling workflow supplies `buildId` explicitly — this action never reads GitHub context on its own.
-- **`productIdentifiers`** are the logical identifiers of the products/artifacts produced by the build. No separate artifact object, media type, size, checksum, or registry field — this stays a small reference record. Repository-specific identifiers, such as an npm package name/version, can be included in this list.
+- **`ciReference`** is optional, added at QA's request to reference the CI build that produced the artifact (e.g. a GitHub Actions run ID). Best-effort only, not a durable reference — GitHub's workflow-run retention window (90 days as of 2026-10-01) means a stored run ID can stop resolving to anything well within this manifest's own multi-year retention period. `commit.sha` is what actually stays valid regardless of GitHub's retention; anyone investigating a build can still find the CI run by searching Actions history against that SHA even without a stored run ID. The calling workflow supplies `ciReference` explicitly — this action never reads GitHub context on its own.
+- **`buildOutputReferences`** is a list of references to the build outputs: names of local files (e.g. an `.ipa`/`.apk`), or Docker image references on ECR. Empty when none are given. Recorded as-is, not validated or resolved.
+- **`componentManifests`** makes a manifest a composite: a list of references (the `manifest-ref` output of the action that created them, e.g. `tasks/delete-user/1.1.7/build-manifest.json`) to existing component build manifests it combines. The action checks that each one is a build manifest (`[*.]build-manifest.json`) and exists, and fails before uploading anything if one does not. Empty for a regular build manifest. Composite manifests are always uploaded to the `composites` folder (`composites/<component>/<version>[-<build-number>]/...`): `folder` must be `composites` when `component-manifests` is given, and `composites` is rejected for any other manifest. Every build manifest must trace back to its source: `commit-sha` (with `repo`) is required unless `component-manifests` is given, so a composite without its own source commit records `commit.repo` and `commit.sha` as `null`.
 - **`tooling`** is a JSON object containing the versions of tools actually used for the build. Callers should populate only applicable values and obtain them from the build environment where possible. Typical values are runner OS/architecture, Node and package-manager version; Xcode, Swift, and CocoaPods for iOS; Java, Gradle, Android Gradle Plugin, Android SDK/build tools for Android; and the relevant framework or generator version for pages and schemas.
 - **`udi`** contains the complete UDI label produced by the existing domain-specific UDI construction. Its component parts are not duplicated in this reference manifest; the calling repository owns the applicable prefix and constructs the final value before invoking the action.
-- **No GitHub run URLs anywhere**, only the best-effort `buildId` — see above for why.
+- **No GitHub run URLs anywhere**, only the best-effort `ciReference` — see above for why.
 - **`buildManifestRef` is recorded as-is, never read, fetched, or validated.** The build manifest is itself an Object-Locked, tamper-evident S3 object, so the reference is exactly as trustworthy as the thing it points to — embedding a copy would add nothing, and skipping the read/validate step keeps `generate-deploy-manifest` simple and decoupled from the build manifest's storage location or existence at generation time.
 - **`buildConfig`/`deployConfig`** embed configuration verbatim, matching whatever shape the source already is — a JSON object when one already exists (`config/config.json`, `cat`'d directly, zero conversion), a raw string otherwise (pages-portal's multi-line `KEY=value` `features` input, embedded unparsed). Never build/publish-only secrets — only values that already ship inside the built artifact. Verified concretely for `fibricheck_react_native`: `CONSUMER_KEY`/`CONSUMER_SECRET`/`CLIENT_ID` are read by app runtime code (`src/utils/sdk/index.ts`) to sign live API calls, so they ship in the `.apk`/`.ipa` in plaintext already (extractable with `unzip`, no decompilation needed) — writing them into a private manifest doesn't newly expose anything. Because those values should not appear in CI logs, production workflows must never print `manifest-json` or the manifest file contents; they should log only its path or storage key.
 - **No `steps`, `approver`, or `outcome` fields.** `commit.sha` already makes the build process fully recoverable (check out that commit, read the workflow file as it existed then), so a hand-maintained steps list would only duplicate that. Approval belongs to the separate release process this manifest feeds into. Outcome is redundant — a deploy manifest only ever gets generated after a deploy actually succeeds, so its existence *is* the success signal.
+- **`componentManifests`** on a deploy manifest works like on a build manifest: a list of references (the `manifest-ref` output of the action that created them, e.g. `tasks/delete-user/1.1.7/eu-production.2026-09-07T101502Z.deploy-manifest.json`) to existing component deploy manifests it combines. Each must be a deploy manifest (`*.deploy-manifest.json`) and must exist, checked before anything is uploaded. `folder` must be `composites` when it is given, and `composites` is rejected otherwise. Empty for a regular deploy manifest. `build-manifest-ref` stays required; for a composite it points to the composite build manifest.
 - **`deploymentTimestamp` isn't store-verified.** For a manual app-store release (see "Manual invocation" below) it's whatever the human running the workflow typed in or the moment they triggered it — not independently confirmed against App Store Connect / Play Console, since neither API reliably exposes a true "went live" time (see below). Treat it as "when someone recorded this deployment," not "when the store actually made it live."
 
 ## Where they get built (`fibricheck-schemas`)
 
-The production deployment workflow resolves the selected release's version and exact Git SHA. It then creates and uploads a timestamped build manifest before publishing the schema. After `deploy-schema` succeeds, it creates a separate timestamped deployment manifest that references that build manifest. A failed deployment can therefore leave a valid build/publishing record, but never a deployment record.
+The production deployment workflow resolves the selected release's version and exact Git SHA. It then creates and uploads the build manifest for that version and target environment before publishing the schema; there is only one per version and environment, and `generate-build-manifest` fails when it already exists. On a re-run or rollback the workflow therefore first looks it up with `latest-version` (with `version` set) and only creates it when missing, otherwise it reuses the existing reference. After `deploy-schema` succeeds, it creates a separate timestamped deployment manifest that references that build manifest. A failed deployment can therefore leave a valid build/publishing record, but never a deployment record.
 
 **Dependency worth restating**: `fibricheck-schemas`'s sha-tracking (both `release.json`'s and the build manifest's `commit.sha`) only stays valid if release PRs are merged with "Create a merge commit" — squash/rebase mint a new hash, and with `delete_branch_on_merge: true` the original commit becomes unreachable and eventually garbage-collected. Still outstanding. This dependency does *not* apply to the S3-based `fibricheck_react_native` approach — an S3 object's integrity doesn't depend on git commit reachability the same way, though `commit.sha` inside the manifest is still only as trustworthy as that same merge-strategy guarantee if someone tries to check it out later.
 
-**Also worth flagging**: because `s3-folder` is a mandatory input on both actions (see below), `fibricheck-schemas` uploading to `manifests.fibricheck.com` isn't optional the moment it calls either action — there's no git-only path left to choose, regardless of whether moving off git-committed manifests was separately decided. Worth being explicit about this with whoever wires up `release-schema.yml`/`deploy-production.yml`.
+**Also worth flagging**: because `folder` is a mandatory input on both actions (see below), `fibricheck-schemas` uploading to `manifests.fibricheck.com` isn't optional the moment it calls either action — there's no git-only path left to choose, regardless of whether moving off git-committed manifests was separately decided. Worth being explicit about this with whoever wires up `release-schema.yml`/`deploy-production.yml`.
 
 ## Generic actions (`fibricheck/actions-general`)
 
 `generate-build-manifest` and `generate-deploy-manifest` (verb-first naming — "build-manifest"/"deploy-manifest" read as "a manifest of building/deploying a manifest"). Both composite/bash, tested against real scenarios (JSON `build-config`, raw-text `build-config` with an embedded `=`, all-empty optional fields, a `build-manifest-ref` pointing at a non-existent path, path-traversal/line-break rejection, S3 upload against a mocked `aws` CLI since CI has no real bucket or credentials), wired into `on-pull-request.yml` for `act`-based CI testing.
 
-Each takes structured inputs and **produces JSON as output** (file + step output), writes the manifest locally, and uploads it to `manifests.fibricheck.com`. `s3-folder` (`app`/`pages`/`schemas`/`tasks`/`packages`/`test`) is a **required** input on both actions — every call uploads, there is no local-file-only mode and no way to opt out. The bucket is hardcoded directly in the action's script; there is no `s3-bucket` input and no way to point either action at a different bucket. Since IAM already scopes the publisher role's credentials to `manifests.fibricheck.com` specifically, this isn't closing a security hole (a different bucket name would just get `AccessDenied`) — it's a simplicity call: one bucket, no override, no "why did this try to upload somewhere else" failure mode to debug. The local write path is likewise always computed internally (`manifests/build/<component>-<version>-<timestamp>.json` / `manifests/deploy/<component>/<version>-<target-environment>-<timestamp>.json`) with no way to override it — it's just where the file lands before upload, nothing has ever needed a different one.
+Each takes structured inputs and **produces JSON as output** (file + step output), writes the manifest locally, and uploads it to `manifests.fibricheck.com`. `folder` (`app`/`pages`/`schemas`/`tasks`/`packages`/`test`, plus `composites` for composite manifests) is a **required** input on both actions — every call uploads, there is no local-file-only mode and no way to opt out. The bucket is hardcoded directly in the action's script; there is no `s3-bucket` input and no way to point either action at a different bucket. Since IAM already scopes the publisher role's credentials to `manifests.fibricheck.com` specifically, this isn't closing a security hole (a different bucket name would just get `AccessDenied`) — it's a simplicity call: one bucket, no override, no "why did this try to upload somewhere else" failure mode to debug. The local write path is likewise always computed internally (`manifests/build/<component>-<version>-<timestamp>.json` / `manifests/deploy/<component>/<version>-<target-environment>-<timestamp>.json`) with no way to override it — it's just where the file lands before upload, nothing has ever needed a different one.
 
-The default S3 key is `<s3-folder>/<component>/<version>/[<target-environment>.][<build-number>.]<build-timestamp>.build-manifest.json` for the build manifest and `<s3-folder>/<component>/<version>/<target-environment>.[<build-number>.]<deployment-timestamp>.deploy-manifest.json` for the deploy manifest; an explicit `s3-key` overrides this. Both uploads use an S3 create-only condition and fail instead of writing another object version when the selected key already exists. `generate-deploy-manifest`'s `build-manifest-ref` is recorded as-is — it doesn't read, fetch, or validate the thing it points to (see the field notes above).
+The default S3 key is `<folder>/<component>/<version>[-<build-number>]/[<target-environment>.]build-manifest.json` for the build manifest and `<folder>/<component>/<version>[-<build-number>]/<target-environment>.<deployment-timestamp>.deploy-manifest.json` for the deploy manifest. There is no way to override the key. Both uploads use an S3 create-only condition and fail instead of writing another object version when the key already exists. With `overwrite: 'true'` they write a new object version instead; Object Lock keeps the previous version, so the earlier record is superseded but not lost. `generate-deploy-manifest`'s `build-manifest-ref` is recorded as-is — it doesn't read, fetch, or validate the thing it points to (see the field notes above).
 
 `build-config`/`deploy-config` auto-detect shape: if the input is valid JSON, it's embedded as-is (an object); otherwise it's wrapped as a JSON string, unparsed. Callers never need a separate conversion step for either case. `tooling` accepts a JSON object and fails when a non-object or invalid JSON value is supplied — intentionally separate from `build-config`: build configuration describes the product's behaviour, tooling describes the environment that produced it.
 
@@ -174,7 +177,7 @@ run: |
 
 GitHub evaluates `${{ inputs.* }}` before Bash parses a `run` block, so interpolating an input directly into shell source can break on ordinary values such as apostrophes and can turn crafted text into executable syntax; the environment variable is the safe boundary between the action input and its Bash implementation. This remains fully compatible with manual `workflow_dispatch` inputs.
 
-Fields used to construct the S3 key or local path (`component`, `version`, `target-environment`, `build-number`, `s3-key`) reject `/`, `\`, exact `.`/`..`, and line breaks. An explicitly supplied `deployment-timestamp` must use the UTC `YYYY-MM-DDTHH:MM:SSZ` format. These checks keep manual inputs from changing the generated path or corrupting the GitHub output file while still allowing ordinary punctuation and shell-like text as literal data everywhere else.
+Fields used to construct the S3 key or local path (`component`, `version`, `target-environment`, `build-number`) reject `/`, `\`, exact `.`/`..`, and line breaks; the required ones also reject empty values. An explicitly supplied `build-timestamp` or `deployment-timestamp` must use `YYYY-MM-DD` or the UTC `YYYY-MM-DDTHH:MM:SSZ` format; a date-only value is normalized to midnight UTC. These checks keep manual inputs from changing the generated path or corrupting the GitHub output file while still allowing ordinary punctuation and shell-like text as literal data everywhere else.
 
 ## Manual invocation (`fibricheck_react_native` deploy manifest)
 

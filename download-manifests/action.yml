@@ -1,5 +1,5 @@
 name: 'Download Manifests'
-description: 'Downloads everything stored for a component version in the shared FibriCheck manifests bucket: its manifests and the files uploaded with them (see the files input of generate-build-manifest).'
+description: 'Downloads everything stored for a component version in the shared FibriCheck manifests store: its manifests and the files uploaded with them (see the files input of generate-build-manifest).'
 inputs:
   component:
     description: 'Name of the component or schema'
@@ -7,10 +7,10 @@ inputs:
   version:
     description: 'Version (e.g. semver)'
     required: true
-  s3-folder:
+  folder:
     description: >
-      Top-level folder within the manifests bucket: app, pages, schemas, tasks, packages, or test. Everything under
-      <s3-folder>/<component>/<version>/ is downloaded.
+      Top-level folder within the manifests store: app, pages, schemas, tasks, packages, test, or composites. Everything under
+      <folder>/<component>/<version>/ is downloaded.
     required: true
   path:
     description: 'Local directory to download into. Defaults to manifests/download/<component>/<version>'
@@ -20,6 +20,14 @@ inputs:
     description: "Fail when nothing is stored for this version. When 'false', the found output is 'false' instead"
     required: false
     default: 'true'
+  role-arn:
+    description: >
+      IAM role assumed through GitHub OIDC to access the manifests store. The calling job needs the
+      id-token: write permission. The credentials are only used by this action and never replace AWS
+      credentials configured elsewhere in the job. Set to '' to skip authentication and use the AWS
+      credentials already configured in the job instead.
+    required: false
+    default: 'arn:aws:iam::964503429135:role/github-manifests'
 outputs:
   found:
     description: "'true' when anything was stored for this version and downloaded"
@@ -33,13 +41,12 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Download
-      id: download
+    - name: Validate
       shell: bash
       env:
         INPUT_COMPONENT: ${{ inputs.component }}
         INPUT_VERSION: ${{ inputs.version }}
-        INPUT_S3_FOLDER: ${{ inputs.s3-folder }}
+        INPUT_FOLDER: ${{ inputs.folder }}
         INPUT_PATH: ${{ inputs.path }}
         INPUT_FAIL_IF_MISSING: ${{ inputs.fail-if-missing }}
       run: |
@@ -74,10 +81,10 @@ runs:
             exit 1
             ;;
         esac
-        case "$INPUT_S3_FOLDER" in
-          app|pages|schemas|tasks|packages|test) ;;
+        case "$INPUT_FOLDER" in
+          app|pages|schemas|tasks|packages|test|composites) ;;
           *)
-            echo "::error::s3-folder must be one of: app, pages, schemas, tasks, packages, test — got: ${INPUT_S3_FOLDER}"
+            echo "::error::folder must be one of: app, pages, schemas, tasks, packages, test, composites — got: ${INPUT_FOLDER}"
             exit 1
             ;;
         esac
@@ -88,9 +95,49 @@ runs:
             exit 1
             ;;
         esac
+    - name: Check OIDC permission
+      if: inputs.role-arn != ''
+      shell: bash
+      run: |
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+          echo "::error::the calling job needs the id-token: write permission to authenticate to AWS"
+          exit 1
+        fi
+    - name: Authenticate to AWS
+      id: aws-auth
+      if: inputs.role-arn != ''
+      uses: aws-actions/configure-aws-credentials@v6.2.4
+      with:
+        role-to-assume: ${{ inputs.role-arn }}
+        aws-region: eu-central-1
+        output-credentials: true
+        output-env-credentials: false
+    - name: Download
+      id: download
+      shell: bash
+      env:
+        INPUT_COMPONENT: ${{ inputs.component }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_FOLDER: ${{ inputs.folder }}
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_FAIL_IF_MISSING: ${{ inputs.fail-if-missing }}
+        MANIFESTS_AWS_ACCESS_KEY_ID: ${{ steps.aws-auth.outputs.aws-access-key-id }}
+        MANIFESTS_AWS_SECRET_ACCESS_KEY: ${{ steps.aws-auth.outputs.aws-secret-access-key }}
+        MANIFESTS_AWS_SESSION_TOKEN: ${{ steps.aws-auth.outputs.aws-session-token }}
+      run: |
+        set -euo pipefail
+
+        # The manifests role's credentials apply to this step only, other AWS credentials in the job are left as they are
+        if [ -n "$MANIFESTS_AWS_ACCESS_KEY_ID" ]; then
+          unset AWS_PROFILE AWS_DEFAULT_PROFILE
+          export AWS_ACCESS_KEY_ID="$MANIFESTS_AWS_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$MANIFESTS_AWS_SECRET_ACCESS_KEY"
+          export AWS_SESSION_TOKEN="$MANIFESTS_AWS_SESSION_TOKEN"
+          export AWS_REGION="eu-central-1"
+        fi
 
         S3_BUCKET="manifests.fibricheck.com"
-        PREFIX="${INPUT_S3_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}"
+        PREFIX="${INPUT_FOLDER}/${INPUT_COMPONENT}/${INPUT_VERSION}"
         DEST="${INPUT_PATH:-manifests/download/${INPUT_COMPONENT}/${INPUT_VERSION}}"
         DEST="${DEST%/}"
         printf 'path=%s\n' "$DEST" >> "$GITHUB_OUTPUT"
@@ -102,10 +149,10 @@ runs:
 
         if [ -z "$KEYS" ]; then
           if [ "$INPUT_FAIL_IF_MISSING" = "true" ]; then
-            echo "::error::Nothing stored at s3://${S3_BUCKET}/${PREFIX}/"
+            echo "::error::Nothing stored at ${PREFIX}/"
             exit 1
           fi
-          echo "Nothing stored at s3://${S3_BUCKET}/${PREFIX}/"
+          echo "Nothing stored at ${PREFIX}/"
           printf 'found=false\n' >> "$GITHUB_OUTPUT"
           exit 0
         fi
@@ -128,7 +175,7 @@ runs:
           if [ -n "$EXPECTED" ] && [ "$EXPECTED" != "None" ]; then
             ACTUAL=$(openssl dgst -sha256 -binary "$TARGET" | base64)
             if [ "$ACTUAL" != "$EXPECTED" ]; then
-              echo "::error::checksum mismatch for s3://${S3_BUCKET}/${KEY}"
+              echo "::error::checksum mismatch for ${KEY}"
               exit 1
             fi
           fi

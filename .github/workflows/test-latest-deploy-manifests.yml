@@ -1,0 +1,170 @@
+name: Test Latest Deploy Manifests
+
+on:
+  workflow_call:
+
+jobs:
+  test-latest-deploy-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install mock aws CLI backed by a local directory
+        run: |
+          BUCKET="$RUNNER_TEMP/mock-bucket"
+          store() { mkdir -p "$(dirname "$BUCKET/$1")"; echo "${2:-{\}}" > "$BUCKET/$1"; }
+          store tasks/delete-user/1.1.7/build-manifest.json '{"component":"delete-user","version":"1.1.7","buildNumber":null}'
+          store tasks/delete-user/1.1.7/eu-production.2026-01-01T000000Z.deploy-manifest.json
+          store tasks/delete-user/1.1.7/eu-production.2026-03-01T120000Z.deploy-manifest.json
+          store tasks/delete-user/1.1.7/us-production.2026-06-01T000000Z.deploy-manifest.json
+          # Deploy manifests are stored under the version and build number, like build manifests
+          store app/fibricheck-app-ios/2.16.0-146/eu-production.build-manifest.json '{"component":"fibricheck-app-ios","version":"2.16.0","buildNumber":146}'
+          store app/fibricheck-app-ios/2.16.0-9/eu-production.build-manifest.json '{"component":"fibricheck-app-ios","version":"2.16.0","buildNumber":9}'
+          store app/fibricheck-app-ios/2.16.0-146/eu-production.2026-02-01T000000Z.deploy-manifest.json
+          store app/fibricheck-app-ios/2.16.0-9/eu-production.2026-05-01T000000Z.deploy-manifest.json
+          store app/fibricheck-app-ios/2.16.0-14/eu-production.2026-07-01T000000Z.deploy-manifest.json
+          # Build manifests of the same version share one deploy manifest
+          store schemas/blood-pressure-measurements/1.0.0/eu-production.build-manifest.json '{"component":"blood-pressure-measurements","version":"1.0.0","buildNumber":null}'
+          store schemas/blood-pressure-measurements/1.0.0/us-production.build-manifest.json '{"component":"blood-pressure-measurements","version":"1.0.0","buildNumber":null}'
+          store schemas/blood-pressure-measurements/1.0.0/eu-production.2026-04-01T000000Z.deploy-manifest.json
+          store tasks/never-deployed/1.0.0/build-manifest.json '{"component":"never-deployed","version":"1.0.0","buildNumber":null}'
+          store tasks/misplaced/1.0.0/build-manifest.json '{"component":"delete-user","version":"1.0.0","buildNumber":null}'
+
+          mkdir -p "$RUNNER_TEMP/mock-bin"
+          cat > "$RUNNER_TEMP/mock-bin/aws" <<MOCKEOF
+          #!/bin/bash
+          BUCKET="$BUCKET"
+          MOCKEOF
+          cat >> "$RUNNER_TEMP/mock-bin/aws" <<'MOCKEOF'
+          key=""; prefix=""; prev=""
+          for a in "$@"; do
+            [ "$prev" = "--key" ] && key=$a
+            [ "$prev" = "--prefix" ] && prefix=$a
+            prev=$a
+          done
+          if [ -f "$RUNNER_TEMP/aws-down" ]; then
+            echo "An error occurred (AccessDenied) when calling the ListObjectsV2 operation: Access Denied" >&2
+            exit 254
+          fi
+          case "$2" in
+            get-object)
+              [ -f "$BUCKET/$key" ] || { echo "An error occurred (NoSuchKey) when calling the GetObject operation" >&2; exit 254; }
+              cp "$BUCKET/$key" "${@: -1}"
+              echo '{}' ;;
+            list-objects-v2)
+              # Like the real CLI, an empty listing prints None
+              KEYS=$(cd "$BUCKET" && find . -type f | sed 's|^\./||' | awk -v p="$prefix" 'index($0, p) == 1' | sort | paste -sd $'\t' -)
+              echo "${KEYS:-None}" ;;
+          esac
+          MOCKEOF
+          chmod +x "$RUNNER_TEMP/mock-bin/aws"
+          echo "$RUNNER_TEMP/mock-bin" >> "$GITHUB_PATH"
+
+      - name: latest
+        id: latest
+        uses: ./latest-deploy-manifests
+        with:
+          role-arn: ''
+          target-environment: eu-production
+          build-manifest-refs: tasks/delete-user/1.1.7/build-manifest.json,app/fibricheck-app-ios/2.16.0-146/eu-production.build-manifest.json,app/fibricheck-app-ios/2.16.0-9/eu-production.build-manifest.json,schemas/blood-pressure-measurements/1.0.0/eu-production.build-manifest.json,schemas/blood-pressure-measurements/1.0.0/us-production.build-manifest.json
+
+      - name: the latest deploy manifest of each component version and build number is found once
+        run: |
+          EXPECTED="tasks/delete-user/1.1.7/eu-production.2026-03-01T120000Z.deploy-manifest.json"
+          EXPECTED="$EXPECTED,app/fibricheck-app-ios/2.16.0-146/eu-production.2026-02-01T000000Z.deploy-manifest.json"
+          EXPECTED="$EXPECTED,app/fibricheck-app-ios/2.16.0-9/eu-production.2026-05-01T000000Z.deploy-manifest.json"
+          EXPECTED="$EXPECTED,schemas/blood-pressure-measurements/1.0.0/eu-production.2026-04-01T000000Z.deploy-manifest.json"
+          [ "${{ steps.latest.outputs.deploy-manifest-refs }}" = "$EXPECTED" ]
+
+      - name: latest-other-environment
+        id: latest-other-environment
+        uses: ./latest-deploy-manifests
+        with:
+          role-arn: ''
+          target-environment: us-production
+          build-manifest-refs: tasks/delete-user/1.1.7/build-manifest.json
+
+      - name: only deploy manifests to the target environment count
+        run: |
+          [ "${{ steps.latest-other-environment.outputs.deploy-manifest-refs }}" = "tasks/delete-user/1.1.7/us-production.2026-06-01T000000Z.deploy-manifest.json" ]
+
+      - name: never-deployed-should-fail
+        id: never-deployed
+        continue-on-error: true
+        uses: ./latest-deploy-manifests
+        with:
+          role-arn: ''
+          target-environment: eu-production
+          build-manifest-refs: tasks/never-deployed/1.0.0/build-manifest.json
+
+      - name: a component version without deployment fails loudly
+        run: |
+          [ "${{ steps.never-deployed.outcome }}" = "failure" ]
+
+      - name: misplaced-should-fail
+        id: misplaced
+        continue-on-error: true
+        uses: ./latest-deploy-manifests
+        with:
+          role-arn: ''
+          target-environment: eu-production
+          build-manifest-refs: tasks/misplaced/1.0.0/build-manifest.json
+
+      - name: a build manifest of another component fails loudly
+        run: |
+          [ "${{ steps.misplaced.outcome }}" = "failure" ]
+
+      - name: missing-build-manifest-should-fail
+        id: missing-build-manifest
+        continue-on-error: true
+        uses: ./latest-deploy-manifests
+        with:
+          role-arn: ''
+          target-environment: eu-production
+          build-manifest-refs: tasks/delete-user/9.9.9/build-manifest.json
+
+      - name: a missing build manifest fails loudly
+        run: |
+          [ "${{ steps.missing-build-manifest.outcome }}" = "failure" ]
+
+      - name: not-a-build-manifest-should-fail
+        id: not-a-build-manifest
+        continue-on-error: true
+        uses: ./latest-deploy-manifests
+        with:
+          role-arn: ''
+          target-environment: eu-production
+          build-manifest-refs: tasks/delete-user/1.1.7/code.zip
+
+      - name: a reference to something other than a build manifest fails loudly
+        run: |
+          [ "${{ steps.not-a-build-manifest.outcome }}" = "failure" ]
+
+      - name: traversal-should-fail
+        id: traversal
+        continue-on-error: true
+        uses: ./latest-deploy-manifests
+        with:
+          role-arn: ''
+          target-environment: eu-production
+          build-manifest-refs: tasks/../etc/1.0.0/build-manifest.json
+
+      - name: traversal fails loudly
+        run: |
+          [ "${{ steps.traversal.outcome }}" = "failure" ]
+
+      - name: Make the aws CLI fail
+        run: touch "$RUNNER_TEMP/aws-down"
+
+      - name: failing-aws-should-fail
+        id: aws-down
+        continue-on-error: true
+        uses: ./latest-deploy-manifests
+        with:
+          role-arn: ''
+          target-environment: eu-production
+          build-manifest-refs: tasks/delete-user/1.1.7/build-manifest.json
+
+      - name: a failing aws call fails
+        run: |
+          [ "${{ steps.aws-down.outcome }}" = "failure" ]
